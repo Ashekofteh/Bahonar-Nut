@@ -10,6 +10,11 @@ build/
 *.g.dart
 *.freezed.dart
 
+# ...but the CAPTCHA glyph templates are generated offline and checked in, since
+# the app cannot recognise a CAPTCHA without them and regenerating requires
+# re-capturing live samples. Narrow negation, not a weakening of the rule above.
+!lib/adapter/captcha_templates.g.dart
+
 # Reconnaissance artifacts — NEVER commit: session cookies, viewstate dumps,
 # CAPTCHA images, authenticated page snapshots may contain personal data.
 recon/
