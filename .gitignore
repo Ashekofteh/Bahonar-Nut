@@ -21,3 +21,8 @@ cookies.txt
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Gradle/Kotlin build noise
+.gradle-build/
+android/.kotlin/
+*.log
