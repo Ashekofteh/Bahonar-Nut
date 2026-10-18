@@ -173,7 +173,54 @@ enum ReminderFailureCause {
 }
 ```
 
-### 3.4 The composer is a pure function
+**D2 (superseded).** An earlier draft of this spec fired reminders on days with no
+service, producing an all-empty body. The product owner corrected this: a reminder
+for a slot the cafeteria does not serve is noise. §3.4 adds an explicit service
+calendar and the scheduler locates nothing on closed slots.
+
+### 3.4 Service calendar
+
+The halls do not serve every meal every day. Verified against two consecutive
+weeks of live grids (see findings F7):
+
+| Weekday | Breakfast | Lunch | Dinner |
+|---|---|---|---|
+| Saturday | — | ✓ | ✓ |
+| Sunday | ✓ | ✓ | ✓ |
+| Monday | ✓ | ✓ | ✓ |
+| Tuesday | ✓ | ✓ | ✓ |
+| Wednesday | ✓ | ✓ | ✓ |
+| Thursday | ✓ | ✓ | — |
+| Friday | — | — | — |
+
+```dart
+/// Which meals are served on a given weekday.
+///
+/// ADVISORY ONLY. The portal's own grid is authoritative whenever a read
+/// succeeds; this table exists to suppress pointless reminders without a
+/// network round-trip and to avoid scheduling an alarm at 10:30 on a Friday.
+/// A local calendar that disagrees with the portal loses.
+class ServiceCalendar {
+  const ServiceCalendar();
+
+  bool isServed(Weekday day, MealSlot slot);
+  bool isClosedAllDay(Weekday day);       // Friday
+  Set<MealSlot> servedSlots(Weekday day);
+}
+```
+
+**Why the table is not derived from the breakfast-with-dinner rule:** the rule
+explains *why* the pattern exists, but deriving it at runtime would be clever
+code that silently breaks the first time the university changes its schedule.
+An explicit table that a human can edit is the more honest encoding. The rule is
+documented above it as the rationale.
+
+**Hall-level variation is not modelled here.** Saturday lunch is served by both
+halls while Thursday lunch is served by مرکزی only, and that distinction lives in
+the grid, not the calendar. The calendar answers "is this meal served at all";
+which halls serve it is read live.
+
+### 3.5 The composer is a pure function
 
 ```dart
 /// Renders a digest into notification title + body. Pure: no clock, no I/O.
@@ -241,6 +288,118 @@ account quietly.
 
 ---
 
+## 4A. Next-Week Reservation Nudge
+
+### 4A.1 The deadline this targets
+
+The week begins Saturday. Saturday's meals cut off at 20:00 two days prior —
+**Thursday 20:00**. That is the first deadline of the coming week, and failing it
+means no weekend meals at all. The nudge exists to make sure the coming week is
+booked before that wall.
+
+### 4A.2 The requested schedule, and a problem with it
+
+The product owner specified six fires: Wednesday noon, Wednesday afternoon,
+Wednesday night, Thursday morning, Thursday noon, Thursday afternoon/evening.
+
+Taken at face value this fires even when the user has already booked everything,
+which trains the user to ignore the notification — the standard way a useful alert
+becomes wallpaper. But the product owner was explicit that it should "check
+whether the user has booked" and notify "if they haven't reserved yet", and the
+six-slot schedule was described as *the intervals to check across*.
+
+**Resolution:** the six times are **check times, not guaranteed fires**. Each check
+reads state and fires only if something is unbooked. This satisfies both the
+literal schedule and the stated intent.
+
+**Escalation, added deliberately:** as the deadline approaches, a stale silence is
+worse than a repeat. So the *first* check that finds a gap fires immediately, and
+each later check re-fires only if the gap persists — which it will, if the user is
+ignoring it. Concretely:
+
+| Check | Fires when |
+|---|---|
+| Wed 12:00 | any gap in the coming week |
+| Wed 16:00 | gap still present |
+| Wed 21:00 | gap still present |
+| Thu 09:00 | gap still present |
+| Thu 12:00 | gap still present |
+| Thu 17:00 | gap still present |
+
+With the final check at 17:00 leaving three hours before the 20:00 wall. Checks
+stop early once the week is fully booked, so a diligent user gets **one**
+notification and then silence — which is the behaviour that keeps the alert
+meaningful.
+
+### 4A.3 Gap definition
+
+```dart
+/// A meal the user could still reserve and has not.
+class BookingGap {
+  final DateTime date;
+  final MealSlot slot;
+  final HallId? hallId;      // null when any hall would do
+}
+
+class NextWeekStatus {
+  final DateTime weekStart;      // the coming Saturday
+  final DateTime deadline;       // Thursday 20:00, portal-local
+  final List<BookingGap> gaps;   // empty when fully booked
+  final List<ReminderFailure> failures;
+  final bool anyAccountComplete;
+
+  bool get isComplete => gaps.isEmpty;
+}
+```
+
+A gap exists only where **all** of these hold:
+1. The slot is served on that weekday (§3.4 calendar).
+2. The reservation cutoff for that date has not yet passed (`ServerClock`).
+3. None of the selected accounts holds that meal.
+
+Rule 3 uses "none holds it" rather than "any holds it" deliberately: with three
+accounts the question that matters is whether *everyone* is fed, not whether
+anyone is.
+
+Rule 2 prevents the nudge demanding a reservation the user can no longer make —
+which would be a notification that can only be satisfied by an impossible action.
+
+### 4A.4 Message format
+
+```
+📅 یادآوری رزرو هفته آینده
+هنوز برای هفته آینده (شنبه ۲ مهر تا جمعه ۸ مهر) رزرو نکردهاید.
+مهلت اولین وعده: پنجشنبه ساعت ۲۰:۰۰
+
+• شنبه ۲ مهر — ناهار: رزرو نشده
+• شنبه ۲ مهر — شام: رزرو نشده
+• یکشنبه ۳ مهر — صبحانه: رزرو نشده
+...
+```
+
+Rules:
+- The body lists **at most the first 5 gaps**, then `و N وعده دیگر` — a
+  notification body is not a scrollable report, and the detail screen shows all.
+- The deadline line appears only while the deadline is in the future.
+- Failures append the same `⚠️ بررسی نشد:` line as §4.4. A nudge must not imply
+  completeness it does not have.
+
+### 4A.5 Relationship to the daily reminders
+
+Independent features that share the digest machinery:
+
+| | Daily reminders (§3–5) | Next-week nudge (§4A) |
+|---|---|---|
+| Fires | always (fixed times) | only on a detected gap |
+| Covers | reserved meals today / tomorrow | unbooked meals next week |
+| Purpose | collection manifest | act before the deadline |
+| Accounts | selected accounts | same selection |
+
+Both are suppressed by the master switch. The nudge gets its own independent
+toggle, since a user may want one and not the other.
+
+---
+
 ## 5. Scheduling and Delivery
 
 ### 5.1 Timing
@@ -286,26 +445,44 @@ is no polling loop: the app sleeps between reminders.
 ```
 lib/core/
   accounts.dart      SavedAccount, display-name resolution chain
+  service_calendar.dart   ServiceCalendar: which meals run on which weekday  [pure]
   reminder.dart      ReminderSlot, ReminderSlotConfig, ReminderConfig, ReminderDigest,
                      ReservedMealItem, ReminderFailure, NotificationText
+  next_week.dart     BookingGap, NextWeekStatus, gap detection            [pure]
   reminder_compose.dart   composeNotification(digest) -> NotificationText   [pure]
+                          composeNudgeNotification(status) -> NotificationText [pure]
 
 lib/adapter/
   reminder_digest_builder.dart   DigestBuilder: reads N accounts -> ReminderDigest
                                  (depends on PortalClient + SessionManager)
+  next_week_checker.dart         NextWeekChecker: reads N accounts -> NextWeekStatus
 
 lib/platform/
   reminder_scheduler.dart        Schedule/cancel exact alarms + WorkManager backstop
+                                 (locates nothing on closed slots, §3.4)
   reminder_notifier.dart         Post the notification, deep-link extras
 
 lib/ui/reminders/
-  reminders_screen.dart          Management: master toggle, times, account selection
+  reminders_screen.dart          Management: master toggle, times, nudge toggle,
+                                 account selection
   reminder_detail_screen.dart    Deep-link target: the digest, live
+  next_week_screen.dart          Deep-link target: full gap list, live
 
 lib/store/
   account_store.dart             Persist SavedAccount list (Keystore-backed)
-  reminder_config_store.dart     Persist ReminderConfig
+  reminder_config_store.dart     Persist ReminderConfig + nudge schedule
+  guidance_log.dart              Bounded record of fires, checks and failures (§6.3)
 ```
+
+### 6.3 The guidance log
+
+A bounded, on-device record of what happened: each fire, each check, each
+failure, and — importantly — each nudge check that found the week already booked.
+
+Without it, a nudge that stays silent because the user booked early is
+indistinguishable from a nudge that silently broke. The log is what makes the
+intended silence in §7 defensible rather than hopeful. Capped at a few hundred
+entries, oldest dropped, contains no credentials and no meal prices.
 
 ### Boundary rules
 
@@ -323,16 +500,26 @@ lib/store/
 |---|---|
 | Master switch off | No alarms scheduled; existing ones cancelled on toggle |
 | All account sessions dead, re-login succeeds | Normal path — CAPTCHA solves silently, no user involvement |
-| CAPTCHA solve declines for one account | That account is a `authFailed` failure, named in the message |
+| CAPTCHA solve declines for one account | That account is an `authFailed` failure, named in the message |
 | Network unreachable | The WorkManager backstop retries once after 10 minutes; if it still fails, post a failure notification: `یادآوری امروز انجام نشد` |
 | Portal returns an unrecognised page (redesign) | Treated as `readFailed`, surfaced, and logged — never silently swallowed |
 | Device clock far off from server | Digest generation is skipped and the user is told; guessing the date would produce a briefing about the wrong day |
 | Phone off at fire time | Catch-up runs on next boot via WorkManager |
 | Notification permission denied | In-app banner on the Reminders screen explaining reminders are muted at OS level |
+| Slot is closed today (§3.4) | No alarm scheduled at all; nothing to suppress at fire time |
+| All selected accounts fail to authenticate | Post the failure notification rather than an empty digest — silence must never be ambiguous |
+| Every slot closed (Friday) | No daily reminders fire. The next-week nudge is unaffected — it concerns the coming week, not today. |
 
 **Absence of a notification is never the only signal.** If a reminder fails
 entirely, a failure notification is posted, because a user who receives nothing
 cannot distinguish "nothing to collect" from "the feature is broken".
+
+**One deliberate exception:** the next-week nudge is *silent by design* when the
+week is fully booked. That silence is not a failure — the nudge's contract is
+"speak only when there is a gap", and a user who books early gets exactly one
+confirmation-free quiet. This is the one place where no notification is the
+correct, intended outcome, and it is distinguished from failure by the guidance
+log (§6.3) recording that checks ran and found nothing.
 
 ---
 
@@ -341,17 +528,27 @@ cannot distinguish "nothing to collect" from "the feature is broken".
 | Layer | Approach |
 |---|---|
 | `displayName` chain | Unit: alias wins, then profileName, then studentId; never blank |
+| `ServiceCalendar` | **Exhaustive**: all 7 weekdays × 3 slots asserted against the verified table, so a mistyped cell fails the build |
 | `composeNotification` | Unit, on the VM, asserting the exact Persian strings including digit/calendar formatting |
 | Composer edge cases | Empty digest; one account reserved; mixed reserved/empty; with failures; all-empty |
+| `composeNudgeNotification` | Unit: gap list truncated at 5 with `و N وعده دیگر`; deadline line present and absent; failures appended |
+| Gap detection | Unit: closed slot never a gap; past-cutoff slot never a gap; slot held by one of two accounts is still a gap |
 | `DigestBuilder` | Fake `PortalClient` scripted to return reservations, to fail auth for one account, and to fail reads; assert failures are reported not dropped |
-| Scheduler | Assert next-fire calculation across slot times, DST-free UTC+3:30, and after a missed fire |
-| Config persistence | Round-trip `ReminderConfig` including per-slot exclusions |
+| Nudge suppression | Scripted fake where the week is fully booked: assert **no** notification is posted and the guidance log records a clean check |
+| Scheduler | Assert next-fire calculation across slot times, UTC+3:30, month rollover (Mehr is 30 days), and after a missed fire |
+| Scheduler on closed slots | Assert no alarm is scheduled for Friday, Thursday dinner, or Saturday breakfast |
+| Nudge escalation | Assert one notification when the gap persists across all six checks, and that early checks stop once booked |
+| Config persistence | Round-trip `ReminderConfig` including per-slot exclusions and nudge toggle |
 | Notification rendering | Manual on device: expand the notification, verify Persian RTL and Persian digits |
 | Doze behaviour | Manual: fire a reminder with the device in Doze and confirm the backstop |
 
 **The highest-value test asset** is the scripted `PortalClient` fake, shared with
 the sniping engine's tests, which lets the whole reminder path run deterministically
 with no network and no device.
+
+**The calendar table gets exhaustive coverage** because a single wrong cell means
+either a reminder that never fires or one that fires on a closed day, and neither
+is visible until the user notices a missing meal.
 
 ---
 
@@ -386,7 +583,7 @@ grey areas. Each is cheap to reverse if the product owner disagrees.
 | # | Case | Decision |
 |---|---|---|
 | D1 | Reminder text and section order | As specified in §4; the product owner's live sample is the reference |
-| D2 | Days with no service (Fridays, university holidays) | **Fire anyway**, producing the all-empty body. Modelling the university holiday calendar is out of scope and would silently go stale; a quiet "nothing reserved" message costs nothing and never lies. |
+| D2 | Days with no service | **Suppress entirely.** See §3.4. Corrected by the product owner: a reminder for a closed slot is noise. A reminder fire is never even scheduled on a closed slot. |
 | D3 | Meal price in the notification | **Detail screen only.** The notification body stays short; price is secondary to knowing what you're collecting. |
 | D4 | Multiple halls in one account's day | Each reserved item carries its own hall name, so a lunch at مرکزی and dinner at فنی render as two bullets with different halls. |
 | D5 | Account with reservations but a failed name lookup | `displayName` falls back to student ID, so the digest is never blocked on a missing profile name. |

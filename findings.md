@@ -221,6 +221,44 @@ screen inside the app.
 Persian-first RTL is the app's design; the notification copy is no exception. The
 product owner's bilingual sample was illustrative, not a copy requirement.
 
+**F7 — The dining halls follow a fixed weekly service calendar.**
+Verified against two consecutive weeks of live grids (current week 1405/07/25-08/01
+and next week 1405/08/02-08/08), which agree exactly:
+
+| Weekday | Breakfast | Lunch | Dinner |
+|---|---|---|---|
+| Saturday | **none** | served | served |
+| Sunday | served | served | served |
+| Monday | served | served | served |
+| Tuesday | served | served | served |
+| Wednesday | served | served | served |
+| Thursday | served | served | **none** |
+| Friday | **none** | **none** | **none** |
+
+Evidence: a slot with no service renders `-` in the hall column with count 0.
+Thursday dinner and all of Friday were stated by the product owner; Saturday
+breakfast and Friday breakfast were found in the data and are *implied by the
+same rule* — breakfast is collected with the previous night's dinner (F1), so a
+missing dinner removes the following breakfast. Friday dinner is absent, hence
+no Saturday breakfast; Thursday dinner is absent, hence no Friday breakfast.
+
+Note: Saturday lunch is served by **both** halls but Thursday lunch by **مرکزی
+only** (فنی absent) in both weeks. Hall-level availability therefore varies
+independently of the meal-level pattern and must be read from the grid, not
+assumed from the calendar.
+
+**Caveat:** two weeks is a strong but not conclusive sample; university holidays
+could perturb it. The local calendar is therefore advisory only, and the portal's
+own grid overrides it whenever a read succeeds (see the spec's ServiceCalendar).
+
+**F8 — The "next week" reservation deadline is Thursday 20:00.**
+Next week begins Saturday. Saturday's meals cut off at 20:00 two days prior
+(F1/regulation 2091), i.e. **Thursday 20:00**. This is what the product owner's
+Wednesday-noon-to-Thursday-evening nudge window is aimed at: it is the run-up to
+the first deadline of the coming week. Note Mehr 1405 is a 30-day month, so
+07/30 (Thursday) is followed directly by 08/01 (Friday) — the day-arithmetic in
+`ServerClock` already handles month rollover via `DateTime.utc`.
+
 ## Open Questions — resolved 2026-10-18
 
 | # | Question | Answer |
