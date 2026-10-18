@@ -159,6 +159,68 @@ message, not a silent free meal. **Verdict: no evidence of a bypass; untested by
 4. CAPTCHA answer binds at image-fetch time; refetch rotates it. Adapter login flow:
    GET page → GET captcha (same jar) → solve → POST once. Any retry needs a fresh pair.
 
+## 2026-10-18 — Domain facts from product owner (Session 7)
+
+**F1 — Tomorrow's breakfast is distributed together with tonight's dinner.**
+They are one collection event. Losing dinner means losing tomorrow's breakfast.
+This is why the reminder feature groups them into a single slot, and it means a
+missed reservation costs two meals, not one.
+
+**F2 — The basket market is thin, and that justifies auto-buy.**
+Live observation showed 1–3 listings, frequently zero available. The Founder
+argued for notify-first as the safer default; the product owner rejected this
+with a better argument: **in a thin market, the notification path loses the race**,
+so a tap-to-confirm design forfeits precisely the listings worth having. Auto-buy
+stays the default. The safeguards that survive are the ones costing no race time:
+dry-run mode, max-price cap, maxPurchasesPerWindow. See [[project-bahonar-nut]].
+
+**F3 — Profile name is only obtainable while authenticated.**
+The portal exposes the student's full name (`divUsername`) only on authenticated
+pages. A saved account that has never been logged in therefore has no profile
+name to fall back to. Alias resolution chain: **alias -> profile name -> student ID**.
+
+**F4 — The reminder is a multi-account aggregated digest, not a per-account nudge.**
+The product owner's example shows ONE notification covering several selected
+accounts, naming what each is actually collecting:
+
+```
+Today's Dinner Reminder (Sunday, Mehr 26 / Oct 18):
+* Moghasami - Tuna fish dish, lime
+
+Tomorrow's breakfast (Monday 27 Mehr) - received with tonight's dinner:
+* Moghasami - milk/halva-shakari/bread/tea/sugar
+* Shekofteh - ...
+* Sharifi   - ...
+```
+
+The sample is **live portal data**, not a mockup: Sunday 1405/07/26 dinner at
+مرکزی was `خوراک تن ماهی، لیمو ترش، خرما` and Monday's breakfast was
+`شیر/حلواشکری/نان/چای/قند`.
+
+**Confirmed semantics (product owner, Session 7): reserved meals only, across all
+slots.** An account appears in a section only if it holds a reservation for that
+meal. Breakfast is grouped with dinner because they are collected together (F1).
+
+Consequences for the design:
+- It requires an **authenticated read per selected account** at reminder time, so
+  it depends on session management and on the CAPTCHA solver for re-login.
+- It must aggregate N accounts into one message, with graceful degradation when
+  some accounts fail to authenticate. A failed account must be **named in the
+  message**, never silently omitted.
+- Dish names come from the menu grid, not just a reserved/not-reserved flag.
+- Account display names come from the F3 chain.
+
+**F5 — Notification delivery must be a normal notification, not an alarm.**
+Exact alarm + WorkManager catch-up for *timing*, but the presentation is a
+standard expandable system notification (`BigTextStyle`) carrying the meal details
+in its body. Explicitly **no continuous ringing and no full-screen takeover** —
+the product owner called this out. Tapping deep-links into a Reminders detail
+screen inside the app.
+
+**F6 — Notifications are Persian-only.**
+Persian-first RTL is the app's design; the notification copy is no exception. The
+product owner's bilingual sample was illustrative, not a copy requirement.
+
 ## Open Questions — resolved 2026-10-18
 
 | # | Question | Answer |

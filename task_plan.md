@@ -20,13 +20,26 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 
 | # | Phase | Status | Blocked by |
 |---|-------|--------|-----------|
-| 0 | Recon — inspect portal, map auth + endpoints | `complete` | None (Completed 2026-10-18) |
+| 0 | Recon — inspect portal, map auth + endpoints | `complete` | — |
 | 1 | Core — domain models, ranker, storage, transport | `partial` | — |
-| 2 | Adapter — portal adapter (Cullinan WebForms) + server clock | `pending` | Phase 1 |
-| 3 | Android — accounts UI, RTL shell, fg service, alarms | `pending` | Phase 1 |
-| 4 | Sniper — scheduler, state machine, ledger, dry-run | `pending` | Phase 1 |
-| 5 | Windows — thin shell over shared core | `pending` | Phase 3, 4 |
-| 6 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 3, 4 |
+| 2 | Adapter — Cullinan `PortalClient` + `ServerClock` | `partial` | Phase 1 |
+| 3 | Sessions — `SessionManager`, per-account jars, silent re-login | `pending` | Phase 2 |
+| 4 | Sniper — scheduler, state machine, ledger, dry-run | `pending` | Phase 3 |
+| 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `pending` | Phase 3 |
+| 6 | Windows — thin shell over shared core | `pending` | Phase 4, 5 |
+| 7 | Reminders domain — alias chain, config, `composeNotification` | `pending` | Phase 1 |
+| 8 | Reminders digest — `DigestBuilder` + sessions | `pending` | Phase 3, 7 |
+| 9 | Reminders platform — scheduler, notifications, screens | `pending` | Phase 5, 8 |
+| 10 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 4, 9 |
+
+**Phase 2 progress:** CAPTCHA solver complete and validated (100% on 90 live
+samples), live read-only login proven. Remaining in phase 2: the full
+`PortalClient` implementation for basket/reservations/balance/claim.
+
+**Phase 7 is Android-free** — pure Dart, VM-testable, parallelisable with 3–5.
+
+See `docs/superpowers/specs/2026-10-18-reminders-and-aliases-design.md` for the
+reminders subsystem (phases 7–9).
 
 **Reconnaissance Milestone Achieved (2026-10-18):**
 - Target verified: `https://nut.uk.ac.ir/` (Cullinan v8.10.27.1 on IIS 10).
