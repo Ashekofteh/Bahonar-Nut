@@ -293,9 +293,19 @@ account quietly.
 ### 4A.1 The deadline this targets
 
 The week begins Saturday. Saturday's meals cut off at 20:00 two days prior —
-**Thursday 20:00**. That is the first deadline of the coming week, and failing it
+**Thursday 20:00**. That is the *first* deadline of the coming week, and failing it
 means no weekend meals at all. The nudge exists to make sure the coming week is
 booked before that wall.
+
+**Corrected during implementation (worth stating because it is easy to get
+wrong): deadlines are per-meal, not per-week.** Each day has its own 20:00
+two-days-prior cutoff, so the week locks progressively rather than all at once.
+On Friday of the current week, the coming Saturday is already locked while the
+following Tuesday is still wide open. The nudge therefore reports only the days
+that remain bookable, and its gap list shrinks day by day rather than going from
+full to empty in one step. The Thursday 20:00 deadline above remains the
+*headline* (it is the first, and the one that costs the weekend), but the
+implementation never treats the week as a single locking unit.
 
 ### 4A.2 The requested schedule, and a problem with it
 
