@@ -315,3 +315,61 @@ vulnerability. Removed, and the probe now validates certificates strictly.
 ### Commit
 
 `89d77a9` — CAPTCHA solver + live login probe
+
+## 2026-10-18 — Session 7: Reminder Design + Phase 7 Implementation
+
+### Requirements added by the product owner
+
+1. **Suppress reminders on closed cafeteria slots.**
+2. **Next-week reservation nudge** — six checks from Wednesday noon to Thursday
+   evening, warning if the coming week is unbooked.
+3. Account aliases (from session 6, landed in the spec).
+
+### Verified the service calendar against live data
+
+Two weeks of captured grids agree exactly, and the pattern is **wider than
+stated**: Thursday dinner and all of Friday were named by the product owner, and
+Saturday breakfast + Friday breakfast follow from the same rule (breakfast ships
+with the previous night's dinner). Encoded as an explicit table with an
+invariant test asserting every missing breakfast is explained by a missing
+dinner.
+
+### Design decision on the nudge
+
+The six specified times would fire even when the week was already booked, which
+trains the user to ignore the alert. Modelled them as **check times, not
+guaranteed fires**: each reads state and speaks only on a gap, with escalation so
+a persistent gap re-fires while a booked week falls silent after the first check.
+
+### Delivered (phase 7 — pure Dart, no Flutter, no network)
+
+| Module | Contents |
+|---|---|
+| `lib/core/service_calendar.dart` | Weekday serving table, advisory; portal grid wins |
+| `lib/core/persian.dart` | Jalali conversion, Persian digits, Rial/clock formatting |
+| `lib/core/reminder.dart` | `ReminderConfig`, `ReminderDigest`, failures, `NotificationText` |
+| `lib/core/next_week.dart` | `BookingGap`, `NextWeekStatus`, `detectNextWeekGaps` |
+| `lib/core/reminder_compose.dart` | Pure composers for digest and nudge |
+
+**193 tests pass, analyzer clean.**
+
+### Errors
+
+| Error | Attempt | Resolution |
+|---|---|---|
+| `ReminderFailure` defined in two files | 1 | Consolidated into `reminder.dart`; `next_week.dart` imports it |
+| Absurd expression in the deadline line (`month == 0 ? 20 : 20`) | — | Caught on re-read; now renders `ClockTime.cutoff` |
+| Composer test expected `۲ مهر`, output was `۲ آبان` | 1 | **Test was wrong, code was right.** Oct 24 is Aban (08/02); Mehr ends 07/30 |
+| Cutoff tests assumed the whole week locks at once | 2 | **Test assumption was wrong.** Deadlines are per-meal: on a Friday the coming Saturday is locked while the following Tuesday is open. Code was right; spec §4A.1 corrected |
+| `const DateTime.utc(...)` in a test top level | 1 | Not a valid const expression; made it `final` |
+
+### Insight worth keeping
+
+**The deadline is per-meal, not per-week.** Discovered by a failing test rather
+than by reasoning, and it changes the nudge's behaviour: the gap list shrinks
+progressively across the week instead of switching from full to empty. Recorded
+in spec §4A.1.
+
+### Commit
+
+`2004f36` — phase 7 implementation

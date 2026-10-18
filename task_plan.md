@@ -27,7 +27,7 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | 4 | Sniper — scheduler, state machine, ledger, dry-run | `pending` | Phase 3 |
 | 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `pending` | Phase 3 |
 | 6 | Windows — thin shell over shared core | `pending` | Phase 4, 5 |
-| 7 | Reminders domain — alias chain, config, `composeNotification` | `pending` | Phase 1 |
+| 7 | Reminders domain — alias chain, config, `composeNotification` | `mostly` | Phase 1 |
 | 8 | Reminders digest — `DigestBuilder` + sessions | `pending` | Phase 3, 7 |
 | 9 | Reminders platform — scheduler, notifications, screens | `pending` | Phase 5, 8 |
 | 10 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 4, 9 |
