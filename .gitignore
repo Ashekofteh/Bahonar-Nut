@@ -1,0 +1,23 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.idea/
+.vscode/
+*.iml
+*.g.dart
+*.freezed.dart
+
+# Reconnaissance artifacts — NEVER commit: session cookies, viewstate dumps,
+# CAPTCHA images, authenticated page snapshots may contain personal data.
+recon/
+*.pkl
+auth_jar.txt
+cookies.txt
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
