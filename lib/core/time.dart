@@ -104,6 +104,81 @@ class FixedServerClock implements ServerClock {
   Duration get staleness => _syncAge;
 }
 
+/// A [`ServerClock`] kept in step with the portal by observing its responses.
+///
+/// The portal sends a standard RFC 1123 `Date` header. Treating that as the
+/// server's time *at the moment the response was generated*, and correcting for
+/// half the observed round trip, gives an estimate good to well under a second
+/// on a normal connection — far tighter than the minute-level precision the
+/// 20:00 cutoff needs.
+///
+/// The local clock is injected so the class is testable without waiting for real
+/// time to pass. Nothing here reads `DateTime.now()` implicitly.
+class SyncedServerClock implements ServerClock {
+  SyncedServerClock({DateTime Function()? localNowUtc})
+      : _localNowUtc = localNowUtc ?? (() => DateTime.now().toUtc());
+
+  final DateTime Function() _localNowUtc;
+
+  /// serverTime - localTime, established by the most recent sync.
+  Duration? _offset;
+
+  /// Local instant of the most recent sync.
+  DateTime? _lastSyncLocalUtc;
+
+  @override
+  bool get isSynced => _offset != null;
+
+  @override
+  Duration get staleness {
+    final last = _lastSyncLocalUtc;
+    if (last == null) return Duration.zero;
+    return _localNowUtc().difference(last);
+  }
+
+  @override
+  DateTime get nowUtc {
+    final offset = _offset;
+    if (offset == null) {
+      throw StateError(
+        'ServerClock is not synced. Callers must check isSynced before reading '
+        'time: guessing here would produce a briefing about the wrong day.',
+      );
+    }
+    return _localNowUtc().add(offset);
+  }
+
+  /// Records a sync from a response.
+  ///
+  /// [serverDateUtc] is the parsed `Date` header, [roundTrip] the measured time
+  /// from sending the request to receiving the response, and [localReceivedAt]
+  /// the local instant the response arrived.
+  void syncFrom({
+    required DateTime serverDateUtc,
+    required Duration roundTrip,
+    required DateTime localReceivedAt,
+  }) {
+    // The header reflects when the server generated the response, which was
+    // roughly half a round trip ago.
+    final estimatedServerNow =
+        serverDateUtc.add(Duration(microseconds: roundTrip.inMicroseconds ~/ 2));
+    _offset = estimatedServerNow.difference(localReceivedAt);
+    _lastSyncLocalUtc = localReceivedAt;
+  }
+
+  /// Discards the sync, so callers stop trusting this clock.
+  ///
+  /// Used when the app is backgrounded for a long time, where an offset measured
+  /// hours ago may no longer hold.
+  void invalidate() {
+    _offset = null;
+    _lastSyncLocalUtc = null;
+  }
+
+  /// The current offset, for diagnostics. Null when never synced.
+  Duration? get offset => _offset;
+}
+
 /// Cutoff arithmetic. Pure functions over a [ServerClock], so tests can pin the
 /// boundary exactly.
 extension ReservationCutoff on ServerClock {

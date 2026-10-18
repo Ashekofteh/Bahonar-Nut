@@ -154,10 +154,49 @@ message, not a silent free meal. **Verdict: no evidence of a bypass; untested by
 2. No `__EVENTVALIDATION` anywhere → editable-row postbacks (dropdown swaps on *unlocked*
    dates) are the softest surface. Our adapter must never emit values the UI didn't offer;
    the contract tests (§10) should assert option-ids come from the live grid, not constants.
-3. Session is cookie-only (`ASP.NET_SessionId` + `keyId`); no anti-forgery token observed
-   on these forms. Our client must hold cookies per-account with zero cross-talk.
+3. ~~Session is cookie-only (`ASP.NET_SessionId` + `keyId`); no anti-forgery token
+   observed on these forms.~~ **CORRECTED 2026-10-18 (session 8):** an
+   `__AntiXsrfToken` cookie **is** set once authenticated. The earlier note was
+   wrong because it only inspected the unauthenticated login page, where no such
+   cookie exists. The full authenticated cookie set is:
+
+   | Cookie | Notes |
+   |---|---|
+   | `ASP.NET_SessionId` | session identity; the critical one |
+   | `keyId` | seen pre-login as well |
+   | `__AntiXsrfToken` | **set only after login**; must be preserved or state-changing posts may be rejected |
+
+   Consequence for the adapter: **persist the whole cookie jar, not a hand-picked
+   subset.** Dropping a cookie the portal set is exactly the kind of bug that only
+   shows up on a write operation, i.e. when it costs a meal.
+
 4. CAPTCHA answer binds at image-fetch time; refetch rotates it. Adapter login flow:
    GET page → GET captcha (same jar) → solve → POST once. Any retry needs a fresh pair.
+
+**F9 — Sessions persist across process restarts (verified 2026-10-18).**
+A session established in one process was loaded from disk and successfully read
+`Reservation.aspx` in a **separate later process**, with no login and no CAPTCHA:
+
+```
+1. found a stored session (3 cookies)
+   RESULT: stored session STILL VALID - no login needed
+```
+
+This is the single most important fact for the login architecture: **the common
+path is reuse, and the CAPTCHA solver is a fallback, not the normal path.** The
+consequences:
+
+- Daily request cost is far lower than feared — no login round-trip per reminder.
+- The largest ban-risk surface (repeated automated logins) is mostly avoided,
+  since logins happen rarely rather than on every run.
+- The solver still matters: it removes all user friction on the rare cold login,
+  and it is what makes silent re-authentication possible when a session does die.
+
+**Not yet measured:** how long a session actually survives in wall-clock terms
+(the probe cannot answer this without waiting hours or days), and whether the
+portal invalidates sessions on concurrent use from two devices. Both are worth
+observing before relying on long reuse windows; `SessionPolicy.maxAge` currently
+defaults to 12 hours as a conservative bound.
 
 ## 2026-10-18 — Domain facts from product owner (Session 7)
 

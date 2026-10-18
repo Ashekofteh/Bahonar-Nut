@@ -446,36 +446,47 @@ rather than failing silently.
 This is the contract Phases 1, 3, and 4 code against. It is defined now precisely so
 that portal recon can proceed in parallel without blocking them.
 
+Implemented in `lib/core/portal.dart`:
+
 ```dart
 abstract class PortalClient {
   /// --- Auth ---
   /// Returns a login challenge (e.g. CAPTCHA image) if the portal demands one.
   Future<LoginChallenge?> beginLogin(String username);
-  Future<Session> completeLogin(String username, String password,
-                                LoginChallengeResponse? challenge);
+  Future<Session> completeLogin({
+    required String username,
+    required String password,
+    LoginChallengeResponse? challenge,
+  });
   Future<Session> refresh(Session session);
   Future<void> logout(Session session);
 
   /// --- Time ---
-  /// Server time from response headers. Authoritative for all cutoff logic.
-  Future<DateTime> fetchServerTime();
+  /// Server time, used to build a ServerClock. Authoritative for cutoff logic.
+  Future<DateTime> fetchServerTime(Session session);
 
   /// --- Read ---
-  Future<Balance> fetchBalance(Session s);
-  Future<List<MealOffering>> fetchOfferings(Session s, DateTime date);
-  Future<List<Reservation>> fetchReservations(Session s);
-  Future<BasketPage> fetchBasket(Session s, {String? cursor});
+  Future<Balance> fetchBalance(Session session);
+  Future<List<MealOffering>> fetchOfferings(Session session, DateTime date);
+  Future<List<Reservation>> fetchReservations(Session session);
+  Future<BasketPage> fetchBasket(Session session, {String? cursor});
 
   /// --- Write ---
-  Future<ClaimResult> claim(Session s, ListingId listingId);
-  Future<Reservation> reserve(Session s, MealOffering offering);
-  Future<void> cancel(Session s, MealId mealId);
+  Future<ClaimResult> claim(Session session, ListingId listingId);
+  Future<Reservation> reserve(Session session, MealOffering offering);
+  Future<void> cancel(Session session, MealId mealId);
 
   /// --- Deep link ---
-  /// Top-up URL, or null if the portal has no constructible link.
-  Uri? topUpUrl(Session s);
+  Uri? topUpUrl(Session session);
 }
 ```
+
+**Cookie handling (corrected 2026-10-18).** The portal sets three cookies, and
+`__AntiXsrfToken` is issued **only after authentication**. Implementations must
+persist and replay the **entire cookie jar** rather than a hand-picked subset;
+dropping a cookie the portal set surfaces as a failure on a write operation,
+which is the worst possible time to discover it. Verified live: a persisted jar
+reused across processes read an authenticated page with no login at all.
 
 ### 7.2 Result types must encode ambiguity explicitly
 
