@@ -373,3 +373,55 @@ in spec §4A.1.
 ### Commit
 
 `2004f36` — phase 7 implementation
+
+## 2026-10-18 — Session 8: Session Management (Phase 3)
+
+**Goal:** unblock the snipe engine, the reminder digest, and the aliases screen —
+all three depend on knowing how to hold an authenticated session.
+
+### Delivered
+
+| Module | Contents |
+|---|---|
+| `lib/core/session.dart` | `SessionStore`, `Credentials`, `ChallengeSolver`, sealed `SessionResult` |
+| `lib/core/session_manager.dart` | Reuse-first lifecycle, per-account serialisation |
+| `lib/core/time.dart` | Added `SyncedServerClock` (RFC 1123 `Date` header, RTT-corrected) |
+
+### The live answer that shaped the design
+
+```
+1. found a stored session (3 cookies)
+   RESULT: stored session STILL VALID - no login needed
+```
+
+A session established in one process was loaded from disk and read an
+authenticated page in a **later process**, with no login and no CAPTCHA.
+
+**So reuse is the common path and the solver is a fallback.** That matters more
+than it sounds: repeated automated logins are the loudest ban signal available,
+and this means they mostly do not happen. Daily request cost is also far lower
+than the design assumed.
+
+### Error found in my own earlier recon
+
+I had recorded "no anti-forgery token observed". **That was wrong** — the portal
+does set `__AntiXsrfToken`, but only *after* authentication. The earlier note came
+from inspecting the unauthenticated page, where it does not exist. Corrected in
+`findings.md` and the spec, with the consequence stated: persist the **whole
+cookie jar**, never a hand-picked subset, because a dropped portal-set cookie
+fails on a write operation.
+
+### Errors
+
+| Error | Attempt | Resolution |
+|---|---|---|
+| Convoluted `ensureSession` locking, low confidence on correctness | — | Rewrote as a simple per-account promise queue before testing; documented why serialisation is required (CAPTCHA binds at fetch time) |
+| `prefer_initializing_formals` lint on 4 injected fields | 1–3 | Tried `// ignore:` pragmas (wrong place), then considered disabling the lint. **The analyzer was right**: public fields with `this.x` formals is the clean idiom. Renamed; no suppressions needed |
+
+**Worth noting:** the reflex on the lint was to silence it. That's the same
+instinct as the TLS bypass two sessions ago — reach for the suppression instead of
+asking whether the tool has a point. It did.
+
+### Commit
+
+`3687c78` — session management
