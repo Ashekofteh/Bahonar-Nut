@@ -259,3 +259,59 @@ caught it before any code touched the live portal.
 - Transport layer (HTTP, cookie jar, `HeaderServerClock` from response headers)
 - Secure storage (`Keystore`/DPAPI abstraction)
 - The `SnipeEngine` orchestration that wires scheduler + ranker + client together
+
+## 2026-10-18 — Session 6: CAPTCHA Solver & First Live Login
+
+**User authorised read-only live probing.** Scope held strictly to reads: login,
+balance, basket, reservations. No reserve/claim/cancel/top-up was ever submitted.
+
+### Delivered
+
+- `lib/adapter/captcha_solver.dart` — pure-Dart 4-digit solver
+- `lib/adapter/captcha_templates.g.dart` — generated glyph templates
+- `scripts/gen_captcha_templates.py` + `scripts/captcha_labels.json` — reproducible
+  regeneration with a leave-one-out self-check that refuses to emit bad templates
+- `tool/live_login_check.dart` — live read-only login probe
+- `test/adapter/captcha_solver_test.dart` — 5 tests, including 90 real samples
+
+### Measured accuracy
+
+| Set | Result |
+|---|---|
+| Leave-one-out, 60 training samples | **60/60** |
+| Unseen holdout, 30 samples | **30/30** |
+| Threshold sweep 150–205 | **100% at every value** |
+
+### Live proof
+
+Logs in to `https://nut.uk.ac.ir` for real with no human reading the CAPTCHA:
+
+```
+3. solved: 5327 (confidence 4145.076)
+4. LOGIN OK (302 -> /Reservation/Reservation.aspx)
+5. credit: 225,000 ریال
+6. basket listings parsed: 3
+```
+
+### Errors
+
+| Error | Attempt | Resolution |
+|---|---|---|
+| Solver Dart/Python mismatch (83% accuracy) | 1 | Python templates were bilinear-resampled; Dart used nearest-neighbour. **Root cause was resampling itself.** Dropping resize and cropping at native 24×31 restored 100% |
+| Greedy glyph clustering split into 39–56 groups | 2 | Abandoned unsupervised clustering. Hand-labelled + computational validation instead |
+| k-means k=10 gave skewed clusters (47 vs 11) | 3 | Same conclusion — labels needed, then verified by LOO |
+| Live login failed with correct CAPTCHA reading | 1 | **Client bug, not solver.** Dart's `HttpClient` followed the 302 but my code treated the followed response as the failure page. Fixed with `followRedirects = false` + explicit redirect handling. Verified the solver was right by reading the challenge image by eye |
+| Added `badCertificateCallback => true` defensively | 1 | **Removed.** The cert is a valid wildcard (`CN=*.uk.ac.ir`, Certum) that verifies cleanly. The workaround masked nothing and violated spec §8 |
+| `captcha_templates.g.dart` silently not committed | 1 | Blanket `*.g.dart` gitignore rule swallowed it. Added a narrow `!` negation so the checked-in templates survive the codegen rule |
+
+### Note on the security workaround
+
+Worth recording because it's a near-miss: I added a TLS-validation bypass while
+debugging, and the reflex was to leave it in "since it works". Checking the
+certificate showed it was perfectly valid — the workaround was unnecessary. That
+is the failure mode where a debugging convenience becomes a permanent
+vulnerability. Removed, and the probe now validates certificates strictly.
+
+### Commit
+
+`89d77a9` — CAPTCHA solver + live login probe
