@@ -1,0 +1,176 @@
+/// The portal adapter contract: the single boundary between this app and the
+/// university's Cullinan portal.
+///
+/// This is the only portal-aware layer. Everything below it is generic transport;
+/// everything above it is site-independent. When the university redesigns the
+/// site, exactly this layer breaks — and the frozen interfaces here are what let
+/// the domain core and UI be built and tested without the live portal.
+library;
+
+import 'models.dart';
+
+/// An authenticated session. Treated as an opaque bearer credential.
+class Session {
+  const Session({
+    required this.account,
+    required this.cookies,
+    required this.establishedAt,
+  });
+
+  final AccountId account;
+
+  /// Cookie name -> value. Held as data so the transport layer owns the jar.
+  final Map<String, String> cookies;
+  final DateTime establishedAt;
+
+  @override
+  String toString() => 'Session($account, established ${establishedAt.toIso8601String()})';
+}
+
+/// A login challenge the portal demands before completing authentication.
+///
+/// The portal uses a 4-digit image CAPTCHA bound to the session at fetch time:
+/// fetching the image rotates the expected answer, so a challenge must be
+/// obtained and answered within one continuous session.
+class LoginChallenge {
+  const LoginChallenge({
+    required this.imageBytes,
+    required this.kind,
+  });
+
+  /// Raw image payload as served by the portal.
+  final List<int> imageBytes;
+  final ChallengeKind kind;
+
+  @override
+  String toString() => 'LoginChallenge(${kind.name}, ${imageBytes.length} bytes)';
+}
+
+enum ChallengeKind {
+  /// Four digits, as used by the Cullinan portal.
+  digits4,
+
+  /// Some other challenge we do not know how to solve automatically.
+  unknown,
+}
+
+/// The user's answer to a challenge.
+class LoginChallengeResponse {
+  const LoginChallengeResponse(this.answer);
+
+  final String answer;
+}
+
+/// One page of basket inventory.
+class BasketPage {
+  const BasketPage({required this.listings, this.cursor});
+
+  final List<Listing> listings;
+
+  /// Cursor for the next page, when the portal paginates. Null means no more.
+  final String? cursor;
+
+  bool get hasMore => cursor != null;
+}
+
+/// The outcome of attempting to claim a listing.
+///
+/// Sealed on purpose. A claim that times out is neither success nor failure, and
+/// conflating it with failure is the single most expensive bug available in this
+/// project: a blind retry can buy two meals and charge the student twice. Making
+/// ambiguity a distinct type means no caller can forget to handle it — the
+/// compiler will insist.
+sealed class ClaimResult {
+  const ClaimResult();
+}
+
+/// The claim definitely succeeded.
+class ClaimSucceeded extends ClaimResult {
+  const ClaimSucceeded(this.reservation);
+
+  final Reservation reservation;
+}
+
+/// The claim definitely failed, and the listing was not bought.
+class ClaimRejected extends ClaimResult {
+  const ClaimRejected(this.reason);
+
+  final String reason;
+}
+
+/// We do not know whether the claim landed.
+///
+/// The engine must reconcile (re-fetch reservations to establish ground truth)
+/// and must **never** retry the claim directly.
+class ClaimAmbiguous extends ClaimResult {
+  const ClaimAmbiguous(this.diagnostic);
+
+  final String diagnostic;
+}
+
+/// What went wrong during login, when it goes wrong.
+class LoginFailure {
+  const LoginFailure(this.reason, {this.retryable = false});
+
+  final String reason;
+  final bool retryable;
+}
+
+/// The portal adapter.
+///
+/// Implementations must:
+///  - keep cookies per account with zero cross-talk between accounts;
+///  - perform login as one atomic sequence (GET page -> GET challenge -> answer
+///    -> POST) because the challenge binds to the session at fetch time;
+///  - never emit option or hall identifiers the live page did not offer.
+abstract class PortalClient {
+  // --- Authentication ---
+
+  /// Begins a login and returns a challenge when the portal demands one.
+  Future<LoginChallenge?> beginLogin(String username);
+
+  /// Completes a login. [challenge] is the response to [beginLogin]'s challenge,
+  /// if one was issued.
+  Future<Session> completeLogin({
+    required String username,
+    required String password,
+    LoginChallengeResponse? challenge,
+  });
+
+  /// Refreshes an existing session, or throws if it cannot be refreshed.
+  Future<Session> refresh(Session session);
+
+  Future<void> logout(Session session);
+
+  // --- Time ---
+
+  /// Server time, used to construct a [`ServerClock`]. All cutoff logic depends
+  /// on this being authoritative rather than the device clock.
+  Future<DateTime> fetchServerTime(Session session);
+
+  // --- Reads ---
+
+  Future<Balance> fetchBalance(Session session);
+
+  Future<List<MealOffering>> fetchOfferings(Session session, DateTime date);
+
+  Future<List<Reservation>> fetchReservations(Session session);
+
+  Future<BasketPage> fetchBasket(Session session, {String? cursor});
+
+  // --- Writes ---
+
+  /// Claims a listing. The distinction between the three return types is load
+  /// bearing; see [ClaimResult].
+  Future<ClaimResult> claim(Session session, ListingId listingId);
+
+  Future<Reservation> reserve(Session session, MealOffering offering);
+
+  Future<void> cancel(Session session, MealId mealId);
+
+  // --- Navigation ---
+
+  /// The top-up URL, or null when the portal offers no constructible link (in
+  /// which case the UI navigates instead).
+  Uri? topUpUrl(Session session);
+}

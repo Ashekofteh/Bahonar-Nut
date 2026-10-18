@@ -154,3 +154,51 @@ None.
 3. Phase 2 adapter now has exact field names, grid IDs, and the atomic login sequence.
 4. Recommend user **change their portal password** (shared in chat; also transmitted as
    plaintext POST by the portal itself).
+
+## 2026-10-18 — Session 4: Toolchain Setup & Scaffold
+
+### What happened
+
+1. Installed Flutter **3.47.7 stable** (Dart 3.13.5) to `D:/flutter`.
+2. Wired `scripts/env.sh`: `FLUTTER_ROOT`, `JAVA_HOME` (JDK 17), `ANDROID_HOME`,
+   `GRADLE_USER_HOME`. **Note:** PATH entries must use POSIX `/d/...` form in Git Bash —
+   Windows-style `D:/...` entries do not resolve for command lookup.
+3. Installed Android platform 36 + build-tools 36 (SDK was at 32, below Flutter's
+   minimum). Accepted all SDK licenses.
+4. `flutter doctor` → **No issues found!**
+5. Scaffolded project: `flutter create . --project-name bahonar_nut --org ir.ac.uk
+   --platforms=android,windows`. Existing `.gitignore`, docs, and planning files preserved.
+6. `flutter test` → passes. `flutter build apk --debug` → **144MB debug APK built**.
+
+### Errors
+
+| Error | Attempt | Resolution |
+|---|---|---|
+| Flutter SDK download returned 250-byte XML error | 1 | My URL had a duplicated `releases/` segment. Used `base_url` + `archive` from the release manifest — byte-exact 1,934,624,561 bytes |
+| `flutter: command not found` after `export PATH="D:/flutter/bin:$PATH"` | 1 | Git Bash needs POSIX `/d/flutter/bin`. Fixed in `env.sh` |
+| **APK build failed: `No space left on device`** | 1 | **C: was at 0 bytes free (100%)** — Gradle writes there. Not a toolchain fault |
+| APK build failed in 1s on retry | 2 | Cached failure; needed real free space |
+| Build OOM risk from default `-Xmx8G` | — | Reduced to `-Xmx3G`, redirected `GRADLE_USER_HOME` and `buildDir` to D: |
+
+### Critical environment constraint
+
+| Drive | Size | Free | Note |
+|---|---|---|---|
+| **C:** | 201G | **5.5G** | Near-full. Gradle defaults here — **this broke the first build.** |
+| **D:** | 752G | 40G | Project + Flutter + Gradle home live here |
+
+**Mitigation now in place:** `GRADLE_USER_HOME=/d/gradle-home` and
+`org.gradle.project.buildDir=D:/Bahonar-Nut/.gradle-build`, so builds no longer
+consume C:. C: held at 5.5G free through a full successful build.
+
+### Commits
+
+- `0e28b7f` — architecture, design spec, authenticated recon
+- `1dc51a7` — Flutter scaffold + verified toolchain
+
+### Next actions
+
+Phase 1 (domain core) + Phase 4 (sniper engine) — both site-independent, per the
+frozen `PortalClient` interface in the spec. `karpathy-guidelines` loads for all
+coding agents. Start with pure-Dart domain types and `PriorityRanker`, tested on the
+VM with no Flutter dependency (spec §3.1 invariant).

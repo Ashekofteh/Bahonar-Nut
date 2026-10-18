@@ -39,6 +39,12 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  # Plain Dart test runner. The domain core (lib/core) is tested with this rather
+  # than flutter_test on purpose: flutter_test pulls in dart:ui, so a core test
+  # that compiles under `dart test` proves the core stayed free of Flutter
+  # imports (spec §3.1). Run with: dart test test/core
+  test: ^1.25.0
+
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
