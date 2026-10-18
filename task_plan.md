@@ -21,7 +21,7 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | # | Phase | Status | Blocked by |
 |---|-------|--------|-----------|
 | 0 | Recon — inspect portal, map auth + endpoints | `complete` | None (Completed 2026-10-18) |
-| 1 | Core — domain models, ranker, storage, transport | `in_progress` | — |
+| 1 | Core — domain models, ranker, storage, transport | `partial` | — |
 | 2 | Adapter — portal adapter (Cullinan WebForms) + server clock | `pending` | Phase 1 |
 | 3 | Android — accounts UI, RTL shell, fg service, alarms | `pending` | Phase 1 |
 | 4 | Sniper — scheduler, state machine, ledger, dry-run | `pending` | Phase 1 |

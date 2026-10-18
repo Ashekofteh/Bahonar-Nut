@@ -202,3 +202,60 @@ Phase 1 (domain core) + Phase 4 (sniper engine) — both site-independent, per t
 frozen `PortalClient` interface in the spec. `karpathy-guidelines` loads for all
 coding agents. Start with pure-Dart domain types and `PriorityRanker`, tested on the
 VM with no Flutter dependency (spec §3.1 invariant).
+
+## 2026-10-18 — Session 5: Phase 1 Domain Core
+
+**Skill invoked:** `karpathy-guidelines` (mandatory for all coding work).
+
+### Delivered
+
+| Module | Contents |
+|---|---|
+| `lib/core/models.dart` | IDs, MealSlot, ReservationState, Hall, MenuOption, MealOffering, Reservation, Listing, Balance |
+| `lib/core/time.dart` | Pure-Dart `ClockTime`, `ServerClock`, cutoff arithmetic for the 20:00 two-days-prior rule, `firstReservableDate` |
+| `lib/core/priority.dart` | `PreferencePair`, `SlotPreference`, `PriorityRanker`, `RankResult`, veto + price ceiling |
+| `lib/core/polling.dart` | `PollingPolicy` (jitter, exponential backoff, hard floor), `RequestBudget`, `CircuitBreaker` |
+| `lib/core/snipe.dart` | `SnipeState`, transition table, `SnipeRun`, `SnipeRule`, `DateTarget`, `MatchAction` |
+| `lib/core/portal.dart` | `PortalClient` interface, sealed `ClaimResult`, `Session`, `LoginChallenge`, `BasketPage` |
+
+### Verification
+
+- **89 tests pass** under plain `dart test` (not `flutter_test` — which is itself
+  the proof that the core stayed Flutter-free).
+- `flutter analyze lib test` → **No issues found!**
+- Architecture test enforces §3.1: core must not import `package:flutter`, `dart:ui`,
+  or `dart:io`. Fails loudly with file paths if violated.
+
+### Notable test coverage
+
+- **48-point sweep** across the cutoff boundary proves `firstReservableDate` is
+  correct at every half-hour of a day — the bug class that would otherwise cause
+  phantom 4xx storms from early snipes.
+- **Exhaustive property test** over all 16 subsets of a 4-listing inventory proves
+  `PriorityRanker` always picks the highest-ranked eligible listing.
+- **Veto sweep** across all 4 ranks proves correct fall-through.
+- **Reachability test** proves every state is reachable from `idle` and terminal
+  states are truly final.
+
+### Errors
+
+| Error | Attempt | Resolution |
+|---|---|---|
+| `PollingPolicy` assertion failed: `jitterMax must be >= 1` | 1 | **Test was wrong, code was right.** My aggressive-test policy used `jitterMax: 0.2`, but jitter must never scale intervals *below* base. Fixed the test |
+| **Off-by-one in exponential backoff** | 2 | **Real bug caught by tests.** `1 << (failures - 1)` gave no backoff on the first failure (1× instead of 2×), so a failing portal kept being hammered at base rate. Changed to `1 << failures` |
+| Jitter bounds compared ms against seconds-valued constants | 1 | Test bug; bounds were `80`/`120` for a 100s base instead of `80_000`/`120_000` |
+
+**The backoff bug is worth noting:** it was a genuine defect that would have made
+the app's retry behaviour materially more aggressive than designed exactly when
+things were going wrong — the worst possible failure mode for ban avoidance. Tests
+caught it before any code touched the live portal.
+
+### Commit
+
+`81c9f98` — Phase 1 domain core
+
+### Remaining in Phase 1
+
+- Transport layer (HTTP, cookie jar, `HeaderServerClock` from response headers)
+- Secure storage (`Keystore`/DPAPI abstraction)
+- The `SnipeEngine` orchestration that wires scheduler + ranker + client together
