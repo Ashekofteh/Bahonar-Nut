@@ -7,6 +7,7 @@
 /// reconciliation replaces a dangerous guess with a fact.
 library;
 
+import 'hunt_config.dart';
 import 'models.dart';
 import 'portal.dart';
 import 'session.dart';
@@ -30,8 +31,23 @@ enum PreflightFailure {
   /// The portal is reachable but returned a balance we could not read.
   balanceUnreadable,
 
-  /// The balance is below the cheapest option the rule would consider.
+  /// The balance cannot cover the meals on the priority list.
   insufficientFunds,
+
+  /// The account already holds a meal for the target date and slot.
+  ///
+  /// The one-meal invariant, checked before the hunt starts rather than at the
+  /// moment of claiming. A basket purchase is irreversible, so buying a second
+  /// meal for a slot the student already has is money spent on food that can
+  /// neither be collected nor cancelled.
+  alreadyBooked,
+
+  /// The account's holdings could not be read, so the invariant cannot be
+  /// checked.
+  ///
+  /// A refusal rather than a pass: starting a hunt without knowing whether the
+  /// slot is already filled is exactly how a double purchase happens.
+  holdingsUnreadable,
 }
 
 /// The verdict of a preflight check.
@@ -64,15 +80,26 @@ class PreflightChecker {
 
   /// Checks everything that must hold before a hunt may begin.
   ///
-  /// [balance] is null when the balance could not be read. [cheapestConsidered]
-  /// is the lowest price among the rule's ranked, non-vetoed options, or null
-  /// when the rule has no price ceiling and funds therefore cannot be judged.
+  /// [balance] is null when the balance could not be read. [requiredCredit] is
+  /// the total the rule's priority list would cost, or null when the rule has
+  /// no price ceiling and funds therefore cannot be judged.
+  ///
+  /// [holdings] is what the account already holds on the target date, or null
+  /// when it could not be read.
+  ///
+  /// [hunt] is the hunt configuration, when the rule is a hunt. It supplies
+  /// the "is anything wanted at all" answer, because a hunt's priority list is
+  /// a list of *dish names* and an optional list of halls — not the rule's
+  /// `(hall, option)` pairs, which the hunt's own ranker does not use.
   PreflightResult check({
     required SnipeRule rule,
     required ServerClock clock,
     required SessionResult session,
     Balance? balance,
-    int? cheapestConsidered,
+    int? requiredCredit,
+    DateTime? targetDate,
+    List<Reservation>? holdings,
+    HuntConfig? hunt,
     DateTime? nowUtc,
   }) {
     final failures = <PreflightFailure>[];
@@ -94,8 +121,16 @@ class PreflightChecker {
     // A rule that can never match anything is a configuration error, not a
     // runtime one, but it is still better surfaced here than as a silent no-op
     // hunt that polls for hours and buys nothing.
-    final hasAnyPreference = rule.preferences.values
-        .any((pref) => pref.ranked.any((pair) => !pair.rejected));
+    //
+    // A hunt is judged on its own priority list: a hunt that names no dish
+    // wants nothing, and a hunt that names a dish wants it in whatever hall
+    // the market offers. The rule's `(hall, option)` pairs are not the
+    // hunt's question — the hunt's ranker matches on the dish name, because
+    // the market renumbers option ids.
+    final hasAnyPreference = hunt != null
+        ? hunt.dishPriority.isNotEmpty
+        : rule.preferences.values
+            .any((pref) => pref.ranked.any((pair) => !pair.rejected));
     if (!hasAnyPreference) {
       failures.add(PreflightFailure.noPreferences);
       notes.add('هیچ گزینه‌ای برای این وعده‌ها اولویت‌بندی نشده است.');
@@ -111,14 +146,39 @@ class PreflightChecker {
       }
     }
 
+    // The one-meal invariant, checked up front rather than at claim time.
+    //
+    // A basket purchase is irreversible, so a hunt that starts on a slot the
+    // student already holds would buy a second meal that can neither be
+    // collected nor cancelled. Checking it here costs one read; discovering it
+    // after a purchase costs real money.
+    if (targetDate != null && holdings == null) {
+      failures.add(PreflightFailure.holdingsUnreadable);
+      notes.add('وضعیت رزروهای فعلی خوانده نشد.');
+    } else if (targetDate != null && holdings != null) {
+      // The slots the hunt covers: the hunt's own target slot, or the rule's
+      // slots when there is no hunt configuration.
+      final slots = hunt?.targetSlot != null
+          ? {hunt!.targetSlot}
+          : rule.slots;
+      final held = holdings.any((r) =>
+          r.state == ReservationState.active &&
+          _sameDate(r.date, targetDate) &&
+          slots.contains(r.slot));
+      if (held) {
+        failures.add(PreflightFailure.alreadyBooked);
+        notes.add('برای این تاریخ و وعده، غذای دیگری در حساب شما ثبت شده است.');
+      }
+    }
+
     // Funds last: it needs a network read, so it is the most expensive check and
     // the one most likely to be skipped when earlier checks already failed.
-    if (failures.isEmpty && balance == null && cheapestConsidered != null) {
+    if (failures.isEmpty && balance == null && requiredCredit != null) {
       failures.add(PreflightFailure.balanceUnreadable);
       notes.add('موجودی حساب خوانده نشد.');
     } else if (balance != null &&
-        cheapestConsidered != null &&
-        balance.amountRial < cheapestConsidered) {
+        requiredCredit != null &&
+        balance.amountRial < requiredCredit) {
       failures.add(PreflightFailure.insufficientFunds);
       notes.add('موجودی برای خرید کافی نیست.');
     }
@@ -126,6 +186,9 @@ class PreflightChecker {
     if (failures.isEmpty) return const PreflightResult.passed();
     return PreflightResult.failed(failures, notes.join(' '));
   }
+
+  static bool _sameDate(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
 /// What reconciliation concluded about an ambiguous claim.
@@ -147,32 +210,45 @@ enum ReconciliationOutcome {
 /// Resolves an ambiguous claim by re-reading ground truth.
 ///
 /// The rule this enforces, from the spec: **never retry an ambiguous claim.**
-/// A blind retry can buy two meals and charge twice. Instead, re-fetch the
-/// reservation list and ask whether the meal is now ours.
+/// A blind retry can buy two meals and charge twice. Instead, re-read the only
+/// page that knows and ask whether the meal is now ours.
+///
+/// ## Why the buy page, and not the reservation grid
+///
+/// A basket purchase does **not** appear in the weekly reservation grid —
+/// verified by a live purchase (2026-10-19), where the grids were byte-for-byte
+/// identical before and after. It appears only in the transaction ledger and as
+/// a held row on the buy page itself.
+///
+/// So a reconciler that re-read the reservation grid would conclude
+/// `notClaimed` for every *successful* basket purchase, and the engine would
+/// hunt on into a second, irreversible one. That is the exact failure this
+/// class exists to prevent, so it reads the buy page.
 class ClaimReconciler {
   const ClaimReconciler();
 
-  /// Determines whether [listing] became a reservation.
+  /// Determines whether [listing] became a held meal.
   ///
-  /// Matching is by slot, date and hall rather than by listing ID, because the
-  /// portal assigns a *new* reservation identifier — the listing ID does not
-  /// survive into the reservation. Matching on the listing ID would therefore
-  /// always conclude "not claimed" and invite the double purchase.
+  /// [client] must support [PortalClient.holdingsOnBuyPage]; the adapter
+  /// reports what the buy page says about the listing's row.
   Future<ReconciliationOutcome> reconcile({
     required PortalClient client,
     required Session session,
     required Listing listing,
   }) async {
     try {
-      final reservations = await client.fetchReservations(session);
-      final matched = reservations.any(
-        (r) =>
-            r.slot == listing.slot &&
-            r.state == ReservationState.active &&
-            _sameDate(r.date, listing.date) &&
-            r.hall.id == listing.hall.id,
+      final hold = await client.holdingsOnBuyPage(
+        session,
+        date: listing.date,
+        optionId: listing.option.id,
       );
-      return matched
+
+      // No row at all means the portal no longer shows this listing. It could
+      // have been sold to someone else or withdrawn — either way it is not
+      // ours, and the caller must not retry it.
+      if (hold == null) return ReconciliationOutcome.notClaimed;
+
+      return hold.isHeld
           ? ReconciliationOutcome.claimed
           : ReconciliationOutcome.notClaimed;
     } catch (_) {
@@ -181,7 +257,4 @@ class ClaimReconciler {
       return ReconciliationOutcome.indeterminate;
     }
   }
-
-  static bool _sameDate(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
 }

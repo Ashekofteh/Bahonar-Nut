@@ -25,6 +25,16 @@ captures/
 auth_jar.txt
 cookies.txt
 
+# Probe output — scratch diagnostics from the read-only portal probes.
+probe_*.txt
+.probe_out.txt
+
+# Analyzer and test transcripts, written during a session.
+analyze_*.txt
+*_test_out.txt
+test_out.txt
+t1.txt
+
 # OS
 .DS_Store
 Thumbs.db

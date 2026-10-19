@@ -70,6 +70,12 @@ enum RejectionReason {
   /// accept listed pairs.
   notInPreferenceList,
 
+  /// The listing's hall is not one the hunt is willing to buy from.
+  ///
+  /// Distinct from [notInPreferenceList]: the dish was wanted, the hall was
+  /// not, and the user said so explicitly.
+  hallNotInPreferenceList,
+
   /// Above the rule's price ceiling.
   overMaxPrice,
 }

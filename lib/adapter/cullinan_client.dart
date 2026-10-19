@@ -215,34 +215,60 @@ class CullinanPortalClient implements PortalClient {
 
   @override
   Future<BasketPage> fetchBasket(Session session, {String? cursor}) async {
-    // The basket page is filtered by date. The cursor is the Jalali date, so a
-    // caller can page through the days ahead of the cutoff.
-    final date = cursor ?? _todayJalali();
-    final page = await transport.get(
+    // The basket page is filtered by date, and the cursor is the Jalali date
+    // the caller wants. Verified live 2026-10-20: the page's own `txtDate`
+    // field agrees with the rows it renders, so a GET alone returns the page's
+    // default date — reading it for any other date requires the filter
+    // postback.
+    final wanted = cursor ?? _todayJalali();
+    final first = await transport.get(session.account, _Paths.basketBuy);
+
+    if (CullinanParser.buyPageDate(first.body) == wanted) {
+      return BasketPage(listings: _parseBasket(first.body, wanted));
+    }
+
+    final filtered = await transport.post(
       session.account,
       _Paths.basketBuy,
-      headers: {},
+      body: {
+        '__VIEWSTATE': hiddenFieldValue(first.body, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR':
+            hiddenFieldValue(first.body, '__VIEWSTATEGENERATOR'),
+        '__EVENTTARGET': '',
+        '__EVENTARGUMENT': '',
+        'ctl00\$cphMain\$txtDate': wanted,
+        'ctl00\$cphMain\$imgbtnGoToDate.x': '1',
+        'ctl00\$cphMain\$imgbtnGoToDate.y': '1',
+      },
     );
-    return BasketPage(listings: _parseBasket(page.body, date));
+
+    if (filtered.looksLikeLoginPage) {
+      throw const LoginRejectedException('نشست منقضی شده است.');
+    }
+
+    return BasketPage(listings: _parseBasket(filtered.body, wanted));
   }
 
   // ---------------------------------------------------------------- writes
 
   @override
   Future<ClaimResult> claim(Session session, ListingId listingId) async {
-    // The claim posts the buy page's own form: the row's checkbox, hall, food
-    // and count, plus `btnSave`. `listingId` is the composite
-    // `date|slot|optionId`, so it is decomposed back into the parts the form
-    // needs.
+    // `listingId` is the composite `date|slot|hall|option`, so it is
+    // decomposed back into the parts the claim POST needs. The hall is part of
+    // the identity: a purchase names a hall as well as a dish.
     final parts = _parseListingId(listingId);
     if (parts == null) {
       return const ClaimRejected('شناسه آگهی معتبر نیست.');
     }
 
     try {
-      final page = await transport.get(session.account, _Paths.basketBuy);
-      final outcome = await _submitBasketRow(session, page.body, parts);
-      return outcome;
+      // The page must be read for the listing's own date, not the default one.
+      final html = await _readBuyPage(session, parts.date);
+      // Awaited inside the try so that a transport failure *during the POST* is
+      // reported as ambiguous rather than escaping as an exception: the server
+      // may have completed the purchase before the connection broke, and the
+      // engine's whole safety story rests on that being a distinct outcome.
+      return await _submitBasketRow(session, html, parts);
     } on TransportException catch (e) {
       // A transport failure is genuinely ambiguous: the request may have been
       // processed before the connection broke. The engine reconciles rather
@@ -324,6 +350,16 @@ class CullinanPortalClient implements PortalClient {
   }
 
   @override
+  Future<BasketHoldStatus?> holdingsOnBuyPage(
+    Session session, {
+    required DateTime date,
+    required String optionId,
+  }) async {
+    final html = await _readBuyPage(session, date);
+    return CullinanParser.heldOnBuyPage(html, optionId);
+  }
+
+  @override
   Future<void> cancel(Session session, MealId mealId) async {
     final page = await transport.get(session.account, _Paths.reservation);
     await transport.post(session.account, _Paths.reservation, body: {
@@ -341,8 +377,11 @@ class CullinanPortalClient implements PortalClient {
   // ------------------------------------------------------------- internals
 
   /// The Jalali date string for today, as the portal expects it.
-  String _todayJalali() {
-    final jalali = toJalali(_now());
+  String _todayJalali() => _jalaliOf(_now());
+
+  /// A civil date as the portal's `yyyy/MM/dd` Jalali string.
+  static String _jalaliOf(DateTime date) {
+    final jalali = toJalali(date);
     return '${jalali.year}/${jalali.month.toString().padLeft(2, '0')}/'
         '${jalali.day.toString().padLeft(2, '0')}';
   }
@@ -362,53 +401,66 @@ class CullinanPortalClient implements PortalClient {
     return CullinanParser.parseBasket(html, date);
   }
 
+  /// Reads the buy page filtered to [date], returning its HTML.
+  Future<String> _readBuyPage(Session session, DateTime date) async {
+    final wanted = _jalaliOf(date);
+    final first = await transport.get(session.account, _Paths.basketBuy);
+    if (CullinanParser.buyPageDate(first.body) == wanted) return first.body;
+
+    final filtered = await transport.post(
+      session.account,
+      _Paths.basketBuy,
+      body: {
+        '__VIEWSTATE': hiddenFieldValue(first.body, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR':
+            hiddenFieldValue(first.body, '__VIEWSTATEGENERATOR'),
+        '__EVENTTARGET': '',
+        '__EVENTARGUMENT': '',
+        'ctl00\$cphMain\$txtDate': wanted,
+        'ctl00\$cphMain\$imgbtnGoToDate.x': '1',
+        'ctl00\$cphMain\$imgbtnGoToDate.y': '1',
+      },
+    );
+    if (filtered.looksLikeLoginPage) {
+      throw const LoginRejectedException('نشست منقضی شده است.');
+    }
+    return filtered.body;
+  }
+
   /// Submits the buy page's form for one listing.
+  ///
+  /// The outcome is decided by **the row's amount**, not by whether the option
+  /// disappeared. Verified live 2026-10-20 against the response to a real
+  /// purchase: the bought option is still offered afterwards, and what changes
+  /// is that its row becomes checked and its مبلغ خرید cell becomes non-zero.
+  /// A client that tested "the option is gone" would report a completed,
+  /// irreversible purchase as a failure and keep hunting.
   Future<ClaimResult> _submitBasketRow(
     Session session,
     String html,
     _ListingParts parts,
   ) async {
-    // Find the row that carries this option, and take its control names.
-    String? checkName;
-    String? hallName;
-    String? foodName;
-    String? countName;
-    String? countValue;
-
-    for (final row in tableRows(html, 'grdFoodBasketReservation')) {
-      final food = selectBySuffix(row.raw, 'drpFood');
-      if (food == null) continue;
-      if (!food.options.any((o) => o.value == parts.optionId)) continue;
-
-      final checkbox = inputBySuffix(row.raw, 'chkReserve');
-      final self = selectBySuffix(row.raw, 'drpSelf');
-      final count = selectBySuffix(row.raw, 'drpFoodCount');
-
-      checkName = checkbox?.name;
-      hallName = self?.name;
-      foodName = food.name;
-      countName = count?.name;
-      countValue = count?.selected?.value ?? count?.options.firstOrNull?.value;
-      break;
-    }
-
-    if (checkName == null || hallName == null || foodName == null) {
+    final offered = CullinanParser.parseBasket(
+      html,
+      parts.date,
+    ).where((l) => l.option.id == parts.optionId).toList();
+    if (offered.isEmpty) {
       return const ClaimRejected('این آگهی دیگر در دسترس نیست.');
     }
 
-    final body = <String, String>{
-      '__VIEWSTATE': hiddenFieldValue(html, '__VIEWSTATE'),
-      '__VIEWSTATEGENERATOR': hiddenFieldValue(html, '__VIEWSTATEGENERATOR'),
-      '__EVENTTARGET': '',
-      '__EVENTARGUMENT': '',
-      checkName: 'on',
-      hallName: parts.hallId,
-      foodName: parts.optionId,
-      'ctl00\$cphMain\$btnSave': 'ذخیره',
-    };
-    if (countName != null) {
-      body[countName] = countValue ?? '1';
+    // The hall must be one the page actually offers for this dish. Posting a
+    // hallucinated hall would be a request the portal rejects at best, and an
+    // unintended purchase at worst.
+    if (!offered.any((l) => l.hall.id == parts.hallId)) {
+      return const ClaimRejected('این آگهی در سالن انتخاب‌شده موجود نیست.');
     }
+
+    final body = CullinanParser.claimFormBody(
+      html,
+      listingId: parts.optionId,
+      hallId: parts.hallId,
+      date: _jalaliOf(parts.date),
+    );
 
     final response = await transport.post(
       session.account,
@@ -420,31 +472,33 @@ class CullinanPortalClient implements PortalClient {
       return const ClaimRejected('نشست منقضی شده است.');
     }
 
-    // The server reports a failure in the status column of the grid, and a
-    // success by the row no longer offering the option.
     final error = _basketError(response.body);
     if (error != null) {
       return ClaimRejected(error);
     }
 
-    final stillOffered = _parseBasket(response.body, _todayJalali())
-        .any((l) => l.option.id == parts.optionId);
-    if (stillOffered) {
-      return const ClaimRejected('خرید انجام نشد.');
+    // The amount is the only trustworthy success signal.
+    final hold = CullinanParser.heldOnBuyPage(response.body, parts.optionId);
+    if (hold != null && hold.isHeld) {
+      return ClaimSucceeded(Reservation(
+        id: parts.optionId,
+        date: parts.date,
+        slot: parts.slot,
+        hall: Hall(id: parts.hallId, name: ''),
+        option: MenuOption(
+          id: parts.optionId,
+          name: '',
+          priceRial: parts.priceRial,
+        ),
+        state: ReservationState.active,
+      ));
     }
 
-    return ClaimSucceeded(Reservation(
-      id: parts.optionId,
-      date: parts.date,
-      slot: parts.slot,
-      hall: Hall(id: parts.hallId, name: ''),
-      option: MenuOption(
-        id: parts.optionId,
-        name: '',
-        priceRial: parts.priceRial,
-      ),
-      state: ReservationState.active,
-    ));
+    // The page neither reported an error nor showed the meal as held. That is
+    // not proof of failure — the response may not have rendered the final
+    // state — so it must not be reported as a rejection, which would invite a
+    // second, irreversible purchase.
+    return const ClaimAmbiguous('پاسخ سامانه نتیجه خرید را روشن نکرد.');
   }
 
   /// The error text the basket page shows for a failed purchase, if any.
@@ -539,7 +593,7 @@ class _ListingParts {
 /// Parses a composite listing id back into its parts.
 _ListingParts? _parseListingId(String id) {
   final parts = id.split('|');
-  if (parts.length != 3) return null;
+  if (parts.length != 4) return null;
 
   final date = DateTime.tryParse(parts[0]);
   if (date == null) return null;
@@ -547,11 +601,14 @@ _ListingParts? _parseListingId(String id) {
   final slot = MealSlot.values.where((s) => s.name == parts[1]).firstOrNull;
   if (slot == null) return null;
 
+  final hallId = parts[2];
+  if (hallId.isEmpty) return null;
+
   return _ListingParts(
     date: DateTime.utc(date.year, date.month, date.day),
     slot: slot,
-    optionId: parts[2],
-    hallId: '',
+    hallId: hallId,
+    optionId: parts[3],
     priceRial: 0,
   );
 }

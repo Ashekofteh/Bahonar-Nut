@@ -1305,3 +1305,171 @@ fetch the challenge, so the answer never matched. The real login is a
 three-step sequence: page, challenge, answer. A tool that skips a step fails
 confidently, which is exactly the kind of error that gets mistaken for a
 portal problem.
+
+### F34 — A listing is a (hall, option) PAIR, and the portal renders the pair as two INDEPENDENT dropdowns
+
+This is the correction to F19, and it changes the hunt's data model.
+
+The buy grid's food dropdown and hall dropdown are **two separate selects on the
+same row, and they are not linked**. Evidence from the live captures:
+
+| Capture | Row | Hall dropdown offers | Food dropdown offers |
+|---|---|---|---|
+| `81_buy_page_1405_07_28.html` | lunch | `1=مرکزی برادران` **only** | `62738=چلو اکبرجوجه` , `62740=چلو گوشت` |
+| `71_basket_buy.html` | dinner | `1=مرکزی برادران`, `2=فنی برادران` | `62732=خوراک مرغ بندری` , `62735=شوید پلو با گوشت` |
+| `70_reservation_hub.html` (weekly) | lunch 1405/07/28 | `1=مرکزی برادران`, `2=فنی برادران` | `62738`, `62740` — **the same two dishes** |
+
+So:
+
+- The **food dropdown lists the available listings** — that is the market, and
+  the option id is the listing identity.
+- The **hall dropdown lists the halls the row is served in**, and it is a
+  *preference* control on the row, not a property of any individual option.
+- The **same option id appears in the weekly reservation grid**, where the row
+  offers BOTH halls for the same two dishes.
+
+**Consequence:** a listing is `(date, slot, optionId)` and the *hall* is a
+separate choice the user makes, not part of the listing's identity. The
+`Listing.hall` field therefore cannot be read off the page as "the hall of this
+option" — it is the row's currently-selected hall.
+
+**Consequence for the hunt:** the hunt's ranker must match on **option id**
+and the hall preference must be applied as a **separate filter**, because the
+portal genuinely offers the same dish in two halls and the user wants to choose
+between them. The existing `PreferencePair(hallId, optionId)` model is still
+right — it is a *preference* pair — but the adapter must synthesise one
+`Listing` per **(option, hall offered)** rather than one per option, or the
+ranker can never match a listing in the second hall.
+
+### F35 — The claim POST must carry the COMPLETE form state, and the adapter currently does not
+
+The live purchase body (`captures/82_buy_post_body.txt`, a real, successful
+purchase of option 62738) contains **every row's** controls, not just the
+target row:
+
+```
+ctl00$cphMain$txtDate=1405/07/28
+ctl00$cphMain$grdFoodBasketReservation$ctl02$drpSelf=1
+ctl00$cphMain$grdFoodBasketReservation$ctl02$drpFood=62737
+ctl00$cphMain$grdFoodBasketReservation$ctl02$drpFoodCount=1
+ctl00$cphMain$grdFoodBasketReservation$ctl03$drpSelf=1
+ctl00$cphMain$grdFoodBasketReservation$ctl03$drpFood=62738
+ctl00$cphMain$grdFoodBasketReservation$ctl03$drpFoodCount=1
+ctl00$cphMain$grdFoodBasketReservation$ctl03$chkReserve=on
+ctl00$cphMain$grdFoodBasketReservation$ctl04$drpSelf=-1
+ctl00$cphMain$grdFoodBasketReservation$ctl04$drpFood=-1
+ctl00$cphMain$grdFoodBasketReservation$ctl04$drpFoodCount=0
+ctl00$cphMain$btnSave=ذخیره
+```
+
+Two things follow, and **both are bugs in the current adapter**
+(`lib/adapter/cullinan_client.dart`):
+
+1. **The complete state is required.** An ASP.NET checkbox ABSENT from a POST
+   reads as UNCHECKED, so posting only the target row would release the
+   account's other held meals. `tool/basket_purchase.dart` got this right
+   (`buildBuyFormState` posts every row); the adapter did not.
+2. **The `txtDate` filter is part of the state**, and the buy page defaults to
+   TODAY. The adapter's `fetchBasket` never applies the date filter, so it
+   reads the wrong date's rows. The live purchase needed a
+   `imgbtnGoToDate` postback first.
+
+### F36 — The adapter's claim-success detection is wrong, and it fails towards "success"
+
+`CullinanPortalClient._submitBasketRow` decides success by checking whether
+the option is **still offered** in the re-parsed response:
+
+```dart
+final stillOffered = _parseBasket(response.body, _todayJalali())
+    .any((l) => l.option.id == parts.optionId);
+if (stillOffered) return const ClaimRejected('خرید انجام نشد.');
+```
+
+But the live response to the successful purchase (`83_buy_response_hall1.html`)
+still offers **both** `62738` and `62740` on the lunch row — the option does
+NOT disappear. What changes is the row's **amount** and its **checked** state:
+
+| | before | after |
+|---|---|---|
+| lunch `checked` | false | **true** |
+| lunch `amount` (مبلغ خرید) | `0` | `500000` |
+| lunch `disabled` | false | false |
+
+So the adapter's success test would have **reported the successful purchase as
+a rejection**. That is the dangerous direction: the engine would tombstone the
+listing and keep hunting, and the next poll could buy a **second** meal that
+can never be cancelled.
+
+**The reliable success signal is the amount cell**, which is the same signal
+already proven for the weekly grid (F20: "checked is NOT held" — a genuinely
+held meal has a non-zero مبلغ خرید cell). A basket purchase shows
+`checked == true` **and** `amount > 0`.
+
+### F37 — A purchase is NOT reflected in the weekly grid, so the reconciler must read the buy page
+
+`ClaimReconciler.reconcile` re-reads `fetchReservations` and matches on
+(slot, date, hall). But a basket purchase lands **only** in the transaction
+ledger and in the buy page's own row — the weekly grids were byte-for-byte
+identical before and after the live purchase (F17).
+
+So the reconciler would always conclude `notClaimed` for a basket purchase
+that actually landed. That is the same class of bug as the ambiguous-claim
+guard it exists to serve: it would invite a second purchase of an irreversible
+item.
+
+**The reconciler must read the buy page's row** — its checked state and its
+amount — not the weekly reservation grids.
+
+### F38 — The buy page is the MARKETPLACE, and its rows do NOT match the official menu
+
+This resolves F16 and corrects it. Measured live on 2026-10-20 (account
+401157013, credit 0), comparing the buy page against the weekly grid **for the
+same dates**:
+
+| Date | Slot | Weekly grid (official menu) | Buy page |
+|---|---|---|---|
+| 1405/07/28 | breakfast | `62737` | **`62798`** |
+| 1405/07/28 | lunch | `62738`, `62740` | `62738` |
+| 1405/07/28 | dinner | `62742`, `62745` | `-1` |
+
+`62798` appears in **no row of the weekly grid** — neither the current week, nor
+the next week (whose ids run `63036`+), nor the week after. So it is not an
+official-menu option id for any visible date.
+
+**Therefore the buy page is genuinely a feed of released meals, each carrying
+its own option id**, and its rows are *not* the official menu for that date. The
+two facts that looked contradictory are both true:
+
+- The **weekly grid** is the official menu, and its option ids are stable
+  per (date, slot).
+- The **buy page** is the secondary market. A listing there may carry an
+  official id (when the released meal was a *different* student's weekly
+  reservation, like `62738`) or an id from the market's own space (`62798`).
+
+**Consequences — and one of them changes the hunt's design:**
+
+1. **The hunt may NOT take its dish list from `fetchOfferings`.** The dishes the
+   user can hunt for are the ones the portal puts on the *buy page*, which is a
+   different set from the official menu. Offering the official menu would let
+   the user choose a dish that never appears in the basket.
+2. **`Listing.hall` is the hall of the listing, and the hall dropdown is the
+   set of halls the market is currently offering for that row.** On the live
+   page the breakfast listing `62798` was offered in `فنی برادران` **only**,
+   which is exactly the hall-priority information the feature needs.
+3. **Cross-checking a listing against `fetchOfferings` is wrong** and would
+   reject legitimate listings. The tombstone and ranker must key on the listing
+   id the buy page supplied.
+4. The buy page filters correctly by date: `txtDate` and `lblTodayDate` agree,
+   and a date with no market activity renders three `-1` rows. So the date
+   filter *is* applied — the earlier "unfiltered" reading was a coincidence of
+   the default date.
+
+**The one thing still unverified:** whether a row offering *two* dishes and
+*two* halls pairs them (dish A in hall 1, dish B in hall 2) or offers them
+independently. The live market never presented such a row — every row had one
+hall — so it could not be tested. The app therefore treats a listing as a
+**(hall, option) pair**, matching the reservation write path that is already
+proven (`drpSelf` + `drpFood` + `btnSave`), and reads the hall list from the
+row that carries the dish. If a pair the portal does not offer is ever posted,
+the portal rejects it, and the engine tombstones that listing rather than
+retrying.

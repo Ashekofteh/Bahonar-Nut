@@ -56,6 +56,8 @@ class ScriptedClient implements PortalClient {
     List<List<Listing>>? basketPages,
     this.claimBehavior = ClaimBehavior.succeed,
     this.reconcileReservations = const [],
+    this.reconcileHold,
+    this.throwOnHoldRead = false,
   }) : _basketPages = basketPages ?? [];
 
   /// Successive basket responses; the last one repeats once exhausted.
@@ -64,6 +66,18 @@ class ScriptedClient implements PortalClient {
 
   ClaimBehavior claimBehavior;
   List<Reservation> reconcileReservations;
+
+  /// What the buy page says about the reconciled listing's row.
+  ///
+  /// The reconciler reads the **buy page**, not the weekly reservation grid:
+  /// a basket purchase lands only in the ledger and on the buy page (F17), so
+  /// a grid-reading reconciler would report every successful purchase as
+  /// "not claimed" and invite a second, irreversible one.
+  final BasketHoldStatus? reconcileHold;
+
+  /// When true, the buy-page re-read throws, so reconciliation is
+  /// indeterminate.
+  final bool throwOnHoldRead;
 
   int claimCalls = 0;
   int reserveCalls = 0;
@@ -104,6 +118,16 @@ class ScriptedClient implements PortalClient {
   @override
   Future<List<Reservation>> fetchReservations(Session session) async =>
       reconcileReservations;
+
+  @override
+  Future<BasketHoldStatus?> holdingsOnBuyPage(
+    Session session, {
+    required DateTime date,
+    required String optionId,
+  }) async {
+    if (throwOnHoldRead) throw Exception('network down');
+    return reconcileHold;
+  }
 
   @override
   Future<Balance> fetchBalance(Session session) async =>
@@ -407,18 +431,9 @@ void main() {
           [listing('L1')],
         ],
         claimBehavior: ClaimBehavior.ambiguous,
+        // The buy page now shows the row as held: the purchase landed.
+        reconcileHold: const BasketHoldStatus(checked: true, amountRial: 350000),
       );
-      // The reservation list shows the meal is ours.
-      client.reconcileReservations = [
-        Reservation(
-          id: 'r1',
-          date: DateTime.utc(2026, 10, 20),
-          slot: MealSlot.lunch,
-          hall: central,
-          option: optA,
-          state: ReservationState.active,
-        ),
-      ];
 
       final engine = buildEngine(client);
       await engine.start(buildRule());
@@ -438,8 +453,9 @@ void main() {
           [listing('L1')],
         ],
         claimBehavior: ClaimBehavior.ambiguous,
+        // The row is still offered and not held: the purchase did not land.
+        reconcileHold: const BasketHoldStatus(checked: false, amountRial: 0),
       );
-      client.reconcileReservations = const [];
 
       final engine = buildEngine(client);
       await engine.start(buildRule());
@@ -455,8 +471,9 @@ void main() {
           [listing('L1')],
         ],
         claimBehavior: ClaimBehavior.ambiguous,
+        // The buy-page re-read throws -> indeterminate.
+        throwOnHoldRead: true,
       );
-      // fetchReservations throws -> indeterminate.
       final engine = DefaultSnipeEngine(
         client: client,
         sessions: SessionManager(

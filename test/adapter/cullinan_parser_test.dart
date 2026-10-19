@@ -20,14 +20,15 @@ void main() {
   }
 
   group('composite listing identity', () {
-    test('is date|slot|optionId', () {
+    test('is date|slot|hallId|optionId', () {
       expect(
         Listing.compositeListingId(
           date: DateTime.utc(2026, 10, 18),
           slot: MealSlot.lunch,
+          hallId: '1',
           optionId: '62726',
         ),
-        '2026-10-18|lunch|62726',
+        '2026-10-18|lunch|1|62726',
       );
     });
 
@@ -36,9 +37,10 @@ void main() {
         Listing.compositeListingId(
           date: DateTime.utc(2026, 1, 5),
           slot: MealSlot.breakfast,
+          hallId: '1',
           optionId: '1',
         ),
-        '2026-01-05|breakfast|1',
+        '2026-01-05|breakfast|1|1',
       );
     });
 
@@ -46,11 +48,13 @@ void main() {
       final morning = Listing.compositeListingId(
         date: DateTime.utc(2026, 10, 18, 8),
         slot: MealSlot.lunch,
+        hallId: '1',
         optionId: '1',
       );
       final evening = Listing.compositeListingId(
         date: DateTime.utc(2026, 10, 18, 20),
         slot: MealSlot.lunch,
+        hallId: '1',
         optionId: '1',
       );
       expect(morning, evening);
@@ -60,14 +64,35 @@ void main() {
       final a = Listing.compositeListingId(
         date: DateTime.utc(2026, 10, 18),
         slot: MealSlot.lunch,
+        hallId: '1',
         optionId: '62726',
       );
       final b = Listing.compositeListingId(
         date: DateTime.utc(2026, 10, 18),
         slot: MealSlot.lunch,
+        hallId: '1',
         optionId: '62729',
       );
       expect(a, isNot(b));
+    });
+
+    test('the same dish in two halls is two listings', () {
+      // The hall is part of the identity: a claim POST names a hall *and* a
+      // dish, so the two are bought separately and lost separately. One
+      // being gone says nothing about the other.
+      final central = Listing.compositeListingId(
+        date: DateTime.utc(2026, 10, 18),
+        slot: MealSlot.lunch,
+        hallId: '1',
+        optionId: '62726',
+      );
+      final technical = Listing.compositeListingId(
+        date: DateTime.utc(2026, 10, 18),
+        slot: MealSlot.lunch,
+        hallId: '2',
+        optionId: '62726',
+      );
+      expect(central, isNot(technical));
     });
 
     test('Listing.composite builds the same id', () {
@@ -78,7 +103,7 @@ void main() {
         option: const MenuOption(
             id: '62742', name: 'سالاد الویه', priceRial: 350000),
       );
-      expect(listing.id, '2026-10-18|dinner|62742');
+      expect(listing.id, '2026-10-18|dinner|1|62742');
       expect(listing.priceRial, 350000);
     });
   });
@@ -170,6 +195,7 @@ void main() {
           Listing.compositeListingId(
             date: listing.date,
             slot: listing.slot,
+            hallId: listing.hall.id,
             optionId: listing.option.id,
           ),
         );

@@ -34,6 +34,29 @@ class Hall {
   String toString() => 'Hall($id, $name)';
 }
 
+/// The canonical key for a dish name, used to match a dish across portal pages.
+///
+/// ## Why the name and not the option id
+///
+/// The **market renumbers the ids.** Verified live (2026-10-20): the same
+/// dish, on the same date and slot, is option `62737` in the weekly
+/// reservation grid and option `62798` on the Food Basket buy page — the
+/// same name, the same price, a different id. So an id a user picked from the
+/// official menu can never identify the market listing of that same dish, and
+/// a hunt that matched on ids would never fire.
+///
+/// The name is the only thing that survives the renumbering, so it is what a
+/// dish is matched on. The portal is also inconsistent about how it separates
+/// the components of a name (`پنیر /گوجه /نان` in one grid, `پنیر/گوجه/نان`
+/// in another, with `,` and `/` both in use), so the name is normalised
+/// before comparison — otherwise one dish reads as two.
+String normalizeDishName(String name) => name
+    .replaceAll(RegExp(r'\s+'), '')
+    .replaceAll('،', ',')
+    .replaceAll('٫', ',')
+    .replaceAll('/', ',')
+    .trim();
+
 /// A menu option within a meal, carrying the subsidized price in Rial.
 ///
 /// The portal also renders an unsubsidized (بدون یارانه) price tier, but that
@@ -48,6 +71,9 @@ class MenuOption {
   final OptionId id;
   final String name;
   final int priceRial;
+
+  /// The name normalised for cross-page matching. See [normalizeDishName].
+  String get dishKey => normalizeDishName(name);
 
   @override
   String toString() => 'MenuOption($id, $name, $priceRial Rial)';
@@ -102,15 +128,22 @@ class Reservation {
 
 /// A listing in the Food Basket: another student's released reservation.
 ///
-/// **Identity is composite.** The portal's buy grid renders one row per
-/// (date, meal slot), and the individual purchasable meals live in the row's
-/// food dropdown as separate option ids. A "listing" is therefore one option
-/// within one row: `(date, slot, option id)`. There is no single portal
-/// identifier for it.
+/// **Identity is composite, and includes the hall.**
 ///
-/// Getting this wrong would silently break the tombstone set, the ledger and
-/// the ranker at once, all keyed on [id], so the identity is constructed in one
-/// place and reused everywhere.
+/// `FoodBasketBuy.aspx` renders one row per (date, meal slot). Each row carries
+/// a **hall dropdown** (the halls the market is offering that row's meals in)
+/// and a **food dropdown** (the meals on offer). A purchase is a POST naming
+/// both: the row's `drpSelf` and its `drpFood`.
+///
+/// So a listing is `(date, slot, hallId, optionId)`, and the hall is part of
+/// the identity rather than a decoration. Two listings of the same dish in two
+/// different halls are genuinely different listings: they are bought with
+/// different POSTs, and one being gone says nothing about the other.
+///
+/// The hall is **not** a display detail. The portal names halls per account
+/// (a female account may see «مرکزی خواهران» where a male one sees «مرکزی
+/// برادران»), so the app keys on the id and shows whatever name the portal
+/// supplied. Matching on a Persian hall name would be a bug waiting to happen.
 class Listing {
   const Listing({
     required this.id,
@@ -129,7 +162,12 @@ class Listing {
     required MenuOption option,
     DateTime? expiresAt,
   }) {
-    final id = compositeListingId(date: date, slot: slot, optionId: option.id);
+    final id = compositeListingId(
+      date: date,
+      slot: slot,
+      hallId: hall.id,
+      optionId: option.id,
+    );
     return Listing(
       id: id,
       date: date,
@@ -140,25 +178,34 @@ class Listing {
     );
   }
 
-  /// The composite identity of a listing: `date|slot|optionId`.
+  /// The composite identity of a listing: `date|slot|hallId|optionId`.
   ///
   /// Uses only the civil date, never a time component: a listing is a meal on
   /// a day, and including a time would make the same meal two different ids.
   static String compositeListingId({
     required DateTime date,
     required MealSlot slot,
+    required String hallId,
     required String optionId,
   }) =>
       '${date.year.toString().padLeft(4, '0')}-'
       '${date.month.toString().padLeft(2, '0')}-'
       '${date.day.toString().padLeft(2, '0')}'
       '|${slot.name}'
+      '|$hallId'
       '|$optionId';
 
   final ListingId id;
   final DateTime date;
   final MealSlot slot;
+
+  /// The hall this listing is bought from.
+  ///
+  /// Not optional: the claim POST names a hall, so a listing without one
+  /// cannot be bought. The parser drops such rows rather than inventing a
+  /// hall, because guessing here spends money.
   final Hall hall;
+
   final MenuOption option;
 
   /// Server-reported expiry, when the portal exposes one. Optional because the

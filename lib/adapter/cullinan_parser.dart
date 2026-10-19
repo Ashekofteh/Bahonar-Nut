@@ -152,9 +152,20 @@ abstract final class CullinanParser {
 
   /// Parses the basket buy grid into listings.
   ///
-  /// **One listing per option in a row's food dropdown.** The row is a
-  /// (date, slot) pair; the options within it are the purchasable meals. A row
-  /// offering two options yields two listings.
+  /// **One listing per (hall, option) pair.** The row is a (date, slot) pair.
+  /// Its food dropdown lists the meals on offer and its hall dropdown lists
+  /// the halls they are offered in, so a row with two dishes in two halls
+  /// yields four listings.
+  ///
+  /// The cross product is deliberate. A claim POST names a hall *and* a dish
+  /// (`drpSelf` + `drpFood`), so each combination is separately purchasable and
+  /// separately lost. Collapsing them would hide the second hall from the
+  /// ranker, and the user's "Engineering as a fallback" would silently never
+  /// fire.
+  ///
+  /// The hall list is what the portal publishes for that row, never a
+  /// hardcoded pair: the portal names halls per account, and serves different
+  /// ones on different days.
   static List<Listing> parseBasket(String html, DateTime date) {
     final listings = <Listing>[];
 
@@ -168,24 +179,32 @@ abstract final class CullinanParser {
       final self = selectBySuffix(row.raw, 'drpSelf');
       if (food == null || self == null) continue;
 
-      final hallValue = self.selected?.value ?? '-1';
-      if (hallValue == '-1') continue;
+      final halls = <Hall>[
+        for (final option in self.options)
+          if (option.value != '-1')
+            Hall(id: option.value, name: option.text),
+      ];
+      if (halls.isEmpty) continue;
 
       for (final option in food.options) {
         if (option.value == '-1') continue;
         final price = parseRial(option.text);
         if (price == null) continue;
 
-        listings.add(Listing.composite(
-          date: date,
-          slot: slot,
-          hall: Hall(id: hallValue, name: self.selected?.text ?? ''),
-          option: MenuOption(
-            id: option.value,
-            name: dishName(option.text),
-            priceRial: price,
-          ),
-        ));
+        final menuOption = MenuOption(
+          id: option.value,
+          name: dishName(option.text),
+          priceRial: price,
+        );
+
+        for (final hall in halls) {
+          listings.add(Listing.composite(
+            date: date,
+            slot: slot,
+            hall: hall,
+            option: menuOption,
+          ));
+        }
       }
     }
 
@@ -199,6 +218,105 @@ abstract final class CullinanParser {
   static String dishName(String optionText) => optionText
       .replaceAll(RegExp(r'\s*\d[\d,٬]*\s*ریال\s*$'), '')
       .trim();
+
+  /// The buy page's date, as the portal's Jalali string.
+  ///
+  /// Read from `txtDate`, which is the page's own filter and always agrees
+  /// with the rows it renders — verified live 2026-10-20.
+  static String? buyPageDate(String html) {
+    final match = RegExp(
+      '<input[^>]*id="[^"]*txtDate"[^>]*value="([^"]*)"',
+      dotAll: true,
+    ).firstMatch(html);
+    final value = match?.group(1)?.trim();
+    return (value == null || value.isEmpty) ? null : value;
+  }
+
+  /// The complete form state of the buy page, with one listing selected.
+  ///
+  /// **The complete state, not one row.** The buy page is an ASP.NET grid, and
+  /// an absent checkbox reads as *unchecked* on the server — so posting only
+  /// the row being bought would silently release whatever else the account
+  /// holds on that page. This mirrors what a browser sends, and matches the
+  /// live capture of the one successful purchase
+  /// (`captures/82_buy_post_body.txt`).
+  ///
+  /// [listingId] selects the row and the option; [hallId] overrides the hall,
+  /// which is what makes the user's hall preference take effect.
+  static Map<String, String> claimFormBody(
+    String html, {
+    required String listingId,
+    required String hallId,
+    String? date,
+  }) {
+    final body = <String, String>{
+      '__VIEWSTATE': hiddenFieldValue(html, '__VIEWSTATE'),
+      '__VIEWSTATEGENERATOR': hiddenFieldValue(html, '__VIEWSTATEGENERATOR'),
+      '__VIEWSTATEENCRYPTED': '',
+      '__EVENTTARGET': '',
+      '__EVENTARGUMENT': '',
+    };
+    if (date != null) body['ctl00\$cphMain\$txtDate'] = date;
+
+    // Every row's current state, so nothing is released by omission. The row
+    // carrying the target listing is written last, so its values win.
+    for (final row in tableRows(html, 'grdFoodBasketReservation')) {
+      final food = selectBySuffix(row.raw, 'drpFood');
+      final self = selectBySuffix(row.raw, 'drpSelf');
+      final count = selectBySuffix(row.raw, 'drpFoodCount');
+      if (food == null || self == null) continue;
+
+      final checkbox = inputBySuffix(row.raw, 'chkReserve');
+      final isTarget = food.options.any((o) => o.value == listingId);
+
+      // Preserve an existing held meal. An absent checkbox reads as unchecked,
+      // so dropping it would give the meal back.
+      if (checkbox != null && checkbox.checked) body[checkbox.name] = 'on';
+
+      body[self.name] = self.selected?.value ?? '-1';
+      body[food.name] = food.selected?.value ?? '-1';
+      if (count != null) body[count.name] = count.selected?.value ?? '-1';
+
+      if (!isTarget) continue;
+
+      if (checkbox != null) body[checkbox.name] = 'on';
+      body[self.name] = hallId;
+      body[food.name] = listingId;
+      // The row renders count 0 when it has no service, and a count of 0 buys
+      // nothing — the listing's presence is what makes the row buyable.
+      if (count != null) body[count.name] = '1';
+    }
+
+    body['ctl00\$cphMain\$btnSave'] = 'ذخیره';
+    return body;
+  }
+
+  /// Whether the buy page shows [optionId] as **held**: checked and charged.
+  ///
+  /// This is the only reliable success signal. Verified live 2026-10-20 against
+  /// the response to a real purchase: the bought option's row comes back
+  /// `checked` with a non-zero amount, and the option is **still listed** in
+  /// the dropdown. So "the option disappeared" is not a success test, and a
+  /// client that used it would mis-report a completed, irreversible purchase as
+  /// a failure — and keep hunting into a second one.
+  ///
+  /// Returns null when no row offers the option at all.
+  static BasketHoldStatus? heldOnBuyPage(String html, String optionId) {
+    for (final row in tableRows(html, 'grdFoodBasketReservation')) {
+      if (row.cells.length < 7) continue;
+
+      final food = selectBySuffix(row.raw, 'drpFood');
+      if (food == null) continue;
+      if (!food.options.any((o) => o.value == optionId)) continue;
+
+      final checkbox = inputBySuffix(row.raw, 'chkReserve');
+      return BasketHoldStatus(
+        checked: checkbox?.checked ?? false,
+        amountRial: parseRial(row.cell(6)) ?? 0,
+      );
+    }
+    return null;
+  }
 
   /// The Persian meal names the ledger uses.
   static const Map<String, MealSlot> _ledgerSlots = {

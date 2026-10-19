@@ -138,6 +138,14 @@ class FakePortalClient implements PortalClient {
       const [];
 
   @override
+  Future<BasketHoldStatus?> holdingsOnBuyPage(
+    Session session, {
+    required DateTime date,
+    required String optionId,
+  }) async =>
+      null;
+
+  @override
   Future<BasketPage> fetchBasket(Session session, {String? cursor}) async =>
       const BasketPage(listings: []);
 

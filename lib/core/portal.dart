@@ -11,6 +11,28 @@ import 'dart:typed_data';
 
 import 'models.dart';
 
+/// What the buy page reports about one option's row.
+///
+/// A meal is held when the row is **both** checked and charged. Neither alone
+/// is enough: the portal renders every row of a just-saved grid as checked,
+/// but only the bought row carries an amount.
+class BasketHoldStatus {
+  const BasketHoldStatus({
+    required this.checked,
+    required this.amountRial,
+  });
+
+  final bool checked;
+  final int amountRial;
+
+  /// True when the account actually holds this meal.
+  bool get isHeld => checked && amountRial > 0;
+
+  @override
+  String toString() =>
+      'BasketHoldStatus(checked=$checked, amountRial=$amountRial)';
+}
+
 /// An authenticated session. Treated as an opaque bearer credential.
 class Session {
   const Session({
@@ -226,6 +248,18 @@ abstract class PortalClient {
   Future<List<Transaction>> fetchTransactions(Session session);
 
   Future<BasketPage> fetchBasket(Session session, {String? cursor});
+
+  /// What the basket buy page says about one option's row.
+  ///
+  /// **This is the only way to establish whether a basket purchase landed.**
+  /// A purchase does not appear in the weekly reservation grid (verified live
+  /// 2026-10-19), so [fetchReservations] cannot reconcile an ambiguous claim
+  /// on the basket. Returns null when the portal no longer lists the option.
+  Future<BasketHoldStatus?> holdingsOnBuyPage(
+    Session session, {
+    required DateTime date,
+    required String optionId,
+  });
 
   // --- Writes ---
 

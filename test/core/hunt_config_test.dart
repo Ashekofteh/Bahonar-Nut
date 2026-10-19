@@ -1,0 +1,262 @@
+import 'package:bahonar_nut/core/hunt_config.dart';
+import 'package:bahonar_nut/core/models.dart';
+import 'package:bahonar_nut/core/time.dart';
+import 'package:test/test.dart';
+
+HuntDish dish(String id, String name, int price) =>
+    HuntDish(optionId: id, name: name, priceRial: price);
+
+void main() {
+  group('the rate is clamped, never rejected', () {
+    test('a peak interval below the floor is raised to the floor', () {
+      final rate = HuntRate(peakInterval: const Duration(milliseconds: 200));
+      expect(rate.peakInterval, HuntBounds.minPeakInterval);
+    });
+
+    test('a peak interval above the ceiling is lowered to the ceiling', () {
+      final rate = HuntRate(peakInterval: const Duration(minutes: 30));
+      expect(rate.peakInterval, HuntBounds.maxPeakInterval);
+    });
+
+    test('an off-peak interval below the floor is raised to the floor', () {
+      final rate = HuntRate(offPeakInterval: const Duration(seconds: 5));
+      expect(rate.offPeakInterval, HuntBounds.minOffPeakInterval);
+    });
+
+    test('an off-peak interval above the ceiling is lowered to the ceiling', () {
+      final rate = HuntRate(offPeakInterval: const Duration(hours: 2));
+      expect(rate.offPeakInterval, HuntBounds.maxOffPeakInterval);
+    });
+
+    test('a value inside the range is kept exactly', () {
+      final rate = HuntRate(
+        peakInterval: const Duration(seconds: 7),
+        offPeakInterval: const Duration(minutes: 3),
+      );
+      expect(rate.peakInterval, const Duration(seconds: 7));
+      expect(rate.offPeakInterval, const Duration(minutes: 3));
+    });
+
+    test('copyWith clamps as well', () {
+      final rate = HuntRate.defaults.copyWith(
+        peakInterval: const Duration(milliseconds: 1),
+      );
+      expect(rate.peakInterval, HuntBounds.minPeakInterval);
+    });
+  });
+
+  group('the risk acknowledgement', () {
+    test('is needed below ten seconds', () {
+      expect(
+        HuntRate(peakInterval: const Duration(seconds: 9)).needsRiskAcknowledgement,
+        isTrue,
+      );
+    });
+
+    test('is not needed at exactly ten seconds', () {
+      expect(
+        HuntRate(peakInterval: const Duration(seconds: 10)).needsRiskAcknowledgement,
+        isFalse,
+      );
+    });
+
+    test('the default rate needs no acknowledgement', () {
+      expect(HuntRate.defaults.needsRiskAcknowledgement, isFalse);
+    });
+  });
+
+  group('the peak window follows the target meal', () {
+    test('a lunch hunt peaks at 09:00-15:30', () {
+      final config = HuntConfig(targetSlot: MealSlot.lunch);
+      expect(config.peakWindow.start, const ClockTime(9, 0));
+      expect(config.peakWindow.end, const ClockTime(15, 30));
+      expect(config.isPeak(const ClockTime(12, 0)), isTrue);
+      expect(config.isPeak(const ClockTime(18, 0)), isFalse);
+    });
+
+    test('a dinner hunt peaks at 16:30-20:30', () {
+      final config = HuntConfig(targetSlot: MealSlot.dinner);
+      expect(config.peakWindow.start, const ClockTime(16, 30));
+      expect(config.peakWindow.end, const ClockTime(20, 30));
+      expect(config.isPeak(const ClockTime(18, 0)), isTrue);
+      expect(config.isPeak(const ClockTime(12, 0)), isFalse);
+    });
+
+    test('breakfast and dinner share the evening window', () {
+      // They are collected together, so a hunt for either is hot at the same
+      // hours.
+      expect(
+        distributionWindows[MealSlot.breakfast],
+        distributionWindows[MealSlot.dinner],
+      );
+    });
+
+    test('the boundary instants are inside the window', () {
+      final config = HuntConfig(targetSlot: MealSlot.dinner);
+      expect(config.isPeak(const ClockTime(16, 30)), isTrue);
+      expect(config.isPeak(const ClockTime(20, 30)), isTrue);
+      expect(config.isPeak(const ClockTime(16, 29)), isFalse);
+      expect(config.isPeak(const ClockTime(20, 31)), isFalse);
+    });
+  });
+
+  group('the hunt window', () {
+    test('contains the times inside it', () {
+      final config = HuntConfig(
+        windowStart: const ClockTime(16, 30),
+        windowEnd: const ClockTime(20, 30),
+      );
+      expect(config.isWithinWindow(const ClockTime(18, 0)), isTrue);
+      expect(config.isWithinWindow(const ClockTime(16, 30)), isTrue);
+      expect(config.isWithinWindow(const ClockTime(20, 30)), isTrue);
+      expect(config.isWithinWindow(const ClockTime(12, 0)), isFalse);
+    });
+
+    test('a window that ends before it starts is inert', () {
+      final config = HuntConfig(
+        windowStart: const ClockTime(20, 30),
+        windowEnd: const ClockTime(16, 30),
+      );
+      expect(config.isWithinWindow(const ClockTime(18, 0)), isFalse);
+    });
+  });
+
+  group('the interval selection', () {
+    final config = HuntConfig(
+      targetSlot: MealSlot.dinner,
+      rate: HuntRate(
+        peakInterval: const Duration(seconds: 5),
+        offPeakInterval: const Duration(minutes: 2),
+      ),
+    );
+
+    test('peak inside the distribution window', () {
+      expect(config.intervalAt(const ClockTime(18, 0)), const Duration(seconds: 5));
+    });
+
+    test('off-peak outside it', () {
+      expect(config.intervalAt(const ClockTime(10, 0)), const Duration(minutes: 2));
+    });
+  });
+
+  group('the required credit', () {
+    test('is the sum of the priority list, not the cheapest dish', () {
+      // The hunt may buy the second choice, and the second choice is what
+      // determines whether the purchase can be completed. Checking only the
+      // first would pass a hunt that then fails at the moment of claiming.
+      final config = HuntConfig(
+        dishPriority: [
+          dish('a', 'لوبیا پلو', 350000),
+          dish('b', 'چلو گوشت', 500000),
+        ],
+      );
+      expect(config.requiredCreditRial, 850000);
+    });
+
+    test('is zero for an empty list', () {
+      expect(HuntConfig().requiredCreditRial, 0);
+    });
+  });
+
+  group('the price ceiling', () {
+    test('is the dearest dish on the list', () {
+      final config = HuntConfig(
+        dishPriority: [
+          dish('a', 'لوبیا پلو', 350000),
+          dish('b', 'چلو گوشت', 500000),
+        ],
+      );
+      expect(config.maxPriceRial, 500000);
+    });
+
+    test('is null for an empty list', () {
+      expect(HuntConfig().maxPriceRial, isNull);
+    });
+  });
+
+  group('the projected request count', () {
+    test('counts the peak and off-peak parts of the window', () {
+      // A four-hour window fully inside the peak, at one request per five
+      // seconds: 14400 / 5 = 2880.
+      final config = HuntConfig(
+        targetSlot: MealSlot.dinner,
+        windowStart: const ClockTime(16, 30),
+        windowEnd: const ClockTime(20, 30),
+        rate: HuntRate(
+          peakInterval: const Duration(seconds: 5),
+          offPeakInterval: const Duration(minutes: 2),
+        ),
+      );
+      expect(config.peakOverlapSeconds, 4 * 3600);
+      expect(config.projectedRequests(), 2880);
+    });
+
+    test('a window that misses the peak entirely polls off-peak throughout', () {
+      // A lunch hunt running in the evening window never sees peak, so
+      // projecting it as if it were peak would overstate the request count and
+      // hide the fact that the hunt was set up wrong.
+      final config = HuntConfig(
+        targetSlot: MealSlot.lunch,
+        windowStart: const ClockTime(16, 30),
+        windowEnd: const ClockTime(20, 30),
+        rate: HuntRate(
+          peakInterval: const Duration(seconds: 5),
+          offPeakInterval: const Duration(minutes: 2),
+        ),
+      );
+      expect(config.peakOverlapSeconds, 0);
+      expect(config.projectedRequests(), 4 * 3600 ~/ 120);
+    });
+
+    test('a faster rate projects a larger count', () {
+      HuntConfig withPeak(Duration interval) => HuntConfig(
+            targetSlot: MealSlot.dinner,
+            windowStart: const ClockTime(16, 30),
+            windowEnd: const ClockTime(20, 30),
+            rate: HuntRate(
+              peakInterval: interval,
+              offPeakInterval: const Duration(minutes: 15),
+            ),
+          );
+
+      expect(
+        withPeak(const Duration(seconds: 2)).projectedRequests(),
+        greaterThan(withPeak(const Duration(seconds: 10)).projectedRequests()),
+      );
+    });
+
+    test('the request count for a span never goes negative', () {
+      expect(HuntConfig.requestsFor(const Duration(seconds: 5), 0), 0);
+      expect(HuntConfig.requestsFor(Duration.zero, 100), 0);
+    });
+  });
+
+  group('the derived rule', () {
+    test('carries the hunt window and the target slot', () {
+      final config = HuntConfig(
+        targetSlot: MealSlot.dinner,
+        windowStart: const ClockTime(17, 0),
+        windowEnd: const ClockTime(19, 0),
+        dishPriority: [dish('a', 'لوبیا پلو', 350000)],
+      );
+
+      final rule = config.toRule(id: 'r1', account: 'a1');
+
+      expect(rule.id, 'r1');
+      expect(rule.windowStart, const ClockTime(17, 0));
+      expect(rule.windowEnd, const ClockTime(19, 0));
+      expect(rule.slots, {MealSlot.dinner});
+    });
+
+    test('the ceiling is the dearest dish, so the fallback stays affordable', () {
+      final config = HuntConfig(
+        dishPriority: [
+          dish('a', 'لوبیا پلو', 350000),
+          dish('b', 'چلو گوشت', 500000),
+        ],
+      );
+
+      expect(config.toRule(id: 'r1', account: 'a1').maxPriceRial, 500000);
+    });
+  });
+}
