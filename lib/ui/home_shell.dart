@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+
+import '../platform/platform_services.dart';
 import 'app_state.dart';
 import 'screens/accounts_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -12,9 +14,16 @@ import 'screens/reservations_screen.dart';
 /// and a student checks it a few times a day, so the bar keeps them one tap away
 /// instead of behind a menu.
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.state});
+  const HomeShell({
+    super.key,
+    required this.state,
+    required this.services,
+  });
 
   final AppState state;
+
+  /// The platform services, so the screens can reach the portal.
+  final AppServices services;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -22,6 +31,18 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // The platform can ask for a hunt; a deep link opens the diagnostics screen.
+    widget.services.bridge.onHuntRequested((payload) {
+      if (!mounted) return;
+      if (payload == 'diagnostics') {
+        setState(() => _index = 3);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

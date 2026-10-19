@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/account.dart';
+import '../../core/session.dart';
 import '../app_state.dart';
 import '../widgets.dart';
 
@@ -72,10 +73,41 @@ class _AccountsScreenState extends State<AccountsScreen> {
     );
     if (result == null) return;
 
-    await widget.state.upsertAccount(
-      studentId: result.studentId,
-      alias: result.alias,
-    );
+    try {
+      await widget.state.upsertAccount(
+        studentId: result.studentId,
+        alias: result.alias,
+      );
+
+      // The password goes to the Keystore, never to the account list.
+      if (result.password != null) {
+        final account = widget.state.accounts.firstWhere(
+          (a) => a.studentId == result.studentId,
+        );
+        await widget.state.saveCredentials(
+          account.id,
+          Credentials(
+            studentId: result.studentId,
+            password: result.password!,
+          ),
+        );
+      }
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('حساب «${result.studentId}» ذخیره شد.')),
+      );
+    } catch (e) {
+      // A failed save must be visible. Silently dropping it would leave the
+      // user believing the account is stored when it is not.
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('ذخیره حساب ناموفق بود: $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
   }
 
   Future<void> _editAccount(BuildContext context, SavedAccount account) async {
@@ -207,10 +239,14 @@ class _AccountTile extends StatelessWidget {
 
 /// The result of the account dialog.
 class _AccountDraft {
-  const _AccountDraft({required this.studentId, this.alias});
+  const _AccountDraft({required this.studentId, this.alias, this.password});
 
   final String studentId;
   final String? alias;
+
+  /// The portal password. Optional: an account can be added without one and
+  /// the credentials can be filled in later.
+  final String? password;
 }
 
 /// The add/edit dialog.
@@ -228,11 +264,13 @@ class _AccountDialogState extends State<_AccountDialog> {
       TextEditingController(text: widget.initial?.studentId ?? '');
   late final TextEditingController _alias =
       TextEditingController(text: widget.initial?.alias ?? '');
+  late final TextEditingController _password = TextEditingController();
 
   @override
   void dispose() {
     _studentId.dispose();
     _alias.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -264,6 +302,16 @@ class _AccountDialogState extends State<_AccountDialog> {
               helperText: 'اگر خالی بماند، نام واقعی و سپس شماره دانشجویی نشان داده می‌شود.',
             ),
           ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _password,
+            obscureText: true,
+            textDirection: TextDirection.ltr,
+            decoration: const InputDecoration(
+              labelText: 'گذرواژه (اختیاری)',
+              helperText: 'برای ورود خودکار لازم است. به‌صورت رمزگذاری‌شده ذخیره می‌شود.',
+            ),
+          ),
         ],
       ),
       actions: [
@@ -276,9 +324,11 @@ class _AccountDialogState extends State<_AccountDialog> {
             final id = _studentId.text.trim();
             if (id.isEmpty) return;
             final alias = _alias.text.trim();
+            final password = _password.text;
             Navigator.of(context).pop(_AccountDraft(
               studentId: id,
               alias: alias.isEmpty ? null : alias,
+              password: password.isEmpty ? null : password,
             ));
           },
           child: Text(isEdit ? 'ذخیره' : 'افزودن'),

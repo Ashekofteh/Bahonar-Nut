@@ -1074,3 +1074,72 @@ lists, and the confirmation dialog before a purchase. The **notification
 composer currently emits no currency at all** (verified), so the digest carries
 a price without displaying one — which is correct, and the detail screen is
 where a Toman price belongs.
+
+## 2026-10-19 — Session 18: Android platform layer
+
+### F26 — The Keystore rejects a caller-supplied GCM IV unless the key allows it
+
+```
+NONCE is present, although CALLER_NONCE is not present
+Error::Km(r#CALLER_NONCE_PROHIBITED)
+```
+
+A key created with the default `setRandomizedEncryptionRequired(true)` **refuses**
+a caller-supplied IV. Since the IV must be stored alongside the ciphertext (the
+platform cannot generate it for us if we want to keep it), the key must be created
+with `setRandomizedEncryptionRequired(false)`.
+
+This does not weaken the encryption: the IV is still random and unique per
+message, which is what GCM requires. It only means the platform does not choose
+the IV.
+
+**The failure was silent** — the write threw, was swallowed by the platform
+channel, and the app appeared to save an account with no password. Found only by
+reading logcat, because the account was there and the credentials were not.
+
+### F27 — A silent platform failure is the worst kind
+
+The symptom was: the account appeared in the list, but no credentials were
+stored. Two separate causes compounded:
+
+1. `_call` in the platform bridge was **calling itself** instead of the channel,
+   producing a stack overflow on the first platform call. (A regex rewrite had
+   clobbered the original `invokeMethod`.) Every write silently failed.
+2. The Keystore rejected the IV, and the rejection was swallowed.
+
+Both are now fixed, and the fix that matters is structural: **platform calls
+surface their failures.** `PlatformBridge._call` re-throws with the platform's
+message, and the account screen shows the error in a snackbar rather than
+pretending the save worked. A platform failure that is invisible is worse than
+one that crashes, because the user believes their password is stored when it is
+not.
+
+### F28 — On-device integration tests are the only way to test the platform
+
+The platform stores cannot be tested on the VM: the Keystore, the preferences
+and the notification manager exist only on Android. `integration_test/
+platform_store_test.dart` runs **on the device** against the real method
+channel, so it proves the wiring works rather than proving a mock works.
+
+It caught the stack overflow immediately, and it passes now: the Keystore
+round-trips, the preferences round-trip, and the permission calls answer.
+
+### Verified on device
+
+- The account **survives a force-stop and restart**, alias intact.
+- The secure store contains ciphertext only:
+  `cred.acc-...=RfJ5axuDmjO6sG4a:ajJWqio36DmlFZW/eKZ114YsZSy313M3KG36XDjRVggbSluCPA==:v1`
+  — base64 IV, ciphertext, format version. The plaintext password appears
+  nowhere on disk.
+- The account list renders in Persian RTL with the resolved name.
+
+### A note on driving a form on a device
+
+Tapping through the add-account dialog on the emulator was unreliable: the soft
+keyboard moves the layout, so every tap coordinate has to be re-derived, and the
+screenshot is 1080px wide while it is *displayed* at 923px, so coordinates need
+scaling by 1.17. Several attempts silently missed the button.
+
+The reliable approach: drive the *logic* with the widget tester (deterministic),
+and use the on-device integration test for the *platform* (which is what only a
+device can prove). Manual tapping is for confirming rendering.

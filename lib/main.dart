@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'core/account_store.dart';
+import 'platform/platform_services.dart';
 import 'ui/app_state.dart';
 import 'ui/home_shell.dart';
 import 'ui/theme.dart';
@@ -12,25 +12,32 @@ void main() {
 
 /// The application root.
 class BahonarNutApp extends StatefulWidget {
-  const BahonarNutApp({super.key});
+  const BahonarNutApp({super.key, this.services});
+
+  /// Injected in tests; built for Android in the app.
+  final AppServices? services;
 
   @override
   State<BahonarNutApp> createState() => _BahonarNutAppState();
 }
 
 class _BahonarNutAppState extends State<BahonarNutApp> {
+  late final AppServices _services;
   late final AppState _state;
 
   @override
   void initState() {
     super.initState();
-    // The stores are in-memory for now. The platform-backed ones (Keystore for
-    // credentials, shared preferences for the account list) land with the
-    // Android shell; the domain is already written against the interfaces, so
-    // swapping them is a one-line change here.
+
+    // On a device this is the Keystore-backed, preference-backed set. In a
+    // test the services can be supplied, so the UI can be driven without a
+    // platform.
+    _services = widget.services ?? AppServices.forAndroid();
+
     _state = AppState(
-      accountStore: InMemoryAccountStore(),
-      reminderConfigStore: InMemoryReminderConfigStore(),
+      accountStore: _services.accountStore,
+      reminderConfigStore: _services.reminderConfigStore,
+      credentialStore: _services.credentialStore,
     )..load();
   }
 
@@ -57,7 +64,7 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home: HomeShell(state: _state),
+      home: HomeShell(state: _state, services: _services),
     );
   }
 }

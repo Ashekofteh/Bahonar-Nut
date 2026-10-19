@@ -12,8 +12,10 @@ import '../core/account.dart';
 import '../core/account_store.dart';
 import '../core/local_meal_store.dart';
 import '../core/models.dart';
+import '../core/platform_stores.dart';
 import '../core/portal.dart';
 import '../core/reminder.dart';
+import '../core/session.dart';
 import '../core/spend_summary.dart';
 
 /// The app's shared state.
@@ -21,6 +23,7 @@ class AppState extends ChangeNotifier {
   AppState({
     required this.accountStore,
     required this.reminderConfigStore,
+    this.credentialStore,
     LocalMealStore? mealStore,
     this._transactions = const [],
   }) : mealStore = mealStore ?? LocalMealStore();
@@ -30,6 +33,10 @@ class AppState extends ChangeNotifier {
 
   /// Where the reminder configuration is persisted.
   final ReminderConfigStore reminderConfigStore;
+
+  /// Where credentials are persisted, encrypted. Null when the app has no
+  /// secure store — in tests, or before the platform layer is wired.
+  final SecureCredentialStore? credentialStore;
 
   /// The local mirror of what the student holds. The reminders read from here,
   /// so they work offline.
@@ -136,6 +143,22 @@ class AppState extends ChangeNotifier {
 
   int _idCounter = 0;
 
+  /// Stores the credentials for an account, encrypted.
+  ///
+  /// The password goes only to the secure store — never to the account list
+  /// and never to the plain store, where the rest of the account data lives.
+  Future<void> saveCredentials(
+    AccountId accountId,
+    Credentials credentials,
+  ) async {
+    await credentialStore?.write(accountId, credentials);
+    notifyListeners();
+  }
+
+  /// Whether an account has stored credentials.
+  Future<bool> hasCredentials(AccountId accountId) async =>
+      await credentialStore?.read(accountId) != null;
+
   /// Sets or clears an account's alias.
   Future<void> setAlias(AccountId accountId, String? alias) async {
     final index = _accounts.indexWhere((a) => a.id == accountId);
@@ -159,8 +182,12 @@ class AppState extends ChangeNotifier {
   }
 
   /// Deletes an account.
+  ///
+  /// The credentials go too: leaving a password behind for an account the
+  /// user deleted would be a privacy failure.
   Future<void> removeAccount(AccountId accountId) async {
     await accountStore.remove(accountId);
+    await credentialStore?.delete(accountId);
     _accounts = await accountStore.loadAll();
     notifyListeners();
   }

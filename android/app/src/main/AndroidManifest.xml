@@ -1,4 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Reminders need to post notifications (Android 13+ asks the user). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Exact alarms, so a 10:30 reminder arrives at 10:30 and not at 11:20.
+         Requested in-app with an explanation. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Re-arm the alarms after a reboot, which clears them. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The hunt runs as a foreground service so it survives Doze. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="باهنر نُت"
         android:name="${applicationName}"
@@ -32,6 +46,30 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- The hunt service, and the alarm receiver that starts it. -->
+        <service
+            android:name=".HuntService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".ReminderAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="ir.ac.uk.bahonar_nut.REMINDER" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Re-arm the alarms after a reboot; Android clears them. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
