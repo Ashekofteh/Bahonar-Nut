@@ -381,3 +381,89 @@ All probing above was read-only: GETs plus the page's own *filter* postbacks
 (date navigation, and `btnFoodReload`, which only populates a dropdown). **No
 reservation, purchase, cancellation or listing was submitted.** The credentials
 were used for login only and are not stored by any of this tooling.
+
+## 2026-10-19 — Session 12: Live write-path capture (account 401157013)
+
+**Request:** book lunch for **Mehr 28, 1405**, dish **Akbar Joojeh** (چلو اکبرجوجه),
+preferring hall مرکزی (1) and falling back to فنی (2).
+
+**Outcome: the reservation was REFUSED, and the capture proves exactly why.**
+
+### The date is locked
+
+Mehr 28, 1405 = **Tuesday 2026-10-20**. The cutoff is 20:00 two days prior =
+**20:00 on Mehr 26 (2026-10-16)** — three days before the run. The portal
+renders that row's checkbox `disabled` and **silently ignores** any reservation
+posted for it: no error message, no alert box, no change. The response page is
+byte-for-byte equivalent in the relevant row.
+
+The POST was verified to be correctly targeted before drawing that conclusion —
+the `name` attribute (`$ctl05$chkReserve`) is exactly the 1405/07/28 row and
+`drpFood=62738` is exactly چلو اکبرجوجه, and the same page shows
+`$ctl04$chkReserve` = 1405/07/27 and `$ctl06$chkReserve` = 1405/07/29. So this
+is the server refusing a locked row, not a client-side targeting error.
+
+### The cutoff rule confirmed to the minute, live
+
+In the same page, the editable rows are exactly the ones the rule predicts:
+
+| Date | Weekday | Editable? | Cutoff (20:00 two days prior) |
+|---|---|---|---|
+| 1405/07/25 | Sat | no | 1405/07/23 |
+| 1405/07/26 | Sun | no | 1405/07/24 |
+| 1405/07/27 | Mon | no | 1405/07/25 |
+| **1405/07/28** | **Tue** | **no** | **1405/07/26** — 3 days ago |
+| 1405/07/29 | Wed | no | 1405/07/27 — 2 days ago |
+| **1405/07/30** | **Thu** | **YES** | 1405/07/28 — tomorrow, not yet passed |
+| 1405/08/01 | Fri | no (no service) | — |
+
+**1405/07/30 is the only editable row in the current week**, because its cutoff
+is 1405/07/28 at 20:00, which had not yet arrived at capture time
+(2026-10-19 17:56 UTC = 2026-10-19 21:26 portal-local). Everything earlier had
+passed. This is the 20:00-two-days-prior rule observed directly, not inferred.
+
+### Week +1 and beyond
+
+Next week (1405/08/02..08/08) is **fully editable** (Saturday..Thursday
+editable, Friday closed). Weeks +2 and +3 (1405/08/09 onwards) are **not yet
+published** — every row renders `-` and no menu exists. So the publish horizon
+is roughly one week ahead.
+
+**Akbar Joojeh (62738) appears only in the 1405/07/28 lunch row.** In the
+published next week the lunches are different dishes entirely (63037 چلو خورشت
+قیمه, 63046 چلو جوجه کباب, 63060 چلوخورشت سبزی, 63072 زرشک پلو با مرغ, 63075 چلو
+کباب کوبیده, 63084 چلو خورشت بادمجان, 63094 چلو کباب کوبیده مرغ). So there is
+**no bookable Akbar Joojeh** on this account: the only date serving it is the
+one whose cutoff has passed.
+
+### Write-path mechanics (now known, from the captured POST)
+
+The reservation is a single form POST to `Reservation/Reservation.aspx` with:
+
+| Field | Value for 1405/07/28 lunch |
+|---|---|
+| `__VIEWSTATE` / `__VIEWSTATEGENERATOR` | from the page the row was read from |
+| `<grid>$ctl05$chkReserve` | `on` |
+| `<grid>$ctl05$drpSelf` | hall id — `1` = مرکزی, `2` = فنی |
+| `<grid>$ctl05$drpFood` | option id — `62738` = چلو اکبرجوجه |
+| `<grid>$ctl05$drpFoodCount` | `1` |
+| `ctl00$cphMain$btnSaveLunch` | `ذخیره` |
+
+Notes:
+- `__EVENTVALIDATION` is absent (as recon found), so no validation token to echo.
+- `__EVENTTARGET`/`__EVENTARGUMENT` are sent empty for a save (they are used
+  for navigation postbacks such as `imgbtnNextWeek`).
+- **The control `name` index and the `id` index differ** (`$ctl05$` vs
+  `_chkReserve_3`): the `name` index counts data rows, the `id` index counts
+  rendered rows including the header. Parsing must use `name`, which is what
+  the POST sends.
+- The server's own error channel is `cphMain_alertBoxValue` (empty here — a
+  locked row is rejected *silently*).
+
+### Account state observed
+
+- Profile name: **رضا شريفي** (Reza Sharifi), id 401157013.
+- Credit: **1,000,000 Rial** (the earlier account had 225,000).
+- Already held: breakfast 1405/07/27, breakfast 1405/07/29, dinner 1405/07/28
+  (خوراک سالاد الویه,سبزی, سوپ جو 350000).
+- Cafeteria credit: 0 (legacy field, always zero — confirms the earlier note).

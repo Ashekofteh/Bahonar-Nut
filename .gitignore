@@ -18,6 +18,9 @@ build/
 # Reconnaissance artifacts — NEVER commit: session cookies, viewstate dumps,
 # CAPTCHA images, authenticated page snapshots may contain personal data.
 recon/
+# Live capture artifacts — same reason: authenticated page snapshots,
+# viewstate dumps and session cookies.
+captures/
 *.pkl
 auth_jar.txt
 cookies.txt
