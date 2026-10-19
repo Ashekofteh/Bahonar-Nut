@@ -869,3 +869,79 @@ distinct from "the server said no".
 **This is the same trap as the silent refusal of a locked date** (F22 in session
 12): the portal's failure modes are frequently silent, so the client has to
 establish ground truth by re-reading rather than waiting for a message.
+
+## 2026-10-19 — Session 17: Product-owner requirements, and the offline-first shift
+
+Five requirements were raised. Recorded here what was verified, decided, and
+built.
+
+### Requirement 1 — one meal per slot per day: VERIFIED, and it is a CLIENT rule
+
+The rule holds, but **the portal enforces none of it** (F21/F22 above). So the
+app must. Implemented in `lib/core/meal_invariant.dart`:
+
+- `MealLedger.check()` answers "may this meal be held?" **without** holding it,
+  for the pre-flight before a confirm action.
+- `MealLedger.hold()` records a meal, and on a conflict **keeps the existing
+  meal** and returns a denial. A denied hold must never displace what is
+  already held.
+- The conflict reason distinguishes the two directions, so the UI can say
+  "you already have a weekly reservation for that lunch" rather than a generic
+  refusal.
+
+**A bug the tests caught, worth recording:** the ledger first keyed meals by
+date+slot alone, so **accounts shared slots** — account A's lunch blocked
+account B's lunch. Invisible with one account, and wrong for an app whose whole
+purpose is multiple students on one phone. The key is now
+`account | date | slot`.
+
+### Requirement 2 — offline-first reminders: the local store
+
+`lib/core/local_meal_store.dart` is the local mirror the reminders read, so
+firing a notification never needs a portal login.
+
+- `put` / `remove` / `replaceForAccount` — updated whenever the app completes a
+  booking, a basket purchase, or a cancellation.
+- `toLedger()` — a `MealLedger` view, so the **offline mirror enforces the same
+  one-meal rule** as the online path. A cached weekly reservation blocks a
+  basket purchase even with no network.
+- `prune(now)` — retention, implemented below.
+
+**Design note:** the local store is the *authority for reminders* and the portal
+is the *authority for truth*. When the two disagree, the live portal wins and
+the store is corrected — but only on a live check, which is opt-in.
+
+### Requirement 3 — live portal sync as an opt-in toggle
+
+Agreed and adopted: the reminder reads the **local store** by default, and a
+settings toggle enables the live portal reconciliation before sending. Off by
+default, as specified. The toggle also implies the cost model: a live check
+costs a login plus N reads, so it is opt-in for battery and ban-risk reasons,
+not for correctness.
+
+### Requirement 4 — resource and storage hygiene
+
+**RAM:** the meal store holds only held meals — a few dozen records at most.
+The digest is built per fire and discarded. No unbounded collections were
+introduced; the `SnipeLedger` (audit log) is already capped at 500 entries and
+the tombstone set prunes itself.
+
+**Disk:** retention is **14 days**, chosen because the reminder's furthest
+horizon is the coming week, so nothing older can affect any notification.
+Pruning is by the **meal's date**, not by when it was cached — so a record for a
+future week cached early is not wrongly dropped, and a stale record for a past
+week is dropped promptly regardless of when it was written. A hard cap of 400
+records backs it up, dropping the oldest by date, so a pathological state cannot
+grow without bound.
+
+**Both prunes are idempotent** and return the number of records removed, so the
+app can log the pruning.
+
+### Requirement 5 — the finance dashboard: a good idea, with one correction
+
+Discussed in full in the reply to the product owner. Summary: the data is
+already there (the transaction ledger), the chart is cheap, and it is the one
+screen that makes the app feel like a product rather than a script. The
+correction is that the ledger's **main grid holds only the newest transaction**
+(F20) — the history lives in the `grdContent_grdDetail_N` sub-grids, so a
+dashboard reading the main grid would show one transaction and a wrong total.
