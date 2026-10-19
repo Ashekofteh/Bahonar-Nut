@@ -529,3 +529,79 @@ price. Parsers must take the price from the option text.
 | dinner | 1405/08/02 | خوراک مرغ بندری,گوجه, خیارشور | 350,000 |
 
 Breakfast is the cheapest, and the account's 500,000 credit covers it.
+
+## 2026-10-19 — Session 14: The book-and-cancel cycle, proven end-to-end
+
+Requested: book any meal for next week with the account's balance, then cancel
+it. One cycle only, to avoid flagging the account.
+
+**Result: SUCCESS, with no collateral damage. The account is exactly as it was.**
+
+| Step | Result |
+|---|---|
+| Booked | 1405/08/03 breakfast, `پنیر/خیار/نان/چای/قند`, hall مرکزی (Central) |
+| Charged | 150,000 Rial — credit 500,000 -> 350,000 |
+| Cancelled | uncheck the row + `btnSaveBreakfast` |
+| Refunded | credit back to **500,000** (original balance) |
+| Collateral | **NONE** — all four pre-existing reservations intact |
+
+Verified independently afterwards with a fresh login and fresh GET: credit
+500,000, next week holds 0 reservations, current week holds its original 4
+(breakfast 07/27, breakfast 07/29, lunch 07/30, dinner 07/28).
+
+### The three things that had to be right
+
+**1. The post must carry `__VIEWSTATE`.** A post without it is processed against
+no state and **silently does nothing** — 200 OK, no error, no reservation, no
+money moved. This cost one cycle to find. The viewstate is ~52KB and carries
+the grid state.
+
+**2. The full form state must be posted, not one row.** The page holds three
+grids of seven rows. An ASP.NET checkbox *absent* from a POST reads as
+**unchecked**. Posting only the target row would present every other checked
+row as unchecked and cancel the account's other meals. So the post is the
+COMPLETE current form state with exactly one field changed — which is what a
+browser sends.
+
+**3. Which week a post affects is decided by the viewstate, not the URL.** The
+grid control names are **identical in every week** (`$ctl02$chkReserve` ..
+`$ctl08$chkReserve` — the index is the ROW position, not the date). So the
+week a post touches comes from the viewstate's encoded week. Posting the
+next week's viewstate therefore operates on next week's rows and leaves the
+current week untouched. Empirically confirmed: the booking left all four
+current-week reservations intact.
+
+### F13 — A row's "checked" state is NOT the same as "held"
+
+The response to a booking renders **all three grids' rows for that date as
+`checked`**, but only the booked one is real. The two reliable signals of a
+genuinely held meal are:
+
+- the **مبلغ خرید** cell is non-zero (150,000 for the booked row; 0 for the
+  merely-echoed rows), and
+- the row carries the green **`imgStaus`** icon with `title="رزرو شده"`.
+
+`checked` alone is unreliable, and treating it as truth would make the app
+believe it holds three meals when it holds one — and, worse, would re-post
+those phantom checkboxes on a cancel, **booking two unwanted meals**.
+
+### F14 — The weekly cancel is "uncheck the row and save again"
+
+There is no cancel button on the reservation hub. The mechanism is the standard
+ASP.NET grid pattern: uncheck the row's `chkReserve` and post with that grid's
+save button (`btnSaveBreakfast` / `btnSaveLunch` / `btnSaveDinner`). The
+transaction ledger then records an `انصراف از رزرو غذا` (withdrawal) row
+alongside the original `رزرو غذا` (booking) row.
+
+**Constraint:** this only works while the date is still editable. A locked date
+renders `disabled` and cannot be unchecked — so a cancellation window is
+bounded by the same 20:00-two-days-prior cutoff as booking. **A meal that
+passes its cutoff can no longer be given back.** That is a product fact the
+reminder feature should surface: booking a meal for a date that is about to
+lock is an irreversible commitment.
+
+### F15 — The price is in the option text, not the price column
+
+The weekly grid's مبلغ خرید cell reads `0` for unbooked rows. The menu price
+is embedded in the food option text (`... 500000 ریال`). Parsers must take the
+price from the option text.
