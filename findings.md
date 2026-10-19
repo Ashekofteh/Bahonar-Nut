@@ -945,3 +945,67 @@ screen that makes the app feel like a product rather than a script. The
 correction is that the ledger's **main grid holds only the newest transaction**
 (F20) — the history lives in the `grdContent_grdDetail_N` sub-grids, so a
 dashboard reading the main grid would show one transaction and a wrong total.
+
+## 2026-10-19 — Session 18: The finance dashboard metric
+
+The product owner settled both open questions:
+
+1. **Filters:** accounts and meal slots, **both multi-select**, combinable.
+2. **Metric:** the **monetary price of the meals reserved** — not top-ups or
+   deposits.
+
+### F24 — The ledger is an event log, and a naive sum overstates by 30%
+
+The transaction history is a sequence of events, not a set of possessions. The
+same (date, slot) can appear several times. From the live ledger:
+
+```
+1405/07/30 lunch  -> [رزرو غذا, انصراف از رزرو غذا, رزرو غذا]
+                     booked,  released,  booked again
+1405/08/03 breakfast -> [انصراف از رزرو غذا, رزرو غذا]
+                     released, booked again
+```
+
+**The counting rule: for each (account, date, slot), only the most recent event
+counts.** If it is a booking the meal is held and its amount is included; if it
+is a withdrawal the meal was given up and is excluded.
+
+**Document order is recency order** — verified: the newest transaction
+(1405/08/03, a future date) appears *second* in the document, not last. So
+"most recent" means "first seen", not "last seen". Getting this backwards would
+silently produce wrong totals.
+
+On the live history:
+
+| | Rial |
+|---|---|
+| Naive sum of every booking row | **2,150,000** |
+| Correct (newest event per key) | **1,500,000** |
+
+A 30% overstatement, from counting one lunch twice and counting a released
+breakfast as held. Verified live through the adapter: 14 transactions -> 10
+meals held, 3,300,000 Rial, 1 released meal excluded.
+
+### F25 — The metric is "meals reserved", not "money spent"
+
+The ledger records meals **reserved**. It does not record whether they were
+**eaten**. A meal reserved and forgotten still counts here — and the portal
+separately charges a penalty for it (Announcement 2090, "unsold basket listings
+incur a penalty").
+
+So the dashboard should label the figure **"meals reserved"** (وعده‌های رزروشده)
+rather than "spending". The number is the cost of the meals held; it is not a
+bank statement, and top-ups are a separate flow the user asked to exclude.
+
+### Implementation
+
+`lib/core/spend_summary.dart`:
+
+- `SpendFilter` — accounts and slots, both multi-select, combinable. **An empty
+  set means "all"**, so the dashboard opens unfiltered and a filter with nothing
+  selected does not accidentally show nothing.
+- `summarise(transactions, filter)` — pure; the newest event per
+  (account, date, slot) wins.
+- `SpendSummary` — `totalRial`, `totalMeals`, `averageMealRial`, `bySlot`,
+  `byAccount`, and `excludedWithdrawn` so the UI can say "excludes N released
+  meals" instead of silently showing a smaller total.

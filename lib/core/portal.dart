@@ -124,6 +124,7 @@ class LoginFailure {
 /// A transaction recorded in the account's ledger.
 class Transaction {
   const Transaction({
+    required this.accountId,
     required this.type,
     required this.foodName,
     required this.slot,
@@ -132,6 +133,11 @@ class Transaction {
     required this.count,
     required this.amountRial,
   });
+
+  /// Which account the transaction belongs to. The portal serves one account
+  /// per session, so this is set by the adapter rather than parsed from the
+  /// page.
+  final AccountId accountId;
 
   /// The portal's transaction type, e.g. `رزرو غذا` (booking) or
   /// `انصراف از رزرو غذا` (withdrawal).

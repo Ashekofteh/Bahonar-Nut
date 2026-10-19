@@ -207,7 +207,10 @@ class CullinanPortalClient implements PortalClient {
   @override
   Future<List<Transaction>> fetchTransactions(Session session) async {
     final page = await transport.get(session.account, _Paths.transactions);
-    return CullinanParser.parseTransactions(page.body);
+    return CullinanParser.parseTransactions(
+      page.body,
+      accountId: session.account,
+    );
   }
 
   @override

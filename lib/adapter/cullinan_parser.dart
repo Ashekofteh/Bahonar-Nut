@@ -214,7 +214,10 @@ abstract final class CullinanParser {
   /// full history in `grdContent_grdDetail_N` sub-grids (verified: 13 rows
   /// before a purchase, 14 after). Reading only the main grid would make the
   /// account look like it had a single transaction ever.
-  static List<Transaction> parseTransactions(String html) {
+  static List<Transaction> parseTransactions(
+    String html, {
+    AccountId accountId = '',
+  }) {
     final out = <Transaction>[];
 
     // The detail sub-grids carry the history; the main grid carries the newest
@@ -231,20 +234,25 @@ abstract final class CullinanParser {
         dotAll: true,
       ).firstMatch(html);
       if (table == null) continue;
-      out.addAll(_transactionRows(table.group(1)!));
+      out.addAll(_transactionRows(table.group(1)!, accountId));
     }
 
     if (out.isEmpty) {
       final main = RegExp('<table[^>]*id="[^"]*grdContent"[^>]*>(.*?)</table>',
               dotAll: true)
           .firstMatch(html);
-      if (main != null) out.addAll(_transactionRows(main.group(1)!));
+      if (main != null) {
+        out.addAll(_transactionRows(main.group(1)!, accountId));
+      }
     }
 
     return out;
   }
 
-  static List<Transaction> _transactionRows(String tableBody) {
+  static List<Transaction> _transactionRows(
+    String tableBody,
+    AccountId accountId,
+  ) {
     final out = <Transaction>[];
 
     for (final row in RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true)
@@ -257,6 +265,7 @@ abstract final class CullinanParser {
       if (cells[0].trim().isEmpty) continue;
 
       out.add(Transaction(
+        accountId: accountId,
         type: cells[0].trim(),
         foodName: cells[1].trim(),
         slot: _ledgerSlots[cells[2].trim()],
