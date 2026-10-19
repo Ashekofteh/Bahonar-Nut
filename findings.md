@@ -766,3 +766,35 @@ Central was the only hall offering Akbar Joojeh — so a double-buy was not
 possible even in principle.
 
 The account now has **0 Rial**, and the purchase is final.
+
+### F20 — The ledger's main grid shows only the MOST RECENT transaction
+
+`MyCullinan/MyTransaction.aspx` has a main grid `grdContent` plus one
+`grdContent_grdDetail_N` sub-grid per transaction. The **main grid holds a
+single row — the latest transaction** — while the full history lives in the
+detail sub-grids (13 rows before, 14 after the purchase).
+
+This is a trap for a "what did I just buy" check: reading only the main grid
+would make it look like the account had exactly one transaction in its life,
+and would make a diff against it useless. The app's transaction history must
+read the detail sub-grids.
+
+(Incidentally, the main grid's "before" row is the `انصراف از رزرو غذا`
+withdrawal of the 1405/08/03 breakfast from session 14 — so the ledger's most
+recent entry was the cancel, and the purchase is now the most recent entry.)
+
+### Confirmed state of the purchase, from the captured pages
+
+| | Before | After |
+|---|---|---|
+| Buy page, lunch row | `checked=false disabled=false amount=0` | `checked=true disabled=true amount=500000` |
+| Buy page, breakfast row | `checked=false disabled=false amount=0` | unchanged |
+| Buy page, dinner row | `checked=false disabled=true amount=0` | unchanged |
+| Weekly reservation grids | 4 meals held | **4 meals held — identical** |
+| Ledger detail sub-grids | 13 rows | 14 rows, newest = the purchase |
+| Credit | 500,000 | **0** |
+
+The basket grid has **no date column** — it is one row per MEAL for the
+page's filtered date. An analysis that assumed a date column would silently
+read nothing, which is how a wrong conclusion gets made; the date comes from
+the page's `txtDate` field instead.
