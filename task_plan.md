@@ -21,8 +21,8 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | # | Phase | Status | Blocked by |
 |---|-------|--------|-----------|
 | 0 | Recon — inspect portal, map auth + endpoints | `complete` | — |
-| 1 | Core — domain models, ranker, storage, transport | `partial` | — |
-| 2 | Adapter — Cullinan `PortalClient` + `ServerClock` | `partial` | Phase 1 |
+| 1 | Core — domain models, ranker, storage, transport | `read done` | — |
+| 2 | Adapter — Cullinan `PortalClient` + `ServerClock` | `read done` | Phase 1 |
 | 3 | Sessions — `SessionManager`, per-account jars, silent re-login | `core done` | Phase 2 |
 | 4 | Sniper — scheduler, state machine, ledger, dry-run | `core done` | Phase 3 |
 | 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `pending` | Phase 3 |
@@ -32,9 +32,14 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | 9 | Reminders platform — scheduler, notifications, screens | `pending` | Phase 5, 8 |
 | 10 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 4, 9 |
 
-**Phase 2 progress:** CAPTCHA solver complete and validated (100% on 90 live
-samples), live read-only login proven. Remaining in phase 2: the full
-`PortalClient` implementation for basket/reservations/balance/claim.
+**Phase 2 progress:** the full `PortalClient` is implemented and live-proven
+(read-only) — login via the on-device solver, server time, balance, offerings,
+reservations, basket. Remaining in phase 2: the **write** paths (claim / reserve
+/ cancel), which are typed and parsing-verified but have not been exercised
+against the live portal, because doing so would spend money or move a meal.
+
+**Transport** (phase 1 remainder) is done: per-account cookie jars, Date-header
+capture, explicit redirect following, HTML parsing.
 
 **Phase 7 is Android-free** — pure Dart, VM-testable, parallelisable with 3–5.
 

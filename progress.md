@@ -467,3 +467,71 @@ helpers (existing class, engine's direct requirement).
 ### Commit
 
 `5eb80a5` — phase 4 snipe engine
+
+## 2026-10-19 — Session 11: Transport + Portal Adapter (Phases 3a & 2)
+
+**Goal:** turn the recon into working code, and validate it against the live
+portal without touching money or meals.
+
+### The correction that mattered
+
+The recon snapshot had led to a wrong model of the Food Basket. `FoodBasketBuy.aspx`
+is **not** a marketplace of other students' meals — it renders **the student's own
+held meals** for one date, and the purchasable items live in each row's **food
+dropdown**, one `<option>` per listing. A lunch row was seen carrying two options
+(62726, 62729), each with its own menu id and price.
+
+So a listing is `(date, slot, optionId)` — a **composite identity**, not a single
+portal id. That changed `Listing.id`, which the tombstone set, the ledger and the
+ranker all key on, so it was settled **before** the adapter was written rather
+than retrofitted across three modules. `Listing.compositeListingId` builds it in
+one place.
+
+### Delivered
+
+| Module | Contents |
+|---|---|
+| `lib/transport/cookie_jar.dart` | Per-account jars, HTTP-date parsing |
+| `lib/transport/http_transport.dart` | GET/POST, Date-header capture, explicit redirects |
+| `lib/transport/html_parsing.dart` | Minimal HTML parsing (selects, rows, inputs, Rial) |
+| `lib/adapter/cullinan_parser.dart` | Page -> domain objects, pure functions |
+| `lib/adapter/cullinan_client.dart` | The frozen `PortalClient` contract |
+
+**325 pure-Dart tests + 1 widget test pass; analyzer clean.**
+
+### Live validation (read-only)
+
+```
+1. challenge fetched: digits4 (3400 bytes)   solved: 4489
+2. LOGIN OK - cookies: [ASP.NET_SessionId, keyId, __AntiXsrfToken]
+3. server time: 2026-10-19 13:53:33.000Z
+4. balance: 225000 Rial
+5. reservations held: 6
+6. offerings on 2026-10-19: 5
+7. basket listings: 3
+     2026-10-19|breakfast|62725  شیر/حلواشکری/نان/چای/قند (150000)
+     2026-10-19|lunch|62726      چلو خورشت قیمه,ماست, میوه (350000)
+     2026-10-19|lunch|62729      چلو خورشت مسما بادمجان,سالاد فصل, میوه (350000)
+```
+
+### Errors
+
+| Error | Attempt | Resolution |
+|---|---|---|
+| **Login failed 4x against the live portal** | 1–4 | **`package:http`'s `Client.send` does NOT follow redirects** — the flag only applies to the convenience methods. The portal answers a successful login with a 302, so the adapter read the redirect page, judged success as failure, and reported "login failed". Redirects are now followed explicitly. This was the exact bug the earlier probe had already solved by following redirects, and I reintroduced it by assuming the flag worked |
+| First hand-written Jalali→Gregorian algorithm was wrong (returned July for October) | 1 | **Derived the inverse by searching the already-verified `toJalali`** instead of writing a second algorithm. The pair is now correct by construction; round-trips tested over a full year, a leap year, and the Nowruz boundary |
+| HTTP-date parser's token-cursor approach was wrong (time is one token, not three) | 1 | Replaced with direct regexes for the three standard formats |
+| `getBytes` issued a *second* request | — | Would have fetched a **different** CAPTCHA than the login POST is judged against, since the portal binds the answer at fetch time. Now goes through the same request path |
+| My parser test expectations were wrong (option ids and dates from the wrong fixture) | 1 | **The parser was right, my test was wrong.** Re-derived expectations from the actual fixture contents |
+| `LoginChallenge.imageBytes` typed `List<int>` | — | Changed to `Uint8List`; the image decoders want bytes. Updated the two affected tests |
+
+### Note on `__AntiXsrfToken`
+
+The token only appeared in the cookie jar **after redirects were followed** —
+because it is set on the page the login redirect lands on. This independently
+confirms the earlier recon correction (the token exists, but only on
+authenticated pages).
+
+### Commit
+
+`2b1d51a` — transport + adapter
