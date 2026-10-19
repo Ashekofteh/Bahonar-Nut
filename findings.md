@@ -1143,3 +1143,52 @@ scaling by 1.17. Several attempts silently missed the button.
 The reliable approach: drive the *logic* with the widget tester (deterministic),
 and use the on-device integration test for the *platform* (which is what only a
 device can prove). Manual tapping is for confirming rendering.
+
+## 2026-10-19 — Session 19: The reminder service and the notification path
+
+### F29 — A reminder reads the LOCAL store, and that is the whole point
+
+`ReminderService` builds its digest from the local meal store, never from a live
+portal read. A reminder must fire with no network, and logging in for every
+notification would be slow, would burn radio time, and would make the app's
+behaviour depend on a third party's uptime. The live portal check stays opt-in,
+per the product owner's decision.
+
+The composers are **pure functions in `lib/core`**, so the Persian message text
+is asserted directly in VM tests rather than verified by eyeballing a rendered
+notification. Two of them:
+
+- `composeReminderText` — what each account is collecting, by meal, with the
+  dish and the hall. A meal with no holder is omitted entirely rather than
+  shown as an empty section.
+- `composeNudgeText` — which accounts are missing a meal next week, and the
+  deadline.
+
+### F30 — The notification channel behaves as specified
+
+Screenshot of the shade on the device confirms:
+- The notification is **grouped and expandable** (`BigTextStyle`), so the
+  multi-account body is visible in full rather than truncated to one line.
+- The channel is `bahonar_nut.reminders`; the foreground-service channel is
+  separate and minimal, so the service's ongoing notification does not
+  compete with a user's reminder.
+- The Persian body renders correctly, right-to-left.
+
+The reminder channel is `IMPORTANCE_HIGH` with **no sound and no vibration**,
+which is what "a standard push notification, not an alarm" means in practice:
+the notification is visible in the shade without ringing.
+
+### A note on the two message builders
+
+There are now two: `composeNotification` (the live digest, from a portal read)
+and `composeReminderText` (the offline one, from the local store). They serve
+different sources and are kept apart deliberately — the offline one must never
+need a session, and the live one can afford the richer data. A test asserts
+neither emits the Rial unit, and that no Latin digits leak into the body.
+
+### Tests
+
+**512 pure-Dart tests + 1 widget test pass; analyzer clean.** Five on-device
+integration tests pass, covering the Keystore round-trip, the preferences
+round-trip, the permission queries, posting a notification, and scheduling and
+cancelling an alarm.

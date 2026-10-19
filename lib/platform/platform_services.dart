@@ -22,6 +22,7 @@ import '../core/session_manager.dart';
 import '../core/time.dart';
 import '../transport/http_transport.dart';
 import 'platform_bridge.dart';
+import 'reminder_service.dart';
 
 /// The portal's base address.
 const String portalBaseUrl = 'https://nut.uk.ac.ir/';
@@ -83,11 +84,16 @@ class AppServices {
 
   /// The local mirror of held meals.
   ///
-  /// Held in memory for now. It is a cache of portal state rather than a
-  /// secret, so it does not need the Keystore, but it does need to survive a
-  /// restart for the offline reminders to work — which is the next thing to
-  /// build, once the store contract for it exists.
+  /// A cache of portal state rather than a secret, so it does not need the
+  /// Keystore, but it does need to survive a restart for the offline reminders
+  /// to work.
   LocalMealStoreHolder get mealStore => LocalMealStoreHolder(plainStore);
+
+  /// The reminder service: builds digests, posts notifications, arms alarms.
+  late final ReminderService reminders = ReminderService(
+    bridge: bridge,
+    mealStore: LocalMealStore(),
+  );
 }
 
 /// Adapts the CAPTCHA solver to the [ChallengeSolver] interface.
