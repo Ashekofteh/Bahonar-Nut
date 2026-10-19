@@ -798,3 +798,74 @@ The basket grid has **no date column** — it is one row per MEAL for the
 page's filtered date. An analysis that assumed a date column would silently
 read nothing, which is how a wrong conclusion gets made; the date comes from
 the page's `txtDate` field instead.
+
+## 2026-10-19 — Session 17: The single-meal invariant, and what the portal enforces
+
+The product owner asserted: *a student can only ever hold one meal per slot per
+day*, across both sources — a weekly reservation and a Food Basket purchase, and
+including two basket purchases of the same slot.
+
+### F21 — The basket dropdown is NOT filtered by what the user already holds
+
+Read-only probe, account 401157013:
+
+```
+=== held per the WEEKLY grid ===
+  1405/07/28: dinner: خوراک سالاد الویه,سبزی, سوپ جو
+  1405/07/30: lunch:  شوید پلو با تن ماهی,لیمو ترش, دلستر
+  1405/08/03: (nothing held)
+
+=== basket offers for 1405/07/30 ===
+  صبحانه   [62758=تخم مرغ2عدد/نان/چای/قند 150000]
+  ناهار    [62759=شوید پلو با تن ماهی,لیمو ترش, دلستر 500000]   <== the SAME option
+                                                                        the account already holds
+```
+
+The basket offered **option 62759 — the exact meal the account already held**,
+for the exact same date and slot. So the *availability list* ignores the
+student's existing holdings.
+
+### F22 — The server does NOT enforce the invariant either
+
+Zero-cost test: the account's balance was **0 Rial** and the cheapest meal costs
+150,000, so no purchase could succeed — the attempt was free of financial
+consequence. One POST attempting to buy the already-held lunch (option 62759,
+1405/07/30):
+
+| Check | Result |
+|---|---|
+| HTTP status | 200 |
+| `cphMain_alertBoxValue` | **EMPTY** — and the container renders `style="display:none;"` |
+| `cphMain_messageBoxValue` | empty |
+| Buy grid lunch row afterwards | `checked=true disabled=true amount=0` — the **echo** of the posted checkbox, not a charge |
+| Credit | 0 → **0** (unchanged) |
+
+**No error, no message, no state change.** The server accepted the request
+silently and did nothing.
+
+**Conclusion: the one-meal-per-slot-per-day rule is a CLIENT-SIDE rule. The
+portal does not enforce it, in either direction.** Nothing on the buy page
+filters by existing holdings, and the server performs no cross-source check.
+
+**Consequence: the app MUST enforce it.** If it does not, the app can:
+- buy a second meal for a slot the student already reserved weekly;
+- buy two basket meals for the same slot and date, and the second purchase would
+  charge again (the ledger would show two `رزرو غذا` rows for the same date and
+  slot) — and since a basket purchase is **irreversible**, that is money spent on
+  a meal the student cannot collect and cannot cancel.
+
+This is the strongest argument yet for the client's pre-flight being right
+*before* the click.
+
+### F23 — The `alertBox` / `messageBox` channels
+
+The portal has two message containers on the reservation and basket pages:
+`cphMain_alertBoxValue` (an error/alert box, `display:none` when empty) and
+`cphMain_messageBoxValue` (a message box). Both were empty after the refused
+attempt. Any adapter that wants to report a server-side refusal must read
+**both**, and must treat "empty" as "the server said nothing", which is
+distinct from "the server said no".
+
+**This is the same trap as the silent refusal of a locked date** (F22 in session
+12): the portal's failure modes are frequently silent, so the client has to
+establish ground truth by re-reading rather than waiting for a message.
