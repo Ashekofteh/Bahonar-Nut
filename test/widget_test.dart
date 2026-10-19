@@ -1,30 +1,50 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:bahonar_nut/main.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:bahonar_nut/main.dart';
-
+/// The app's shell test: it must start, in Persian, right-to-left, with the
+/// four destinations present.
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('the app starts in Persian with all four destinations',
+      (tester) async {
+    await tester.pumpWidget(const BahonarNutApp());
+    await tester.pumpAndSettle();
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // The app bar of the first screen.
+    expect(find.text('حساب‌ها'), findsWidgets);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // The four navigation destinations.
+    expect(find.text('رزروها'), findsOneWidget);
+    expect(find.text('خرج'), findsOneWidget);
+    expect(find.text('یادآورها'), findsOneWidget);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('the layout is right-to-left', (tester) async {
+    await tester.pumpWidget(const BahonarNutApp());
+    await tester.pumpAndSettle();
+
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(app.locale, const Locale('fa', 'IR'));
+    expect(
+      Directionality.of(tester.element(find.byType(NavigationBar))),
+      TextDirection.rtl,
+      reason: 'a Persian app must lay out right-to-left',
+    );
+  });
+
+  testWidgets('the Persian localisations are available', (tester) async {
+    await tester.pumpWidget(const BahonarNutApp());
+    await tester.pumpAndSettle();
+
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(
+      app.localizationsDelegates,
+      contains(GlobalMaterialLocalizations.delegate),
+    );
+    expect(
+      app.localizationsDelegates,
+      contains(GlobalWidgetsLocalizations.delegate),
+    );
   });
 }

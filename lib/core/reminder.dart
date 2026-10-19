@@ -93,6 +93,31 @@ class ReminderConfig {
     final config = slot == ReminderSlot.lunch ? lunch : evening;
     return config.enabled && accountsFor(slot).isNotEmpty;
   }
+
+  /// A copy with the given fields changed.
+  ///
+  /// Every mutation goes through this rather than rebuilding the config by hand.
+  /// Rebuilding it field-by-field is how a change silently drops a setting — and
+  /// the dropped setting here was the **master switch**, which would silently
+  /// turn every reminder back on. A copy method makes that class of mistake
+  /// impossible.
+  ReminderConfig copyWith({
+    bool? masterEnabled,
+    Set<AccountId>? accountIds,
+    ReminderSlotConfig? lunch,
+    ReminderSlotConfig? evening,
+    bool? nextWeekNudgeEnabled,
+    Map<ReminderSlot, Set<AccountId>>? excludedFromSlot,
+  }) =>
+      ReminderConfig(
+        masterEnabled: masterEnabled ?? this.masterEnabled,
+        accountIds: accountIds ?? this.accountIds,
+        lunch: lunch ?? this.lunch,
+        evening: evening ?? this.evening,
+        nextWeekNudgeEnabled:
+            nextWeekNudgeEnabled ?? this.nextWeekNudgeEnabled,
+        excludedFromSlot: excludedFromSlot ?? this.excludedFromSlot,
+      );
 }
 
 /// A reserved meal, as it will be reported.

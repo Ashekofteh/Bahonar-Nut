@@ -1,0 +1,289 @@
+import 'package:flutter/material.dart';
+
+import '../../core/account.dart';
+import '../app_state.dart';
+import '../widgets.dart';
+
+/// The accounts screen: the app's front door.
+///
+/// Shows every saved account with its **resolved** name — the user's alias if
+/// they set one, otherwise the student's real name from the portal, otherwise
+/// the student ID. The source of the name is shown too, so a student can see
+/// at a glance that the app knows their real name but they have not given it a
+/// nickname, and can fix that in one tap.
+class AccountsScreen extends StatefulWidget {
+  const AccountsScreen({super.key, required this.state});
+
+  final AppState state;
+
+  @override
+  State<AccountsScreen> createState() => _AccountsScreenState();
+}
+
+class _AccountsScreenState extends State<AccountsScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.state,
+      builder: (context, _) {
+        final accounts = widget.state.accounts;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('حساب‌ها'),
+            actions: [
+              IconButton(
+                onPressed: () => _addAccount(context),
+                icon: const Icon(Icons.person_add_alt),
+                tooltip: 'افزودن حساب',
+              ),
+            ],
+          ),
+          body: accounts.isEmpty
+              ? EmptyState(
+                  icon: Icons.people_outline,
+                  title: 'هنوز حسابی اضافه نشده',
+                  message: 'برای شروع، شماره دانشجویی خود را وارد کنید.',
+                  action: FilledButton.icon(
+                    onPressed: () => _addAccount(context),
+                    icon: const Icon(Icons.add),
+                    label: const Text('افزودن حساب'),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                  itemCount: accounts.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) => _AccountTile(
+                    account: accounts[index],
+                    onEdit: () => _editAccount(context, accounts[index]),
+                    onDelete: () => _deleteAccount(context, accounts[index]),
+                  ),
+                ),
+        );
+      },
+    );
+  }
+
+  Future<void> _addAccount(BuildContext context) async {
+    final result = await showDialog<_AccountDraft>(
+      context: context,
+      builder: (_) => const _AccountDialog(),
+    );
+    if (result == null) return;
+
+    await widget.state.upsertAccount(
+      studentId: result.studentId,
+      alias: result.alias,
+    );
+  }
+
+  Future<void> _editAccount(BuildContext context, SavedAccount account) async {
+    final result = await showDialog<_AccountDraft>(
+      context: context,
+      builder: (_) => _AccountDialog(initial: account),
+    );
+    if (result == null) return;
+
+    await widget.state.setAlias(account.id, result.alias);
+    if (result.studentId != account.studentId) {
+      await widget.state.upsertAccount(
+        studentId: result.studentId,
+        alias: result.alias,
+      );
+    }
+  }
+
+  Future<void> _deleteAccount(BuildContext context, SavedAccount account) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('حذف حساب'),
+        content: Text(
+          'حساب «${account.resolvedName}» و تمام اطلاعات آن '
+          '(ورود، نشست و رزروهای ذخیره‌شده) حذف می‌شود. '
+          'این کار برگشت‌پذیر نیست.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('انصراف'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('حذف کن'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await widget.state.removeAccount(account.id);
+  }
+}
+
+/// One account row.
+class _AccountTile extends StatelessWidget {
+  const _AccountTile({
+    required this.account,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final SavedAccount account;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final identity = identityOf(account);
+
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: theme.colorScheme.primaryContainer,
+          child: Text(
+            _initial(identity.displayName),
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ),
+        title: Text(
+          identity.displayName,
+          style: theme.textTheme.titleMedium,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          _subtitle(identity),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'ویرایش نام',
+            ),
+            IconButton(
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'حذف',
+            ),
+          ],
+        ),
+        onTap: onEdit,
+      ),
+    );
+  }
+
+  /// The first letter of the display name, for the avatar.
+  static String _initial(String name) {
+    if (name.isEmpty) return '؟';
+    return name.characters.first;
+  }
+
+  /// The secondary line: the student ID, and where the name came from.
+  static String _subtitle(AccountIdentity identity) {
+    final source = switch (identity.source) {
+      NameSource.alias => 'نام دلخواه',
+      NameSource.profile => 'نام پروفایل',
+      NameSource.studentId => 'نام پروفایل در دسترس نیست',
+    };
+    return '${identity.studentId} • $source';
+  }
+}
+
+/// The result of the account dialog.
+class _AccountDraft {
+  const _AccountDraft({required this.studentId, this.alias});
+
+  final String studentId;
+  final String? alias;
+}
+
+/// The add/edit dialog.
+class _AccountDialog extends StatefulWidget {
+  const _AccountDialog({this.initial});
+
+  final SavedAccount? initial;
+
+  @override
+  State<_AccountDialog> createState() => _AccountDialogState();
+}
+
+class _AccountDialogState extends State<_AccountDialog> {
+  late final TextEditingController _studentId =
+      TextEditingController(text: widget.initial?.studentId ?? '');
+  late final TextEditingController _alias =
+      TextEditingController(text: widget.initial?.alias ?? '');
+
+  @override
+  void dispose() {
+    _studentId.dispose();
+    _alias.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEdit = widget.initial != null;
+
+    return AlertDialog(
+      title: Text(isEdit ? 'ویرایش حساب' : 'افزودن حساب'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _studentId,
+            keyboardType: TextInputType.number,
+            textDirection: TextDirection.ltr,
+            decoration: const InputDecoration(
+              labelText: 'شماره دانشجویی',
+              hintText: '۴۰۱۴۰۵۰۳۵',
+            ),
+            enabled: !isEdit,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _alias,
+            textDirection: TextDirection.rtl,
+            decoration: const InputDecoration(
+              labelText: 'نام دلخواه (اختیاری)',
+              helperText: 'اگر خالی بماند، نام واقعی و سپس شماره دانشجویی نشان داده می‌شود.',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('انصراف'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final id = _studentId.text.trim();
+            if (id.isEmpty) return;
+            final alias = _alias.text.trim();
+            Navigator.of(context).pop(_AccountDraft(
+              studentId: id,
+              alias: alias.isEmpty ? null : alias,
+            ));
+          },
+          child: Text(isEdit ? 'ذخیره' : 'افزودن'),
+        ),
+      ],
+    );
+  }
+}
