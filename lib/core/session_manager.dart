@@ -235,3 +235,27 @@ class PortalUnreachableException implements Exception {
   @override
   String toString() => 'PortalUnreachableException: $message';
 }
+
+/// The reservation was refused because the date is no longer bookable.
+///
+/// The portal **refuses a locked date silently**: the row renders `disabled`
+/// and the posted reservation is ignored with no error message and no state
+/// change. Verified live 2026-10-19. A distinct type is required because the
+/// response looks identical to a successful-but-not-yet-rendered post, and
+/// treating it as a transport error would make the engine retry a date that
+/// can never be booked.
+class ReservationLockedException implements Exception {
+  const ReservationLockedException(
+    this.message, {
+    required this.date,
+    required this.slot,
+  });
+
+  final String message;
+  final DateTime date;
+  final MealSlot slot;
+
+  @override
+  String toString() =>
+      'ReservationLockedException: $message (${date.toIso8601String()}, ${slot.name})';
+}

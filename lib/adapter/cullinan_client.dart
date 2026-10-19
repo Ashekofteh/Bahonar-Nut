@@ -31,7 +31,10 @@ import '../core/models.dart';
 import '../core/portal.dart';
 import '../core/persian.dart';
 import '../core/session_manager.dart'
-    show LoginRejectedException, PortalUnreachableException;
+    show
+        LoginRejectedException,
+        PortalUnreachableException,
+        ReservationLockedException;
 import '../transport/html_parsing.dart';
 import '../transport/http_transport.dart';
 import 'cullinan_parser.dart';
@@ -263,7 +266,51 @@ class CullinanPortalClient implements PortalClient {
         return reservation;
       }
     }
+
+    // Nothing held, and no error was reported.
+    //
+    // A **locked date is refused silently**: the row renders `disabled` and the
+    // server ignores the post entirely — no error label, no alert box, no state
+    // change. Verified live (2026-10-19): posting a reservation for 1405/07/28,
+    // whose cutoff had passed three days earlier, produced an identical page
+    // and no reservation. So the absence of a reservation after a save is NOT
+    // proof of a transport problem, and a client that waited for an error
+    // message would wait forever.
+    //
+    // Distinguish the two by re-reading the row: a locked row still renders
+    // `disabled`, which is the server's own statement that the date is closed.
+    if (_isLockedForSlot(response.body, offering)) {
+      throw ReservationLockedException(
+        'مهلت رزرو این تاریخ به پایان رسیده است.',
+        date: offering.date,
+        slot: offering.slot,
+      );
+    }
+
     throw const PortalUnreachableException('رزرو تأیید نشد.');
+  }
+
+  /// True when the portal still renders this date's row as locked.
+  ///
+  /// The lock is the server's own signal, and it survives a refused post.
+  bool _isLockedForSlot(String html, MealOffering offering) {
+    final gridId = switch (offering.slot) {
+      MealSlot.breakfast => 'grdReservationBreakfast',
+      MealSlot.lunch => 'grdReservationLunch',
+      MealSlot.dinner => 'grdReservationDinner',
+    };
+
+    for (final row in tableRows(html, gridId)) {
+      if (row.cells.length < 4) continue;
+      final date = parseJalaliDate(row.cell(1));
+      if (date == null || !_sameDate(date, offering.date)) continue;
+
+      // The checkbox is the server's lock marker.
+      final checkbox = inputBySuffix(row.raw, 'chkReserve');
+      return checkbox?.disabled ?? false;
+    }
+
+    return false;
   }
 
   @override
