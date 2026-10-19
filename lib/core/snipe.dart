@@ -253,4 +253,49 @@ class SnipeRunStatus {
   final String? stopReason;
 
   bool get isTerminal => SnipeStateMachine.isTerminal(state);
+
+  SnipeRunStatus withState(SnipeState nextState, {String? stopReason}) =>
+      SnipeRunStatus(
+        ruleId: ruleId,
+        state: nextState,
+        pollCount: pollCount,
+        lastPollAt: lastPollAt,
+        lastError: lastError,
+        claimedListingId: claimedListingId,
+        purchasesThisWindow: purchasesThisWindow,
+        stopReason: stopReason ?? this.stopReason,
+      );
+
+  SnipeRunStatus withPoll(DateTime at, {String? error}) => SnipeRunStatus(
+        ruleId: ruleId,
+        state: state,
+        pollCount: pollCount + 1,
+        lastPollAt: at,
+        lastError: error,
+        claimedListingId: claimedListingId,
+        purchasesThisWindow: purchasesThisWindow,
+        stopReason: stopReason,
+      );
+
+  SnipeRunStatus withClaimed(ListingId id) => SnipeRunStatus(
+        ruleId: ruleId,
+        state: state,
+        pollCount: pollCount,
+        lastPollAt: lastPollAt,
+        lastError: lastError,
+        claimedListingId: id,
+        purchasesThisWindow: purchasesThisWindow,
+        stopReason: stopReason,
+      );
+
+  SnipeRunStatus withPurchase(DateTime at) => SnipeRunStatus(
+        ruleId: ruleId,
+        state: state,
+        pollCount: pollCount,
+        lastPollAt: at,
+        lastError: lastError,
+        claimedListingId: claimedListingId,
+        purchasesThisWindow: purchasesThisWindow + 1,
+        stopReason: stopReason,
+      );
 }
