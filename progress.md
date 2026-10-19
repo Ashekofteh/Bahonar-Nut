@@ -669,3 +669,76 @@ are new write-path regression tests.
 
 - `769398a` — book-and-cancel cycle proven
 - `c952758` — write-path facts pinned as tests
+
+## 2026-10-19 — Session 16: Food Basket purchase, executed and verified
+
+**Requested:** purchase lunch for Mehr 28 (1405), Akbar Joojeh, hall Central, on
+Reza Sharifi's account. Acknowledged as irreversible.
+
+**Result: purchased, on the first attempt, with no collateral damage.**
+
+| | |
+|---|---|
+| Purchased | 1405/07/28 lunch, option `62738`, چلو اکبرجوجه, دوغ, hall مرکزی برادران |
+| Price | 500,000 Rial (exactly the balance) |
+| Credit | 500,000 -> **0** |
+| Ledger | `رزرو غذا \| چلو اکبرجوجه \| ناهار \| سه شنبه \| 1405/07/28 \| 1 \| 500000` |
+| Weekly reservations | **LOST: NONE. GAINED: NONE.** The four pre-existing meals intact |
+
+The account now has **0 Rial**, and the purchase is final.
+
+### F17 answered — a basket purchase lands ONLY in the ledger
+
+The weekly reservation grids were byte-for-byte identical before and after. The
+meal exists as a ledger row and as a checked+disabled row on the buy page,
+nowhere else.
+
+**Consequence: the reminder digest would have been wrong.** As designed it reads
+the weekly grids, so on 1405/07/28 it would report "no lunch reserved" for an
+account that had in fact bought one. Fixed before it could ship: `fetchTransactions`
+added to the `PortalClient` contract, implemented, and verified live (14
+transactions, the purchase classified as an acquisition, the earlier cancel as a
+withdrawal). The reminder spec now treats ledger-reading as a correctness
+requirement.
+
+### F18 — the cutoff governs RESERVING, not BUYING
+
+The same date on two pages: the weekly grid **refused** 1405/07/28 (locked), the
+basket **accepted** it (not locked). A student who missed the cutoff can still
+obtain that meal from the basket if another student released it. That is the
+mechanism that makes the secondary market work, and it means the 20:00 rule is
+not a limit on basket purchasing.
+
+### F19 — the hall column is a filter, not a property
+
+The buy page's hall dropdown lists the halls **offering that meal** (the lunch
+row listed only Central for Akbar Joojeh), so a hall priority is a preference
+among the halls that actually offer the chosen dish.
+
+### F20 — the ledger's main grid holds only the newest transaction
+
+The full history lives in the `grdContent_grdDetail_N` sub-grids (13 rows
+before, 14 after). Reading only the main grid would make the account look like
+it had a single transaction ever, and would make a before/after diff useless.
+
+### Safety properties held
+
+- **Full form state posted**, so the account's four other meals were untouched
+  (LOST: NONE) — the specific risk of a partial post.
+- **Ground truth after every POST** (fresh credit read + ledger diff), and a
+  refusal to try the second hall if the outcome were unknown. It never had to
+  fire: one attempt sufficed, and Central was the only hall offering the dish,
+  so a double-buy was not possible even in principle.
+- **Inspect mode first** (`--inspect`) showed exactly what would be posted and
+  nothing was spent until that was reviewed.
+
+### Tests
+
+**349 pure-Dart tests + 1 widget test pass; analyzer clean.** Eight new
+regression tests cover the basket purchase.
+
+### Commits
+
+- `385cb6f` — the purchase and where it lands
+- `9e05f88` — the ledger reading correction
+- `7b949f9` — transaction ledger support in the adapter
