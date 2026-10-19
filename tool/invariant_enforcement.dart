@@ -18,7 +18,7 @@
 ///
 /// One request. It cannot spend.
 ///
-/// Usage: `dart run tool/invariant_enforcement.dart <studentId> <password>
+/// Usage: `dart run tool/invariant_enforcement.dart <studentId> <password>`
 // Diagnostic probe: stdout printing is the entire point.
 // ignore_for_file: avoid_print, prefer_interpolation_to_compose_strings
 
