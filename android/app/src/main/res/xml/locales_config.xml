@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app is Persian-only, so the per-app language list names Persian rather
+  than leaving the system to guess from the device locale. On Android 13+ this
+  is what the "App languages" settings entry shows.
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="fa-IR" />
+</locale-config>

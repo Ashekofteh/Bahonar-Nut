@@ -137,9 +137,32 @@ ThemeData _base(ColorScheme scheme) {
       thickness: 1,
     ),
     switchTheme: SwitchThemeData(
+      // The disabled state must read as disabled. Without this, a switch that
+      // the master switch has disabled still renders as a solid, "on" amber
+      // block - which reads as active and misleads.
       thumbColor: WidgetStateProperty.resolveWith(
-        (states) => states.contains(WidgetState.selected)
-            ? scheme.primary
+        (states) {
+          if (states.contains(WidgetState.disabled)) {
+            return scheme.onSurface.withValues(alpha: 0.38);
+          }
+          if (states.contains(WidgetState.selected)) return scheme.onPrimary;
+          return scheme.outline;
+        },
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) {
+          if (states.contains(WidgetState.disabled)) {
+            return scheme.onSurface.withValues(alpha: 0.12);
+          }
+          if (states.contains(WidgetState.selected)) {
+            return scheme.primary.withValues(alpha: 0.5);
+          }
+          return scheme.surfaceContainerHighest;
+        },
+      ),
+      trackOutlineColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.disabled)
+            ? scheme.onSurface.withValues(alpha: 0.12)
             : scheme.outline,
       ),
     ),
