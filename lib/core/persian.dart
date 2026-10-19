@@ -197,15 +197,64 @@ String toPersianDigits(Object input) {
 }
 
 /// Formats a Rial amount for display, e.g. `۳۵۰٬۰۰۰ ریال`.
-String formatRialPersian(int amountRial) {
-  final digits = amountRial.abs().toString();
+///
+/// **This is for the rare case that Rial must be shown.** Iran has not used
+/// Rial in daily life for a long time; everything the user sees should be in
+/// Toman. Use [formatTomanPersian] for that. Kept because the portal's own
+/// figures are denominated in Rial, and a debug view may need to quote them
+/// verbatim.
+String formatRialPersian(int amountRial) =>
+    '${_groupDigits(amountRial)} ریال';
+
+/// Formats a **Toman** amount for display, e.g. `۳۵٬۰۰۰ تومان`.
+///
+/// ## The unit
+///
+/// 1 Toman = 10 Rial, so Toman = Rial / 10. The portal's prices are all exact
+/// multiples of 10 Rial (150,000 / 350,000 / 500,000), so a meal price converts
+/// without a remainder. Rial amounts that are *not* multiples of 10 would round,
+/// so this rounds **half up** and the caller is told the rounded value.
+///
+/// ## Why the conversion lives at the display boundary
+///
+/// The domain, the adapter and the stored data all stay in Rial, because that
+/// is the portal's own unit and every comparison — the price cap, the balance
+/// check, the spend summary — must be exact. Converting once, at the edge, is
+/// the only place a rounding error can occur, and it cannot corrupt a
+/// comparison. The alternative, storing Toman, would mean dividing every portal
+/// figure on the way in and risking a mismatch against the server's own
+/// arithmetic.
+String formatTomanPersian(int amountRial) {
+  final toman = rialToToman(amountRial);
+  return '${_groupDigits(toman)} تومان';
+}
+
+/// Converts Rial to Toman, rounding half up.
+///
+/// Rial amounts that are not a multiple of 10 lose up to 0.5 Toman. Meal prices
+/// and balances are always multiples of 10, so this is exact for every real
+/// value the app handles.
+int rialToToman(int amountRial) {
+  final negative = amountRial < 0;
+  final magnitude = amountRial.abs();
+  // Half up: (magnitude + 5) ~/ 10 rounds .5 upwards.
+  final toman = (magnitude + 5) ~/ 10;
+  return negative ? -toman : toman;
+}
+
+/// Converts Toman to Rial, for the rare case a Toman figure must be sent back.
+int tomanToRial(int amountToman) => amountToman * 10;
+
+/// Groups an integer's digits with the Persian thousands separator.
+String _groupDigits(int amount) {
+  final digits = amount.abs().toString();
   final grouped = StringBuffer();
   for (var i = 0; i < digits.length; i++) {
     if (i > 0 && (digits.length - i) % 3 == 0) grouped.write('٬');
     grouped.write(digits[i]);
   }
-  final sign = amountRial < 0 ? '−' : '';
-  return '$sign${toPersianDigits(grouped.toString())} ریال';
+  final sign = amount < 0 ? '−' : '';
+  return '$sign${toPersianDigits(grouped.toString())}';
 }
 
 /// A clock time rendered in Persian, e.g. `۲۰:۰۰`.

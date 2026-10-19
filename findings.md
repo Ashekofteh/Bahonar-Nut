@@ -1009,3 +1009,68 @@ bank statement, and top-ups are a separate flow the user asked to exclude.
 - `SpendSummary` — `totalRial`, `totalMeals`, `averageMealRial`, `bySlot`,
   `byAccount`, and `excludedWithdrawn` so the UI can say "excludes N released
   meals" instead of silently showing a smaller total.
+
+## 2026-10-19 — Session 19: Currency — Toman everywhere the user can see it
+
+**Requirement:** every monetary amount the user sees must be in **Toman** (تومان).
+Rial has not been used in daily life in Iran for a long time, and Toman is what
+people think in. Rial stays under the hood, aligned with the portal's own API.
+
+### The decision: Rial internally, Toman at the display boundary
+
+| Layer | Unit | Why |
+|---|---|---|
+| Domain, adapter, stored data | **Rial** | the portal's own unit; every comparison — the price cap, the balance check, the spend total — must be exact |
+| Everything the user reads | **Toman** | the unit people think in |
+
+**1 Toman = 10 Rial**, so Toman = Rial / 10. Every price the portal serves is an
+exact multiple of 10 Rial (150,000 / 350,000 / 500,000), so **no real value ever
+rounds**. The conversion rounds half up for safety, and the helper is in
+`persian.dart` as `rialToToman` / `tomanToRial` / `formatTomanPersian`.
+
+Converting once, at the edge, is the only place a rounding error can occur — and
+it cannot corrupt a comparison. Storing Toman instead would mean dividing every
+portal figure on the way in and risking a mismatch against the server's own
+arithmetic.
+
+### F26 — The audit found exactly ONE user-facing Rial surface
+
+A grep across `lib/` for `ریال` found it in only one place that reaches the user:
+`formatRialPersian`. Everything else was either internal (`priceRial`,
+`amountRial`) or a comment. So the change was small — but that was luck, not
+design, which is why it is now enforced.
+
+### F27 — A guard test, because a convention is not a mechanism
+
+`test/core/currency_display_test.dart` scans `lib/` for the word `ریال` inside a
+**string literal** and fails the build if it appears outside the two legitimate
+places:
+
+1. **The parser.** The portal itself writes `500000 ریال`, so the parser must
+   match that word to strip the price out of a dish name. Matching it in a
+   regular expression is parsing, not display.
+2. **The Rial formatter**, kept for the rare case it is genuinely needed (a
+   debug view quoting the portal's own figures).
+
+The allowance is matched by the *enclosing function's name*, not by the shape of
+the literal, so it cannot drift onto an unrelated line.
+
+**Verified by planting a violation** — a `String get badLabel => 'ریال';` was
+injected into `spend_summary.dart` and the guard failed with the exact file and
+line:
+
+```
+Actual: ['lib\core\spend_summary.dart:119: String get badLabel => 'ریال';']
+```
+
+and passed again once reverted. A guard nobody has seen fail is a guard nobody
+should trust.
+
+### Where Toman must be applied in Phase 5
+
+Every surface that shows money: the balance, the price cap in a rule, the
+spend summary and its chart, the meal prices in the reservation and basket
+lists, and the confirmation dialog before a purchase. The **notification
+composer currently emits no currency at all** (verified), so the digest carries
+a price without displaying one — which is correct, and the detail screen is
+where a Toman price belongs.
