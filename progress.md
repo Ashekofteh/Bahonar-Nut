@@ -613,3 +613,59 @@ name, id and balance.
 ### Commit
 
 `2f80688` — silent-refusal handling
+
+## 2026-10-19 — Session 14: Book-and-cancel cycle, proven end-to-end
+
+**Requested:** book any meal for next week with the account's balance, then
+cancel it. One cycle only, to avoid flagging the account.
+
+**Result: SUCCESS. The account is exactly as it started.**
+
+| Step | Result |
+|---|---|
+| Booked | 1405/08/03 breakfast, `پنیر/خیار/نان/چای/قند`, hall مرکزی |
+| Charged | 150,000 Rial — credit 500,000 -> 350,000 |
+| Cancelled | uncheck the row + `btnSaveBreakfast` |
+| Refunded | **500,000** (original balance), confirmed by an independent fresh read |
+| Collateral | **NONE** — all four pre-existing reservations intact |
+
+### Three things the write path needs, each learned by getting it wrong
+
+1. **The post must carry `__VIEWSTATE`.** Without it the server processes the
+   post against no state and **silently does nothing** — 200 OK, no error, no
+   reservation, no money moved. This cost one cycle.
+2. **The COMPLETE form state must be posted, not one row.** Three grids of
+   seven rows; an ASP.NET checkbox absent from a POST reads as *unchecked*, so
+   posting only the target row would cancel the account's other meals.
+3. **Which week a post affects is decided by the viewstate, not the URL.** The
+   grid control names are identical in every week, so the viewstate's encoded
+   week decides. Posting next week's viewstate leaves the current week alone —
+   confirmed by the booking preserving all four current-week reservations.
+
+### Two behaviours worth pinning as tests
+
+- **"checked" is not "held".** The booking response renders all three grids'
+  rows for a date as checked, but only the booked one has a non-zero amount and
+  the green رزرو شده icon. Trusting "checked" would make a cancel re-post
+  phantom checkboxes and **book two unwanted meals**.
+- **The refund lands after the page renders.** The cancel response still shows
+  350,000; a fresh read shows 500,000. Asserting on the response alone would
+  have called a good cancel a failure.
+
+### Product consequence
+
+**A meal that passes its cutoff can no longer be given back.** The weekly
+cancel is uncheck-and-save, which only works while the date is still editable.
+Booking a meal for a date that is about to lock is therefore an irreversible
+commitment — a fact the reminder feature should surface, because the
+next-week nudge fires exactly in that run-up window.
+
+### Tests
+
+**341 pure-Dart tests + 1 widget test pass; analyzer clean.** Nine of those
+are new write-path regression tests.
+
+### Commits
+
+- `769398a` — book-and-cancel cycle proven
+- `c952758` — write-path facts pinned as tests
