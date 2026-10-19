@@ -25,12 +25,19 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | 2 | Adapter — Cullinan `PortalClient` + `ServerClock` | `read done` | Phase 1 |
 | 3 | Sessions — `SessionManager`, per-account jars, silent re-login | `core done` | Phase 2 |
 | 4 | Sniper — scheduler, state machine, ledger, dry-run | `core done` | Phase 3 |
-| 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `pending` | Phase 3 |
+| 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `ui done` | Phase 3 |
 | 6 | Windows — thin shell over shared core | `pending` | Phase 4, 5 |
-| 7 | Reminders domain — alias chain, config, `composeNotification` | `mostly` | Phase 1 |
+| 7 | Reminders domain — alias chain, config, `composeNotification` | `done` | Phase 1 |
 | 8 | Reminders digest — `DigestBuilder` + sessions | `pending` | Phase 3, 7 |
 | 9 | Reminders platform — scheduler, notifications, screens | `pending` | Phase 5, 8 |
 | 10 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 4, 9 |
+
+**Phase 5 progress:** the Persian RTL app shell, the accounts screen (with the
+alias chain), the finance dashboard (multi-select filters, Toman) and the
+reminders screen are built, tested (478 tests) and **verified on a real Android
+14 emulator** — screenshots confirm RTL layout, Vazirmatn rendering, and the
+reminders screen's switches. Still to come in phase 5: the foreground service,
+exact alarms, the Android Keystore-backed stores, and real portal wiring.
 
 **Phase 2 progress:** the full `PortalClient` is implemented and live-proven
 (read-only) — login via the on-device solver, server time, balance, offerings,
