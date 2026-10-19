@@ -37,6 +37,7 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
     _state = AppState(
       accountStore: _services.accountStore,
       reminderConfigStore: _services.reminderConfigStore,
+      huntConfigStore: _services.huntConfigStore,
       credentialStore: _services.credentialStore,
     )..load();
   }

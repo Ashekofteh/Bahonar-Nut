@@ -12,6 +12,8 @@
 library;
 
 import 'account.dart';
+import 'hunt_config.dart';
+import 'hunt_store.dart';
 import 'models.dart';
 import 'reminder.dart';
 
@@ -65,5 +67,23 @@ class InMemoryReminderConfigStore implements ReminderConfigStore {
   @override
   Future<void> save(ReminderConfig config) async {
     _config = config;
+  }
+}
+
+/// An in-memory hunt config store, one configuration per account.
+class InMemoryHuntConfigStore implements HuntConfigStore {
+  final Map<AccountId, HuntConfig> _configs = {};
+
+  @override
+  Future<HuntConfig?> load(AccountId accountId) async => _configs[accountId];
+
+  @override
+  Future<void> save(AccountId accountId, HuntConfig config) async {
+    _configs[accountId] = config;
+  }
+
+  @override
+  Future<void> remove(AccountId accountId) async {
+    _configs.remove(accountId);
   }
 }

@@ -17,6 +17,8 @@ import 'dart:convert';
 
 import 'account.dart';
 import 'account_store.dart';
+import 'hunt_config.dart';
+import 'hunt_store.dart';
 import 'local_meal_store.dart';
 import 'meal_invariant.dart';
 import 'models.dart';
@@ -81,9 +83,13 @@ abstract final class StoreKeys {
   static const liveCheckEnabled = 'reminder.liveCheck';
   static const purchaseInFlight = 'purchase.inFlight';
   static const lastSyncAt = 'sync.lastAt';
+  static const huntPrefix = 'hunt.';
 
   /// The key holding one account's record.
   static String account(AccountId id) => '$accountPrefix$id';
+
+  /// The key holding one account's hunt configuration.
+  static String hunt(AccountId id) => '$huntPrefix$id';
 }
 
 /// An account store built on a [PlainStore].
@@ -139,6 +145,37 @@ class PreferencesReminderConfigStore implements ReminderConfigStore {
   @override
   Future<void> save(ReminderConfig config) async {
     await _store.writeString(StoreKeys.reminderConfig, encodeReminderConfig(config));
+  }
+}
+
+/// A hunt configuration store built on a [PlainStore].
+///
+/// One hunt per account, so the key is account-scoped. The configuration is
+/// not secret — it names dishes and halls, not credentials — so a plain store
+/// is appropriate.
+class PreferencesHuntConfigStore implements HuntConfigStore {
+  PreferencesHuntConfigStore(this._store);
+
+  final PlainStore _store;
+
+  @override
+  Future<HuntConfig?> load(AccountId accountId) async {
+    final raw = await _store.readString(StoreKeys.hunt(accountId));
+    if (raw == null) return null;
+    return decodeHuntConfig(raw);
+  }
+
+  @override
+  Future<void> save(AccountId accountId, HuntConfig config) async {
+    await _store.writeString(
+      StoreKeys.hunt(accountId),
+      encodeHuntConfig(config),
+    );
+  }
+
+  @override
+  Future<void> remove(AccountId accountId) async {
+    await _store.remove(StoreKeys.hunt(accountId));
   }
 }
 

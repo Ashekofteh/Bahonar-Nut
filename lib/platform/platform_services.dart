@@ -14,11 +14,13 @@ import 'dart:async';
 import '../adapter/captcha_solver.dart';
 import '../adapter/cullinan_client.dart';
 import '../core/account_store.dart';
+import '../core/hunt_store.dart';
 import '../core/local_meal_store.dart';
 import '../core/platform_stores.dart';
 import '../core/portal.dart';
 import '../core/session.dart';
 import '../core/session_manager.dart';
+import '../core/snipe_engine.dart';
 import '../core/time.dart';
 import '../transport/http_transport.dart';
 import 'platform_bridge.dart';
@@ -88,6 +90,20 @@ class AppServices {
   /// Keystore, but it does need to survive a restart for the offline reminders
   /// to work.
   LocalMealStoreHolder get mealStore => LocalMealStoreHolder(plainStore);
+
+  /// The hunt configuration, persisted in the plain store.
+  HuntConfigStore get huntConfigStore => PreferencesHuntConfigStore(plainStore);
+
+  /// The engine that runs the hunt.
+  ///
+  /// Built here rather than in the UI, so the engine outlives the screen: a
+  /// hunt must keep running while the student uses the rest of the app, and
+  /// the foreground service is what keeps the process alive for that.
+  late final SnipeEngine engine = DefaultSnipeEngine(
+    client: client,
+    sessions: sessions,
+    clock: clock,
+  );
 
   /// The reminder service: builds digests, posts notifications, arms alarms.
   late final ReminderService reminders = ReminderService(

@@ -10,6 +10,8 @@ import 'package:flutter/foundation.dart';
 
 import '../core/account.dart';
 import '../core/account_store.dart';
+import '../core/hunt_config.dart';
+import '../core/hunt_store.dart';
 import '../core/local_meal_store.dart';
 import '../core/models.dart';
 import '../core/platform_stores.dart';
@@ -23,6 +25,7 @@ class AppState extends ChangeNotifier {
   AppState({
     required this.accountStore,
     required this.reminderConfigStore,
+    this.huntConfigStore,
     this.credentialStore,
     LocalMealStore? mealStore,
     this._transactions = const [],
@@ -33,6 +36,12 @@ class AppState extends ChangeNotifier {
 
   /// Where the reminder configuration is persisted.
   final ReminderConfigStore reminderConfigStore;
+
+  /// Where the hunt configuration is persisted.
+  ///
+  /// Null when the app has no plain store for it — in tests, or before the
+  /// platform layer is wired. A hunt then simply does not persist.
+  final HuntConfigStore? huntConfigStore;
 
   /// Where credentials are persisted, encrypted. Null when the app has no
   /// secure store — in tests, or before the platform layer is wired.
@@ -45,6 +54,19 @@ class AppState extends ChangeNotifier {
   List<SavedAccount> _accounts = const [];
   ReminderConfig _reminderConfig = const ReminderConfig();
   List<Transaction> _transactions = const [];
+
+  /// The hunt configuration, per account.
+  final Map<AccountId, HuntConfig> _huntConfigs = {};
+
+  /// The account whose hunt the screen is editing.
+  AccountId? _activeHuntAccount;
+
+  /// Whether a hunt is running.
+  bool _huntRunning = false;
+
+  /// The last pre-flight verdict, as the user-facing text.
+  String? _huntPreflightSummary;
+  String? _huntPreflightRefusal;
 
   /// The dashboard's filter. Multi-select on both dimensions.
   SpendFilter _spendFilter = const SpendFilter();
@@ -69,6 +91,22 @@ class AppState extends ChangeNotifier {
   ReminderConfig get reminderConfig => _reminderConfig;
   SpendFilter get spendFilter => _spendFilter;
 
+  /// The account whose hunt the screen is editing.
+  AccountId? get activeHuntAccount => _activeHuntAccount;
+
+  /// The configuration of the account's hunt, or null when it has none.
+  HuntConfig? get activeHuntConfig =>
+      _activeHuntAccount == null ? null : _huntConfigs[_activeHuntAccount];
+
+  /// The last pre-flight verdict: what the hunt would buy, when it is ready.
+  String? get huntPreflightSummary => _huntPreflightSummary;
+
+  /// Why the hunt was refused, when it was.
+  String? get huntPreflightRefusal => _huntPreflightRefusal;
+
+  /// Whether a hunt is running.
+  bool get huntRunning => _huntRunning;
+
   /// The transactions the dashboard is computed from.
   List<Transaction> get transactions => _transactions;
 
@@ -92,8 +130,20 @@ class AppState extends ChangeNotifier {
   Future<void> load() async {
     _accounts = await accountStore.loadAll();
     _reminderConfig = await reminderConfigStore.load();
+    await _loadHuntConfigs();
     _loaded = true;
     notifyListeners();
+  }
+
+  /// Loads each account's hunt configuration.
+  Future<void> _loadHuntConfigs() async {
+    final store = huntConfigStore;
+    if (store == null) return;
+
+    for (final account in _accounts) {
+      final config = await store.load(account.id);
+      if (config != null) _huntConfigs[account.id] = config;
+    }
   }
 
   /// Replaces the transaction history, e.g. after a live read.
@@ -214,6 +264,45 @@ class AppState extends ChangeNotifier {
     final next = Set<AccountId>.from(_reminderConfig.accountIds);
     if (!next.remove(accountId)) next.add(accountId);
     await saveReminderConfig(_reminderConfig.copyWith(accountIds: next));
+  }
+
+  // -------------------------------------------------------------------- hunt
+
+  /// Selects the account whose hunt the screen shows.
+  void selectHuntAccount(AccountId accountId) {
+    if (_activeHuntAccount == accountId) return;
+    _activeHuntAccount = accountId;
+    // The verdict belongs to the previous account's configuration, so it is
+    // cleared rather than shown against the wrong one.
+    _huntPreflightSummary = null;
+    _huntPreflightRefusal = null;
+    notifyListeners();
+  }
+
+  /// Saves the hunt configuration for the active account.
+  Future<void> saveHuntConfig(HuntConfig config) async {
+    final accountId = _activeHuntAccount;
+    if (accountId == null) return;
+
+    _huntConfigs[accountId] = config;
+    await huntConfigStore?.save(accountId, config);
+    // The verdict was computed for the old configuration.
+    _huntPreflightSummary = null;
+    _huntPreflightRefusal = null;
+    notifyListeners();
+  }
+
+  /// Records the pre-flight verdict for the hunt.
+  void setHuntPreflight({String? summary, String? refusal}) {
+    _huntPreflightSummary = summary;
+    _huntPreflightRefusal = refusal;
+    notifyListeners();
+  }
+
+  /// Records whether a hunt is running.
+  void setHuntRunning(bool value) {
+    _huntRunning = value;
+    notifyListeners();
   }
 
   // --------------------------------------------------------------- filtering

@@ -28,6 +28,7 @@ import 'polling.dart';
 import 'portal.dart';
 import 'preflight.dart';
 import 'priority.dart';
+import 'session.dart';
 import 'session_manager.dart';
 import 'snipe.dart';
 import 'time.dart';
@@ -90,6 +91,12 @@ abstract class SnipeEngine {
   /// the window, the peak/off-peak rate and the priority list the rule's own
   /// fields cannot express.
   Future<void> start(SnipeRule rule, {HuntConfig? hunt});
+
+  /// Runs the pre-flight checks without starting the hunt.
+  ///
+  /// The screen calls this so the user sees a verdict — and a refusal — before
+  /// anything is bought.
+  Future<PreflightResult> preflight(SnipeRule rule, {HuntConfig? hunt});
 
   /// Stops a running rule and releases its resources.
   Future<void> stop(String ruleId);
@@ -187,6 +194,63 @@ class DefaultSnipeEngine implements SnipeEngine {
   /// Whether a rule is currently running.
   bool isRunning(String ruleId) => _runs.containsKey(ruleId);
 
+  /// Runs the pre-flight checks without starting the hunt.
+  ///
+  /// The hunt screen calls this to show the user a verdict **before** anything
+  /// is bought: the dish, the hall, the window, the projected request count —
+  /// or the reason the hunt would be refused. Only then does the user press
+  /// start.
+  ///
+  /// A pre-flight failure is free: it costs the reads the check itself needs
+  /// and nothing more. A failure discovered mid-hunt has already spent the
+  /// request budget and possibly the money.
+  @override
+  Future<PreflightResult> preflight(SnipeRule rule, {HuntConfig? hunt}) async {
+    final inputs = await _readPreflightInputs(rule);
+    return _preflight.check(
+      rule: rule,
+      clock: _clock,
+      session: inputs.session,
+      balance: inputs.balance,
+      requiredCredit: hunt?.requiredCreditRial,
+      targetDate: hunt?.targetDate,
+      holdings: inputs.holdings,
+      hunt: hunt,
+    );
+  }
+
+  /// The reads a pre-flight needs: the session, the balance and the holdings.
+  ///
+  /// A read that fails yields null rather than throwing, because "could not
+  /// read it" and "read it and it is zero" are different facts, and the
+  /// checker has to be able to tell them apart.
+  Future<_PreflightInputs> _readPreflightInputs(SnipeRule rule) async {
+    final sessionResult = await _sessions.ensureSession(rule.account);
+    final session = _sessions.sessionFor(rule.account);
+
+    Balance? balance;
+    List<Reservation>? holdings;
+
+    if (session != null) {
+      try {
+        balance = await _client.fetchBalance(session);
+      } catch (_) {
+        balance = null; // The checker reports this as balanceUnreadable.
+      }
+      try {
+        holdings = await _client.fetchReservations(session);
+      } catch (_) {
+        holdings = null; // The checker reports this as holdingsUnreadable.
+      }
+    }
+
+    return _PreflightInputs(
+      session: sessionResult,
+      balance: balance,
+      holdings: holdings,
+    );
+  }
+
   SnipeRunStatus _initialStatus(SnipeRule rule) => SnipeRunStatus(
         ruleId: rule.id,
         state: SnipeState.idle,
@@ -205,33 +269,18 @@ class DefaultSnipeEngine implements SnipeEngine {
       );
 
       // --- Preflight ---
-      final sessionResult = await _sessions.ensureSession(rule.account);
+      final inputs = await _readPreflightInputs(rule);
       final session = _sessions.sessionFor(rule.account);
-
-      Balance? balance;
-      List<Reservation>? holdings;
-      if (session != null) {
-        try {
-          balance = await _client.fetchBalance(session);
-        } catch (_) {
-          balance = null; // Preflight reports this as balanceUnreadable.
-        }
-        try {
-          holdings = await _client.fetchReservations(session);
-        } catch (_) {
-          holdings = null; // Preflight reports this as holdingsUnreadable.
-        }
-      }
 
       final hunt = run.hunt;
       final verdict = _preflight.check(
         rule: rule,
         clock: _clock,
-        session: sessionResult,
-        balance: balance,
+        session: inputs.session,
+        balance: inputs.balance,
         requiredCredit: hunt?.requiredCreditRial,
         targetDate: hunt?.targetDate,
-        holdings: holdings,
+        holdings: inputs.holdings,
         hunt: hunt,
       );
 
@@ -259,7 +308,7 @@ class DefaultSnipeEngine implements SnipeEngine {
       _transition(run, SnipeState.hunting);
 
       // --- Hunt ---
-      await _hunt(run, session!, balance);
+      await _hunt(run, session!, inputs.balance);
     } on SnipeCancelled {
       _finish(run, SnipeState.windowExpired, 'stopped by user');
       await _listener.onEnded(
@@ -771,6 +820,23 @@ class DefaultSnipeEngine implements SnipeEngine {
     run.status = run.status.withState(state, stopReason: reason);
     run.emit();
   }
+}
+
+/// The reads a pre-flight needs.
+class _PreflightInputs {
+  const _PreflightInputs({
+    required this.session,
+    this.balance,
+    this.holdings,
+  });
+
+  final SessionResult session;
+
+  /// Null when the balance could not be read.
+  final Balance? balance;
+
+  /// Null when the holdings could not be read.
+  final List<Reservation>? holdings;
 }
 
 /// Mutable state for one running rule.
