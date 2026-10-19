@@ -467,3 +467,65 @@ Notes:
 - Already held: breakfast 1405/07/27, breakfast 1405/07/29, dinner 1405/07/28
   (خوراک سالاد الویه,سبزی, سوپ جو 350000).
 - Cafeteria credit: 0 (legacy field, always zero — confirms the earlier note).
+
+## 2026-10-19 — Session 13: The cancel mechanism, and what changed the account
+
+### F10 — A cancel mechanism exists: `انصراف از رزرو غذا` (withdrawal from food reservation)
+
+The transaction ledger (`MyCullinan/MyTransaction.aspx`, grid `cphMain_grdContent`,
+columns نوع تراکنش / غذا / وعده / روز / تاریخ / تعداد / مبلغ) shows a
+withdrawal row alongside booking rows:
+
+```
+رزرو غذا        | شوید پلو با تن ماهی | ناهار | پنجشنبه | 1405/07/30 | 1 | 500000
+انصراف از رزرو غذا | شوید پلو با تن ماهی | ناهار | پنجشنبه | 1405/07/30 | 1 | 500000
+```
+
+So a weekly reservation **can** be withdrawn. The `نوع تراکنش` (transaction type)
+column is the field to parse for this, and the app's transaction log should
+distinguish booking from withdrawal.
+
+The reservation hub itself has **no** cancel-named control (searched for
+`cancel`/`delete`/`remove`/لغو/حذف — none found). The cafeteria page
+(`CafeteriaReservation.aspx`) has `btnCancelHidden` ("حذف رزرو") and
+`btnPayHidden` ("پرداخت"), but that page is the *daily complementary
+restaurant* flow, a different feature from the weekly reservation. Since the
+ledger records a withdrawal for a **weekly** lunch, the weekly cancel must be
+some other mechanism — most likely **unchecking the row's checkbox and saving
+again**, which is the standard ASP.NET grid pattern and is only possible while
+the date is still editable.
+
+**Still to confirm:** the exact weekly-cancel mechanism, empirically.
+
+### F11 — The account changed under us, and it was not the app
+
+Between the 17:56 and 18:30 runs, the 1405/07/30 lunch row went from
+`checked=false disabled=false` to `checked=true disabled=false`, and the credit
+went **1,000,000 -> 500,000** (exactly the price of that lunch, 500,000 Rial).
+
+The 17:56 run is verified to have made **zero** write attempts: it wrote no
+reserve POST body, no reserve response, and its log contains no
+"RESERVATION WRITE" section — it returned early with "no editable Akbar
+Joojeh". The 17:52 run's only write was the refused 1405/07/28 attempt.
+Both later runs (cancel probe, ledger check) were read-only.
+
+So the booking was made **by the product owner manually**, between the runs.
+This is worth stating plainly: the app did not spend the money, and the
+account's state is consistent with a manual book-and-cancel test.
+
+### F12 — The price column in the weekly grid
+
+The weekly grid's 7th cell reads `0` for unbooked rows; the real price is
+embedded in the **food option text** (`... 500000 ریال`). The price column
+appears to hold the *amount already charged* for a booked row, not the menu
+price. Parsers must take the price from the option text.
+
+### Cheapest bookable meal for next week (1405/08/02..08/08)
+
+| Slot | Date | Dish | Price |
+|---|---|---|---|
+| breakfast | 1405/08/03 | پنیر/خیار/نان/چای/قند | **150,000** |
+| lunch | 1405/08/02 | چلو خورشت قیمه,ماست | 350,000 |
+| dinner | 1405/08/02 | خوراک مرغ بندری,گوجه, خیارشور | 350,000 |
+
+Breakfast is the cheapest, and the account's 500,000 credit covers it.
