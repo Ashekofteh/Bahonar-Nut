@@ -786,3 +786,64 @@ reserved", not "spending".
 ### Commit
 
 `cf5861d` — meal-spend summary
+
+## 2026-10-19 — Session 20: Phase 5, the Android shell
+
+**Delivered:** the app now exists as an app. It starts, renders in Persian
+right-to-left, and all four screens work. Verified on a **real Android 14
+emulator**, not just by building.
+
+### What was built
+
+| Module | Contents |
+|---|---|
+| `lib/core/account.dart` | `SavedAccount` with the alias -> profile name -> student id chain, and the name's *source* so the UI can say where it came from |
+| `lib/core/account_store.dart` | Persistence contracts + in-memory implementations |
+| `lib/ui/theme.dart` | Vazirmatn, Persian line heights, amber (food) vs teal (money) |
+| `lib/ui/widgets.dart` | `MoneyText` — the ONLY way a screen renders an amount |
+| `lib/ui/app_state.dart` | One `ChangeNotifier` holding accounts, config, transactions, filter |
+| `lib/ui/screens/*` | accounts, reservations, dashboard, reminders |
+
+### Three bugs that only running it could find
+
+1. **`android:supportsRtl` was missing.** The Persian label was right, but
+   without it the Android system lays out LTR — mirroring the navigation bar
+   and the back gesture wrongly. Added, plus a `localeConfig` naming `fa-IR`.
+
+2. **A disabled switch still rendered as a solid "on" amber block** — the thumb
+   colour was the same as the track. The switch theme now distinguishes
+   selected / unselected / disabled for both thumb and track.
+
+3. **Two accounts added in the same microsecond collided** and the second
+   silently overwrote the first. Ids now carry a counter. The test found it
+   because a widget test runs with a frozen clock.
+
+### Testing approach
+
+**478 tests pass**, analyzer clean. The flows a user performs — add an account,
+cancel the dialog, reject an empty student id, edit an alias, delete with the
+irreversible-action confirmation — are driven through the **widget tester**, not
+by tapping a device screen.
+
+That is a deliberate choice: on a device the soft keyboard moves the layout and
+every tap coordinate has to be re-derived (I hit exactly that while trying to
+fill the dialog by hand and gave up on it). In the tester the same flow is
+deterministic, and the device run is left to confirm *rendering*, which is what
+it is good at.
+
+### The device run did its job
+
+Screenshots from the emulator confirmed: Persian RTL layout with the nav bar
+mirrored, Vazirmatn rendering correctly (not a system fallback), the amber
+accent, the add-account dialog with correct RTL button ordering, the dashboard
+and reminders screens, and the master switch disabling its two sub-slots with
+the subtitle changing to explain that every reminder is off.
+
+### Environment note
+
+The Android emulator's AVD was created on **D:** — the default location is C:,
+which had 6.2GB free against the 7.3GB an AVD needs.
+
+### Commit
+
+`0b48178` — Android verification and fixes
