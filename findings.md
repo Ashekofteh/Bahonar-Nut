@@ -683,3 +683,86 @@ cannot be undone:
 - The **ambiguity rule** ("never retry an ambiguous claim") becomes even more
   important. A retry after an ambiguous basket purchase could buy the same meal
   **twice**, with no way to cancel either.
+
+## 2026-10-19 — Session 16: A Food Basket purchase, executed and verified
+
+**Requested:** purchase lunch for **Mehr 28, 1405**, dish **Akbar Joojeh**
+(چلو اکبرجوجه), hall Central (مرکزی). Acknowledged as irreversible.
+
+**Result: PURCHASE LANDED, on the first attempt, with no collateral damage.**
+
+| | |
+|---|---|
+| Purchased | 1405/07/28 lunch, option `62738`, چلو اکبرجوجه, دوغ, hall مرکزی برادران |
+| Price | 500,000 Rial |
+| Credit | 500,000 -> **0** |
+| Ledger | new row: `رزرو غذا | چلو اکبرجوجه | ناهار | سه شنبه | 1405/07/28 | 1 | 500000` |
+| Buy page after | the lunch row is now `checked=true disabled=true amount=500000` |
+| Weekly reservations | **LOST: NONE. GAINED: NONE.** The four pre-existing meals are intact |
+
+### F17 answered: a basket purchase lands ONLY in the transaction ledger
+
+This was the open question from session 15, and the answer is decisive:
+
+> **The purchased meal does NOT appear in the weekly reservation grid.**
+> The weekly grids are byte-for-byte unchanged — no row gained, no row lost.
+> The purchase exists only as a ledger row, and on the buy page as a now-checked
+> and now-disabled row.
+
+**Consequences, and they are significant:**
+
+1. **The reminder digest, as currently designed, would miss a basket purchase.**
+   The digest reads the weekly reservation grids to answer "what am I
+   collecting". A meal bought from the basket is invisible there. So on
+   1405/07/28 the digest would report "no lunch reserved" for this account
+   while it had in fact bought one. **The digest must also read the transaction
+   ledger** and reconcile basket purchases into its view. This is now a
+   requirement, not a nicety.
+
+2. **The buy page is the only place the purchase is visible in a grid** — as a
+   `checked` + `disabled` row with a non-zero amount. The same "checked is not
+   held" trap applies: after the purchase, the row renders `checked=true`, and
+   its amount is 500,000, which IS the reliable signal.
+
+3. **"GAINED: NONE" also means the purchase did not disturb the account's other
+   meals**, which was the specific risk of posting a partial form state. The
+   full-form-state posting worked: the four existing meals are untouched.
+
+### F18 — The basket buy page and the weekly grid disagree about the lock
+
+The same date, 1405/07/28, on two different pages:
+
+| Page | 1405/07/28 lunch | Meaning |
+|---|---|---|
+| `Reservation.aspx` (weekly) | `disabled` — **REFUSED** a booking | cutoff passed; meal booking closed |
+| `FoodBasketBuy.aspx` (basket) | `disabled=false` — **ACCEPTED** a purchase | a *transfer* of someone else's meal is still allowed |
+
+**The cutoff governs reserving a meal, not buying one.** A student who missed
+the cutoff for Thursday's lunch can still obtain that meal from the basket, if
+another student released it. That is precisely the mechanism that makes the
+secondary market work — and it means the 20:00 rule is **not** a limit on
+basket purchasing.
+
+It also explains the two "Akbar Joojeh" sightings: the weekly grid's
+1405/07/28 lunch row (option 62738) is the meal the account could no longer
+book, and the basket offered the *same option id* for purchase — the meal
+another student had released for sale.
+
+### F19 — The basket's hall column is a filter, not a property
+
+On the buy page, the hall dropdown's options are the halls **offering that
+meal** — the lunch row listed only `1=مرکزی برادران` for 1405/07/28, while the
+breakfast row listed both. So the "hall priority" the user configures is a
+*preference among the halls that actually offer the chosen meal*, and the
+portal's own option list is the authority on which those are.
+
+### Practical note on the run
+
+Only ONE attempt was needed, so the no-retry-on-ambiguity rule never had to
+fire. It was still implemented: the tool establishes ground truth (fresh credit
+read + ledger diff) after every POST, and refuses to try the second hall if the
+outcome is unknown. In this run the fallback list had only one entry anyway —
+Central was the only hall offering Akbar Joojeh — so a double-buy was not
+possible even in principle.
+
+The account now has **0 Rial**, and the purchase is final.
