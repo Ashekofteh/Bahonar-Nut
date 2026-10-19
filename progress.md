@@ -535,3 +535,81 @@ authenticated pages).
 ### Commit
 
 `2b1d51a` — transport + adapter
+
+## 2026-10-19 — Session 12: Live write-path capture (account 401157013)
+
+**Requested:** lunch for Mehr 28, 1405 (Tuesday), dish Akbar Joojeh (چلو اکبرجوجه),
+hall Central first with Engineering fallback.
+
+**Outcome: refused — and the capture proves exactly why, rather than leaving it
+as a guess.**
+
+### Why: the date is locked
+
+Mehr 28 = 2026-10-20; its cutoff was 20:00 on Mehr 26 (2026-10-16) — three
+days before the run. The portal renders that row `disabled` and **silently
+ignores** a reservation posted for it: no error label, no alert box, no state
+change.
+
+Before concluding that, the POST was verified to be correctly targeted: the
+control **name** index (`$ctl05$chkReserve`) is exactly the 1405/07/28 row, with
+`$ctl04$` = 07/27 and `$ctl06$` = 07/29 as neighbours, and `drpFood=62738` is
+exactly Akbar Joojeh. So this is the server refusing a locked row, not a
+client-side targeting error.
+
+### The cutoff rule observed, not inferred
+
+The same page shows the lock frontier at exactly the predicted place:
+**1405/07/30 was the only editable row in the current week**, because its
+cutoff (1405/07/28 20:00) had not yet arrived.
+
+And the strongest evidence available: comparing the 2026-10-18 capture with
+today's, **the frontier moved forward exactly one day**. Two observations, two
+different days, same rule. This is now asserted as a test.
+
+### Other facts established
+
+- **No bookable Akbar Joojeh exists on this account.** Option 62738 appears only
+  in the 1405/07/28 lunch row — the locked one. The published next week serves
+  entirely different dishes.
+- The **publish horizon is about one week**: weeks 1405/08/09 onward render
+  every row as `-`.
+- **The control `name` index and the `id` index differ** (`$ctl05$chkReserve` vs
+  `chkReserve_3`): the name index counts data rows, the id index counts
+  rendered rows including the header. **Parsing must use `name`** — which is
+  what the POST sends.
+- The server's error channel is `cphMain_alertBoxValue`, and a locked row
+  bypasses it entirely.
+- Write-path fields: `__VIEWSTATE`, `__VIEWSTATEGENERATOR`, the row's
+  `chkReserve=on` / `drpSelf=<hallId>` / `drpFood=<optionId>` /
+  `drpFoodCount=1`, and `btnSave{Breakfast,Lunch,Dinner}`. `__EVENTTARGET` is
+  empty for a save (it is for navigation postbacks).
+
+### What changed in the code
+
+- `ReservationLockedException` — a distinct type, because the response looks
+  identical to a successful-but-unrendered post. Without it, the engine would
+  retry a date that can never be booked.
+- `CullinanPortalClient.reserve` re-reads the row and raises it when the portal
+  still renders the date as disabled.
+- `test/adapter/locked_refusal_test.dart` — 7 tests asserting the refusal
+  contract against the captured pages, including the two-day frontier movement.
+
+### A mistake I made and corrected
+
+I committed the capture directory (authenticated page snapshots, viewstate,
+session cookies) to git. That is exactly the material the project deliberately
+keeps out of history, and it was my error. Fixed by resetting the commit,
+re-committing without the artifacts, adding `captures/` to `.gitignore`, and
+deleting the backup branch — then verifying **no reachable commit contains a
+capture**. The files remain on disk for analysis. The password was redacted in
+the captured POST body, but the page snapshots still held the account holder's
+name, id and balance.
+
+### Tests
+
+**332 pure-Dart tests + 1 widget test pass; analyzer clean.**
+
+### Commit
+
+`2f80688` — silent-refusal handling
