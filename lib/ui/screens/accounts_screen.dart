@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/account.dart';
+import '../../core/persian.dart';
 import '../../core/session.dart';
 import '../app_state.dart';
 import '../widgets.dart';
@@ -13,9 +14,12 @@ import '../widgets.dart';
 /// at a glance that the app knows their real name but they have not given it a
 /// nickname, and can fix that in one tap.
 class AccountsScreen extends StatefulWidget {
-  const AccountsScreen({super.key, required this.state});
+  const AccountsScreen({super.key, required this.state, this.onRefresh});
 
   final AppState state;
+
+  /// Reads the portal for the saved accounts. Null in tests.
+  final Future<void> Function()? onRefresh;
 
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
@@ -33,6 +37,18 @@ class _AccountsScreenState extends State<AccountsScreen> {
           appBar: AppBar(
             title: const Text('حساب‌ها'),
             actions: [
+              if (widget.onRefresh != null)
+                IconButton(
+                  onPressed: widget.state.isSyncing ? null : widget.onRefresh,
+                  icon: widget.state.isSyncing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                  tooltip: 'به‌روزرسانی از سامانه',
+                ),
               IconButton(
                 onPressed: () => _addAccount(context),
                 icon: const Icon(Icons.person_add_alt),
@@ -59,6 +75,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
                     account: accounts[index],
                     onEdit: () => _editAccount(context, accounts[index]),
                     onDelete: () => _deleteAccount(context, accounts[index]),
+                    balanceRial: widget.state.balanceFor(accounts[index].id),
+                    syncError: widget.state.syncErrorFor(accounts[index].id),
                   ),
                 ),
         );
@@ -164,11 +182,20 @@ class _AccountTile extends StatelessWidget {
     required this.account,
     required this.onEdit,
     required this.onDelete,
+    this.balanceRial,
+    this.syncError,
   });
 
   final SavedAccount account;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+
+  /// The balance last read from the portal, in Rial. Null when the account
+  /// has not been read yet.
+  final int? balanceRial;
+
+  /// Why the last read failed, if it did.
+  final String? syncError;
 
   @override
   Widget build(BuildContext context) {
@@ -192,13 +219,35 @@ class _AccountTile extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        subtitle: Text(
-          _subtitle(identity),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _subtitle(identity),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (balanceRial != null)
+              Text(
+                'اعتبار: ${formatTomanPersian(balanceRial!)}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.secondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              )
+            else if (syncError != null)
+              Text(
+                syncError!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+          ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,

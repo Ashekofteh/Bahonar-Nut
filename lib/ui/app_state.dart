@@ -52,6 +52,14 @@ class AppState extends ChangeNotifier {
   bool _loaded = false;
   String? _error;
 
+  /// The balance per account, in Rial, as last read from the portal.
+  final Map<AccountId, int> _balances = {};
+
+  /// The result of the last sync, per account.
+  final Map<AccountId, String> _syncErrors = {};
+
+  bool _syncing = false;
+
   // ------------------------------------------------------------- accessors
 
   bool get isLoaded => _loaded;
@@ -225,6 +233,34 @@ class AppState extends ChangeNotifier {
   /// Clears the dashboard's filter, back to showing everything.
   void clearSpendFilter() {
     _spendFilter = const SpendFilter();
+    notifyListeners();
+  }
+
+  /// The balance last read for [accountId], in Rial.
+  int? balanceFor(AccountId accountId) => _balances[accountId];
+
+  /// The error from the last sync of [accountId], if it failed.
+  String? syncErrorFor(AccountId accountId) => _syncErrors[accountId];
+
+  /// Whether a sync is in progress.
+  bool get isSyncing => _syncing;
+
+  /// Records a balance read from the portal.
+  void setBalance(AccountId accountId, int balanceRial) {
+    _balances[accountId] = balanceRial;
+    _syncErrors.remove(accountId);
+    notifyListeners();
+  }
+
+  /// Records a failed sync.
+  void setSyncError(AccountId accountId, String error) {
+    _syncErrors[accountId] = error;
+    notifyListeners();
+  }
+
+  /// Sets the syncing flag.
+  void setSyncing(bool value) {
+    _syncing = value;
     notifyListeners();
   }
 

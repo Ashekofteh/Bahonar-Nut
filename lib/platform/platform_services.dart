@@ -121,6 +121,12 @@ class LocalMealStoreHolder {
 
   final PlainStore _store;
 
+  /// The in-memory store the app uses.
+  ///
+  /// The persisted copy is the same data; this is the live view the reminders
+  /// read and the sync updates.
+  late final LocalMealStore store = LocalMealStore();
+
   static const String _key = 'meals.held';
 
   /// Reads the stored meals.

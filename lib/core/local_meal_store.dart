@@ -151,6 +151,17 @@ class LocalMealStore {
     _meals[meal.key] = meal;
   }
 
+  /// Replaces every stored meal with [meals].
+  ///
+  /// Used by a portal sync, where the portal's list is the truth: a meal that
+  /// has been cancelled or has passed must not linger in the local mirror and
+  /// keep showing up in a reminder.
+  void replaceAll(Iterable<StoredMeal> meals) {
+    _meals
+      ..clear()
+      ..addEntries(meals.map((m) => MapEntry(m.key, m)));
+  }
+
   /// Removes the meal for (accountId, date, slot).
   ///
   /// Returns true when something was removed.

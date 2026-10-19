@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 
 import '../platform/platform_services.dart';
+import '../platform/portal_sync.dart';
 import 'app_state.dart';
 import 'screens/accounts_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -32,22 +33,56 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
+  /// Reads the portal for the saved accounts and refreshes the local mirror.
+  late final PortalSync _sync;
+
   @override
   void initState() {
     super.initState();
-    // The platform can ask for a hunt; a deep link opens the diagnostics screen.
+
+    _sync = PortalSync(
+      client: widget.services.client,
+      sessions: widget.services.sessions,
+      mealStore: widget.services.mealStore.store,
+    );
+
+    // The platform can ask for a hunt.
     widget.services.bridge.onHuntRequested((payload) {
       if (!mounted) return;
-      if (payload == 'diagnostics') {
-        setState(() => _index = 3);
+      if (payload == 'refresh') {
+        refreshFromPortal();
       }
     });
+  }
+
+  /// Reads every account's balance and reservations from the portal.
+  ///
+  /// Explicit, and never a background poll: every request is a request
+  /// pattern, and the portal is a shared resource.
+  Future<void> refreshFromPortal() async {
+    final accounts = widget.state.accounts;
+    if (accounts.isEmpty) return;
+
+    widget.state.setSyncing(true);
+    try {
+      for (final account in accounts) {
+        final result = await _sync.sync(account.id);
+        if (!mounted) return;
+        if (result.ok) {
+          widget.state.setBalance(account.id, result.balanceRial ?? 0);
+        } else {
+          widget.state.setSyncError(account.id, result.error ?? 'خطای نامشخص');
+        }
+      }
+    } finally {
+      if (mounted) widget.state.setSyncing(false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final screens = <Widget>[
-      AccountsScreen(state: widget.state),
+      AccountsScreen(state: widget.state, onRefresh: refreshFromPortal),
       ReservationsScreen(state: widget.state),
       DashboardScreen(state: widget.state),
       RemindersScreen(state: widget.state),
