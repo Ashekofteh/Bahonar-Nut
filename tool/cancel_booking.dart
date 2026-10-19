@@ -25,7 +25,7 @@
 /// as `checked` (an echo of what was posted), and re-posting that would
 /// re-check them.
 ///
-/// Usage: `dart run tool/cancel_booking.dart <studentId> <password> [jalaliDate]
+/// Usage: `dart run tool/cancel_booking.dart <studentId> <password> [jalaliDate]`
 // One-shot live action tool: stdout printing is the entire point.
 // ignore_for_file: avoid_print, prefer_interpolation_to_compose_strings
 
