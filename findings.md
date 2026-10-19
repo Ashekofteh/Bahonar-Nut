@@ -1192,3 +1192,48 @@ neither emits the Rial unit, and that no Latin digits leak into the body.
 integration tests pass, covering the Keystore round-trip, the preferences
 round-trip, the permission queries, posting a notification, and scheduling and
 cancelling an alarm.
+
+## 2026-10-19 — Session 19 (continued): the live chain, proven on device
+
+### F31 — The whole chain works on a real device
+
+The chain, end to end, on an Android 14 emulator against the live portal:
+
+```
+add account (student id + alias + password)
+  -> password encrypted into the Android Keystore
+  -> tap refresh
+  -> credentials decrypted, CAPTCHA fetched and solved ON DEVICE
+  -> portal login succeeds
+  -> balance read
+  -> displayed in Toman with Persian digits
+```
+
+Screenshot: **Shekofteh · 401405035 · اعتبار: ۲۲٬۵۰۰ تومان** — 225,000 Rial,
+shown as 22,500 Toman, fetched live.
+
+The error path was proven too, and it is the portal's own message rather than
+ours: with the wrong student id, the app showed
+`نام کاربری یا گذرواژه پذیرفته نشد: نام کاربری یا کلمه عبور اشتباه است`.
+That is the portal saying *"the username or password is wrong"* — proof the
+login really reached the server, and that failures are surfaced rather than
+swallowed.
+
+### F32 — The balance display was verified against a non-zero value
+
+The first live check showed `۰ تومان` for the new account, which was correct
+(its 500,000 had been spent on the earlier book-and-cancel test) but proved
+nothing about the conversion. Checking the account that still held funds showed
+**۲۲٬۵۰۰ تومان** for 225,000 Rial — the conversion, the grouping separator
+and the Persian digits all correct on device.
+
+### A note on driving a form on a device
+
+Tapping through the add-account dialog was unreliable: the soft keyboard moves
+the layout, so every tap coordinate has to be re-derived, and the screenshot is
+1080px wide while displayed at 923px, so coordinates need scaling by 1.17.
+Several attempts silently missed the button.
+
+The approach that works: drive the *logic* with the widget tester (deterministic),
+use the on-device integration test for the *platform* (which only a device can
+prove), and use manual tapping only to confirm *rendering*.

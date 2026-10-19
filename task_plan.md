@@ -23,13 +23,13 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | 0 | Recon — inspect portal, map auth + endpoints | `complete` | — |
 | 1 | Core — domain models, ranker, storage, transport | `read done` | — |
 | 2 | Adapter — Cullinan `PortalClient` + `ServerClock` | `read done` | Phase 1 |
-| 3 | Sessions — `SessionManager`, per-account jars, silent re-login | `core done` | Phase 2 |
+| 3 | Sessions — `SessionManager`, per-account jars, silent re-login | `done` | Phase 2 |
 | 4 | Sniper — scheduler, state machine, ledger, dry-run | `core done` | Phase 3 |
 | 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `ui done` | Phase 3 |
 | 6 | Windows — thin shell over shared core | `pending` | Phase 4, 5 |
 | 7 | Reminders domain — alias chain, config, `composeNotification` | `done` | Phase 1 |
 | 8 | Reminders digest — `DigestBuilder` + sessions | `pending` | Phase 3, 7 |
-| 9 | Reminders platform — scheduler, notifications, screens | `pending` | Phase 5, 8 |
+| 9 | Reminders platform — scheduler, notifications, screens | `mostly` | Phase 5, 8 |
 | 10 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 4, 9 |
 
 **Phase 5 progress:** the Persian RTL app shell, the accounts screen (with the
