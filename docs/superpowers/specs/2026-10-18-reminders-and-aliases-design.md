@@ -502,6 +502,45 @@ entries, oldest dropped, contains no credentials and no meal prices.
 - `ReminderScheduler` and `ReminderNotifier` are the only Android-aware pieces;
   they are thin and contain no message logic.
 
+### The digest must read the transaction ledger too (added 2026-10-19)
+
+**This is a correctness requirement, not an enhancement.** Verified by a live
+Food Basket purchase (2026-10-19, option 62738, 500,000 Rial):
+
+> **A meal bought from the Food Basket does NOT appear in the weekly
+> reservation grid.** The grids were byte-for-byte identical before and after
+> the purchase. The meal exists only as a transaction-ledger row, and on the buy
+> page as a now-checked, now-disabled row.
+
+The digest as originally designed reads the weekly reservation grids to answer
+"what am I collecting". A basket purchase is invisible there, so on a day the
+student bought a meal from the basket, the digest would report **"no lunch
+reserved"** — telling the student they have no meal when they in fact have one.
+For a digest whose whole purpose is to be trusted, that is the worst possible
+failure.
+
+So the digest's sources are:
+
+| Source | Provides |
+|---|---|
+| `fetchReservations` (weekly grids) | meals held as ordinary reservations |
+| **transaction ledger** (detail sub-grids) | **meals bought from the Food Basket** |
+
+The ledger's **detail sub-grids** must be read, not its main grid: the main
+grid holds a single row — the most recent transaction — while the full history
+lives in `grdContent_grdDetail_N` (13 rows before the purchase, 14 after).
+
+A ledger row is matched to a meal by (date, meal slot, dish). The ledger's
+columns are `نوع تراکنش | غذا | وعده | روز | تاریخ | تعداد | مبلغ`, and its
+transaction type distinguishes a booking (`رزرو غذا`) from a withdrawal
+(`انصراف از رزرو غذا`) — so a withdrawal must **not** be reported as a meal
+being collected.
+
+**Open detail:** a basket purchase and a weekly reservation for the same meal
+would be indistinguishable in the ledger alone. The digest should reconcile
+against the weekly grids first and treat the ledger as the *additional* source,
+so the common case is counted once.
+
 ---
 
 ## 7. Error Handling

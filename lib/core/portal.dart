@@ -121,6 +121,51 @@ class LoginFailure {
   final bool retryable;
 }
 
+/// A transaction recorded in the account's ledger.
+class Transaction {
+  const Transaction({
+    required this.type,
+    required this.foodName,
+    required this.slot,
+    required this.weekday,
+    required this.date,
+    required this.count,
+    required this.amountRial,
+  });
+
+  /// The portal's transaction type, e.g. `رزرو غذا` (booking) or
+  /// `انصراف از رزرو غذا` (withdrawal).
+  final String type;
+
+  /// The meal, e.g. `چلو اکبرجوجه,دوغ`.
+  final String foodName;
+
+  /// The meal slot, e.g. `ناهار`.
+  final MealSlot? slot;
+
+  /// The Persian weekday, e.g. `سه شنبه`.
+  final String weekday;
+
+  /// The Jalali date, e.g. `1405/07/28`.
+  final String date;
+
+  final int count;
+  final int amountRial;
+
+  /// True when this transaction is a meal being collected rather than given up.
+  ///
+  /// A withdrawal (`انصراف از رزرو غذا`) means the meal was released, so it must
+  /// never be reported as something the student is collecting.
+  bool get isAcquisition => type.contains('رزرو') && !type.contains('انصراف');
+
+  /// True when this transaction is a release of a meal.
+  bool get isWithdrawal => type.contains('انصراف');
+
+  @override
+  String toString() => '$type | $foodName | ${slot?.name ?? weekday} | $date '
+      '| $count | $amountRial';
+}
+
 /// The portal adapter.
 ///
 /// Implementations must:
@@ -160,6 +205,19 @@ abstract class PortalClient {
   Future<List<MealOffering>> fetchOfferings(Session session, DateTime date);
 
   Future<List<Reservation>> fetchReservations(Session session);
+
+  /// The account's transaction history.
+  ///
+  /// **Necessary because a Food Basket purchase does not appear in the weekly
+  /// reservation grid.** Verified by a live purchase (2026-10-19): the grids
+  /// were byte-for-byte identical before and after, and the meal existed only
+  /// as a ledger row. A digest that reads only the grids would report "no
+  /// lunch" on a day the student had in fact bought one.
+  ///
+  /// The FULL history must be returned, not just the most recent row: the
+  /// page's main grid holds a single row (the newest transaction) while the
+  /// history lives in its `grdDetail_N` sub-grids.
+  Future<List<Transaction>> fetchTransactions(Session session);
 
   Future<BasketPage> fetchBasket(Session session, {String? cursor});
 

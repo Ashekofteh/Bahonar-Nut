@@ -134,6 +134,10 @@ class FakePortalClient implements PortalClient {
   Future<List<Reservation>> fetchReservations(Session session) async => const [];
 
   @override
+  Future<List<Transaction>> fetchTransactions(Session session) async =>
+      const [];
+
+  @override
   Future<BasketPage> fetchBasket(Session session, {String? cursor}) async =>
       const BasketPage(listings: []);
 
@@ -486,6 +490,10 @@ class _ThrowingLogoutClient extends FakePortalClient {
   Future<void> logout(Session session) async {
     throw const PortalUnreachableException('timeout');
   }
+
+  @override
+  Future<List<Transaction>> fetchTransactions(Session session) async =>
+      const <Transaction>[];
 }
 
 class _UnsyncedClock implements ServerClock {

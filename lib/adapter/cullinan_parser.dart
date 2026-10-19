@@ -23,6 +23,7 @@ library;
 
 import '../core/models.dart';
 import '../core/persian.dart';
+import '../core/portal.dart';
 import '../transport/html_parsing.dart';
 
 /// The Persian meal names the portal renders.
@@ -198,6 +199,76 @@ abstract final class CullinanParser {
   static String dishName(String optionText) => optionText
       .replaceAll(RegExp(r'\s*\d[\d,٬]*\s*ریال\s*$'), '')
       .trim();
+
+  /// The Persian meal names the ledger uses.
+  static const Map<String, MealSlot> _ledgerSlots = {
+    'صبحانه': MealSlot.breakfast,
+    'ناهار': MealSlot.lunch,
+    'شام': MealSlot.dinner,
+  };
+
+  /// Parses the transaction ledger.
+  ///
+  /// **The main grid is NOT enough.** `MyCullinan/MyTransaction.aspx` renders a
+  /// single row in `grdContent` — the most recent transaction — and keeps the
+  /// full history in `grdContent_grdDetail_N` sub-grids (verified: 13 rows
+  /// before a purchase, 14 after). Reading only the main grid would make the
+  /// account look like it had a single transaction ever.
+  static List<Transaction> parseTransactions(String html) {
+    final out = <Transaction>[];
+
+    // The detail sub-grids carry the history; the main grid carries the newest
+    // row, which is also the first detail grid's row. Collect the details, and
+    // fall back to the main grid if there are none.
+    final detailIds = RegExp(r'id="(cphMain_grdContent_grdDetail_\d+)"')
+        .allMatches(html)
+        .map((m) => m.group(1)!)
+        .toList();
+
+    for (final id in detailIds) {
+      final table = RegExp(
+        '<table[^>]*id="${RegExp.escape(id)}"[^>]*>(.*?)</table>',
+        dotAll: true,
+      ).firstMatch(html);
+      if (table == null) continue;
+      out.addAll(_transactionRows(table.group(1)!));
+    }
+
+    if (out.isEmpty) {
+      final main = RegExp('<table[^>]*id="[^"]*grdContent"[^>]*>(.*?)</table>',
+              dotAll: true)
+          .firstMatch(html);
+      if (main != null) out.addAll(_transactionRows(main.group(1)!));
+    }
+
+    return out;
+  }
+
+  static List<Transaction> _transactionRows(String tableBody) {
+    final out = <Transaction>[];
+
+    for (final row in RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true)
+        .allMatches(tableBody)) {
+      final cells = RegExp(r'<td[^>]*>(.*?)</td>', dotAll: true)
+          .allMatches(row.group(1)!)
+          .map((m) => stripTags(m.group(1)!))
+          .toList();
+      if (cells.length < 7) continue;
+      if (cells[0].trim().isEmpty) continue;
+
+      out.add(Transaction(
+        type: cells[0].trim(),
+        foodName: cells[1].trim(),
+        slot: _ledgerSlots[cells[2].trim()],
+        weekday: cells[3].trim(),
+        date: cells[4].trim(),
+        count: int.tryParse(cells[5].trim()) ?? 0,
+        amountRial: parseRial(cells[6]) ?? 0,
+      ));
+    }
+
+    return out;
+  }
 
   /// True when the row's reserve checkbox is disabled, meaning the date is
   /// locked by the server.

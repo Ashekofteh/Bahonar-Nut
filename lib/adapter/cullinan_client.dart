@@ -44,6 +44,7 @@ class _Paths {
   static const login = '/';
   static const reservation = '/Reservation/Reservation.aspx';
   static const basketBuy = '/FoodBasket/FoodBasketBuy.aspx';
+  static const transactions = '/MyCullinan/MyTransaction.aspx';
   static const captcha = '/UserControls/Captcha.ashx';
   static const topUp = '/ePay/ePay_Payment.aspx';
 }
@@ -201,6 +202,12 @@ class CullinanPortalClient implements PortalClient {
   Future<List<Reservation>> fetchReservations(Session session) async {
     final page = await transport.get(session.account, _Paths.reservation);
     return _parseReservations(page.body);
+  }
+
+  @override
+  Future<List<Transaction>> fetchTransactions(Session session) async {
+    final page = await transport.get(session.account, _Paths.transactions);
+    return CullinanParser.parseTransactions(page.body);
   }
 
   @override

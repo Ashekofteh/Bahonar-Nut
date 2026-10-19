@@ -329,6 +329,10 @@ class _ReconClient implements PortalClient {
   }
 
   @override
+  Future<List<Transaction>> fetchTransactions(Session session) async =>
+      const <Transaction>[];
+
+  @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('${invocation.memberName} not used');
 }

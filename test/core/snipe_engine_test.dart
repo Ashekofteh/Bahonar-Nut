@@ -145,6 +145,10 @@ class ScriptedClient implements PortalClient {
   }
 
   @override
+  Future<List<Transaction>> fetchTransactions(Session session) async =>
+      const <Transaction>[];
+
+  @override
   Future<void> cancel(Session session, MealId mealId) async {
     cancelCalls++;
   }
