@@ -425,3 +425,45 @@ asking whether the tool has a point. It did.
 ### Commit
 
 `3687c78` — session management
+
+## 2026-10-19 — Session 9: Snipe Engine (Phase 4)
+
+**Goal:** assemble the tested parts into the loop that actually wins a listing.
+Assembly, not invention — the ordering of decisions is the whole design.
+
+### Delivered
+
+| Module | Contents |
+|---|---|
+| `lib/core/tombstone.dart` | Per-account cooldown tombstones for dead listings |
+| `lib/core/ledger.dart` | Bounded append-only audit log, dry-run flagged simulated |
+| `lib/core/preflight.dart` | All-failures-collected precondition gate + ClaimReconciler |
+| `lib/core/snipe_engine.dart` | `DefaultSnipeEngine` with injected sleep, ledger outlives runs |
+
+Extended `SnipeRunStatus` with `withState`/`withPoll`/`withClaimed`/`withPurchase`
+helpers (existing class, engine's direct requirement).
+
+**278 tests pass, analyzer clean.**
+
+### Money-path guarantees, proven by test
+
+- An ambiguous claim is NEVER re-claimed (thrown and returned-ambiguous both go
+  through reconcile-never-retry)
+- Reconciliation matches on slot/date/hall, NOT listing id, because the portal
+  assigns a fresh reservation id
+- Reconciled-as-claimed records a real purchase (understating a charge would be
+  its own kind of wrong)
+- Dry-run never issues claim/reserve/cancel, but records what it would have done
+- A lost listing is tombstoned after the first rejection, never re-polled
+
+### Errors
+
+| Error | Attempt | Resolution |
+|---|---|---|
+| Completed runs never removed from `_runs`: `isRunning` true forever, 13 test timeouts | 1 | `_runs.remove` in `finally`; ledgers retained in a separate `_ledgers` map so purchases stay explainable after the fact |
+| reconcile-as-claimed wrote a note but no purchase, so `purchaseCount` understated the charge | 1 | Record `claimSucceeded` on reconcile-as-claimed |
+| Stop-test raced the 400-request budget (instant sleep burns it in ms) | 1 | **Test was wrong, budget was right.** Assert immediately after start |
+
+### Commit
+
+`5eb80a5` — phase 4 snipe engine

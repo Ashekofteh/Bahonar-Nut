@@ -24,7 +24,7 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | 1 | Core — domain models, ranker, storage, transport | `partial` | — |
 | 2 | Adapter — Cullinan `PortalClient` + `ServerClock` | `partial` | Phase 1 |
 | 3 | Sessions — `SessionManager`, per-account jars, silent re-login | `core done` | Phase 2 |
-| 4 | Sniper — scheduler, state machine, ledger, dry-run | `pending` | Phase 3 |
+| 4 | Sniper — scheduler, state machine, ledger, dry-run | `core done` | Phase 3 |
 | 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `pending` | Phase 3 |
 | 6 | Windows — thin shell over shared core | `pending` | Phase 4, 5 |
 | 7 | Reminders domain — alias chain, config, `composeNotification` | `mostly` | Phase 1 |
