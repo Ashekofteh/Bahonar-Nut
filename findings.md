@@ -605,3 +605,81 @@ lock is an irreversible commitment.
 The weekly grid's مبلغ خرید cell reads `0` for unbooked rows. The menu price
 is embedded in the food option text (`... 500000 ریال`). Parsers must take the
 price from the option text.
+
+## 2026-10-19 — Session 15: Food Basket semantics (a basket purchase is FINAL)
+
+The product owner reported: *once you buy a meal from the basket, there is no
+option to cancel or resell it.* Verified directly (read-only probe,
+`tool/basket_semantics_probe.dart`).
+
+### Confirmed: a basket purchase is irreversible
+
+| Check | Result |
+|---|---|
+| Withdraw-like controls on the **BUY** page (`FoodBasketBuy.aspx`) | **NONE** — searched for `cancel`/`delete`/`remove`/`withdraw`/لغو/حذف/برداشتن |
+| Withdraw-like controls on the **SELL** page (`FoodBasketSale.aspx`) | **NONE** |
+| The SELL page's entire control set | `txtDate`, `drpReserveType`, `drpFoodType`, `btnFoodReload` — **only a "load food" button. There is no list of the account's own listings, and therefore no control to withdraw one** |
+| Transaction types observed | only `انصراف از رزرو غذا` — a withdrawal type, but it applies to **weekly reservations**, not to basket purchases |
+
+**So the two operations are genuinely different in kind:**
+
+| | Weekly reservation | Food Basket purchase |
+|---|---|---|
+| Bought by | booking a menu option for a date | buying another student's released meal |
+| Cancelable? | **Yes** — uncheck the row and save, while the date is still editable | **No** — no mechanism exists |
+| Re-sellable? | n/a | **No** — the sale page cannot withdraw a listing either |
+| Irreversible? | Only once the date passes its cutoff | **Immediately, at the moment of purchase** |
+
+**This is the single most important fact about the auto-buy feature.** A weekly
+reservation is a reversible commitment (until its cutoff). A basket purchase is
+a final one, from the first click.
+
+### F16 — The buy page is a *purchase form*, not a market view
+
+`FoodBasketBuy.aspx` renders one row per meal slot for a single date, and the
+row's `drpFood` dropdown lists the **options that are available to buy**. On
+2026-10-19 for 1405/07/27 the page offered:
+
+```
+صبحانه  option 62725  شیر/حلواشکری/نان/چای/قند            150000
+ناهار   option 62726  چلو خورشت قیمه,ماست, میوه            350000
+         option 62729  چلو خورشت مسما بادمجان,سالاد فصل, میوه  350000
+شام     option 62732  خوراک مرغ بندری,گوجه, خیارشور          500000
+         option 62735  شوید پلو با گوشت چرخی,ماست            350000
+```
+
+The dropdown is therefore the **market**: the options a student may buy. This
+is the same "a row is a slot, an option is a listing" shape as the weekly
+grid, and it confirms the earlier correction — a listing is
+`(date, slot, optionId)`.
+
+The `hall` column reads `-` on this page (the buy form does not pre-select a
+hall), and the row's `disabled` flag is a per-row lock indicator.
+
+### F17 — Where a basket purchase lands is still unverified
+
+The probe did not buy anything, so it could not observe where a purchased
+basket meal appears. The open question for the app's model: does a basket
+purchase become (a) a row in the **weekly reservation grid** (i.e. the same
+meal, held), (b) only a **transaction ledger row**, or (c) something else
+entirely?
+
+This matters for the reminder feature: if a basket purchase does **not** appear
+in the weekly reservation grid, then the "what am I collecting" digest would
+miss it, and the student would be told they have no lunch when they in fact
+bought one.
+
+### Consequence for the auto-buy design
+
+The safeguards must be ordered by *when* they act, because a basket purchase
+cannot be undone:
+
+- **maxPriceRial** and the priority ranking must be right **before** the click.
+  There is no post-hoc correction.
+- **Dry-run** is the only true "look before you leap" for a basket purchase.
+- The **tombstone** set (already implemented) remains essential, but its role
+  changes: a lost basket listing is not merely wasted, it is a listing that may
+  be gone forever.
+- The **ambiguity rule** ("never retry an ambiguous claim") becomes even more
+  important. A retry after an ambiguous basket purchase could buy the same meal
+  **twice**, with no way to cancel either.
