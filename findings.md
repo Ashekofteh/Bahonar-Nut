@@ -1237,3 +1237,71 @@ Several attempts silently missed the button.
 The approach that works: drive the *logic* with the widget tester (deterministic),
 use the on-device integration test for the *platform* (which only a device can
 prove), and use manual tapping only to confirm *rendering*.
+
+## 2026-10-19 — Session 20: Hall identity, gender, and the hunt setup
+
+### F32 — Hall IDs are stable; the NAMES are what vary (if anything)
+
+Checked both accounts against every page of the portal:
+
+| | Male 401405035 (ابوالفضل شكفته) | Female 401157013 (رضا شريفي) |
+|---|---|---|
+| Weekly grid hall dropdowns | `1=مرکزی برادران`, `2=فنی برادران` | **identical** |
+| Daily cafeteria hall picker | `7=رستوران پسران`, `8=رستوران فنی` | **identical** |
+| «خواهران» occurrences | 2, both in a static dorm notice | 2, same notice |
+
+**The product owner's report that female accounts see «مرکزی خواهران» / «فنی خواهران»
+did not reproduce.** The only «خواهران» on any page is in a fixed notice about
+visiting the health centre «جنب خوابگاه خواهران» ("next to the sisters' dorm"),
+which is identical for every account.
+
+**But the underlying risk is real and the design must tolerate it anyway.** The
+two hall sets are genuinely different:
+
+| Set | Used by | IDs |
+|---|---|---|
+| Weekly reservation grid | `Reservation.aspx` | 1 = central, 2 = technical |
+| Daily cafeteria | `CafeteriaReservation.aspx` | 7 = boys' restaurant, 8 = technical restaurant |
+
+The cafeteria set is named **by gender** («رستوران پسران» = boys' restaurant),
+so a female account *can* legitimately see a different set there — this
+particular female account's university simply serves the same menus. A female
+student at a university with separate dining would see «رستوران دختران».
+
+**Therefore the app must never match Persian hall names.** It keys on the
+**hall id** and takes the display name from the portal, so whatever the portal
+calls a hall is what the app shows. The domain already does this: `Hall` carries
+`id` and `name`, and the priority model is built on `(hall, option)` pairs. A
+gender-aware string matcher would be a bug waiting to happen; a gender-aware
+*id* lookup is free.
+
+### F33 — A menu option's price is NOT its price
+
+The probe returned, for the same option id on different dates:
+
+```
+id=62758  تخم مرغ2عدد/نان/چای/قند   price=2150000
+id=62759  شوید پلو با تن ماهی...        price=500000
+```
+
+`62758` is the breakfast option and `62759` the lunch option on 1405/07/30.
+The **price is per (date, slot)** — the same dish costs differently by meal and
+day. So the hunt's price ceiling must be checked against the *live* offering for
+the target date and slot, never against a remembered price, and never against
+another date's price.
+
+### The officially offered dishes, per date and slot
+
+The hunt setup screen's dropdown is populated from the portal's own offering
+list for the chosen date and slot — which is exactly `fetchOfferings`, already
+implemented and live-verified. The app therefore never invents a dish: it
+offers what the portal serves that day, and the user picks from it.
+
+### The probe bug worth recording
+
+The first hall probe failed with "the captcha was wrong" twice in a row. The
+solver was fine — the **probe** called `completeLogin` directly, which does not
+fetch the challenge, so the answer never matched. The real login is a
+three-step sequence: page, challenge, answer. A tool that skips a step fails
+confidently, which is exactly the kind of error that gets mistaken for a
+portal problem.
