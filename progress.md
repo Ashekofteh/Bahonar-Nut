@@ -742,3 +742,47 @@ regression tests cover the basket purchase.
 - `385cb6f` — the purchase and where it lands
 - `9e05f88` — the ledger reading correction
 - `7b949f9` — transaction ledger support in the adapter
+
+## 2026-10-19 — Session 18: The finance dashboard metric
+
+**Settled:** accounts and meal slots are both multi-select and combinable; the
+metric is the monetary price of the **meals reserved**, not top-ups.
+
+**The non-obvious part — the counting rule.** The ledger is an EVENT log, not a
+set of possessions. The live history contains:
+
+```
+1405/07/30 lunch    -> [booked, released, booked again]
+1405/08/03 breakfast -> [released, booked again]
+```
+
+So for each (account, date, slot) only the **most recent** event counts: a
+booking means held and counted, a withdrawal means given up and excluded.
+
+A naive sum of booking rows gives **2,150,000**; the correct figure is
+**1,500,000** — a 30% overstatement. Verified live through the adapter: 14
+transactions -> 10 meals held, 3,300,000 Rial, 1 released meal excluded.
+
+**Document order is recency order** — the newest transaction (1405/08/03, a
+future date) appears *second* in the document, not last. So "most recent" means
+"first seen". Backwards would silently give wrong totals.
+
+**Metric labelling:** the ledger records meals *reserved*, not meals *eaten*, and
+an uneaten meal still incurs the portal's penalty. The UI should say "meals
+reserved", not "spending".
+
+### Delivered
+
+- `lib/core/spend_summary.dart` — `SpendFilter` (multi-select accounts and
+  slots, combinable, empty = all), `summarise()`, `SpendSummary` with
+  `totalRial` / `totalMeals` / `averageMealRial` / `bySlot` / `byAccount` /
+  `excludedWithdrawn`.
+- `Transaction.accountId` added to the portal contract, so one ledger read can
+  serve a multi-account dashboard.
+- 24 new tests, including one that asserts the naive sum is wrong.
+
+**405 pure-Dart tests + 1 widget test pass; analyzer clean.**
+
+### Commit
+
+`cf5861d` — meal-spend summary
