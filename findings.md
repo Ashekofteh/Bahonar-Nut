@@ -310,3 +310,74 @@ the first deadline of the coming week. Note Mehr 1405 is a 30-day month, so
 | Q6 | Cutoff applies to transfers? | Cutoff is 20:00 two-days-prior for reservations; basket semantics per Phase 2 |
 | Q7 | Top-up deep link? | No — must navigate ePay → bank gateway redirect |
 | Q8 | Currency; atomic debit? | Rial; server-side debit assumed, untested by choice |
+
+## 2026-10-19 — Session 10: Where the Food Basket marketplace actually lives
+
+### The finding
+
+`FoodBasketBuy.aspx` is **not a marketplace page**. It is a single-date view of
+**the student's own held meals**: exactly three rows (breakfast / lunch / dinner)
+for one date, each with a `chkReserve` checkbox, a hall dropdown, a food dropdown,
+a count dropdown, a price, and a `btnSave` ("ذخیره") button.
+
+Verified live (2026-10-19) with three separate dates (1405/07/27, 1405/08/02,
+1405/08/09, 1405/08/16): every date renders exactly three rows, and rows with no
+service render `-` in the hall/food columns with count 0. The date filter
+(`txtDate` + `imgbtnGoToDate`) is a **read filter** — it changes which date is
+shown, not which students' meals are listed.
+
+**The individual listings live in the `drpFood` dropdown, not in the grid rows.**
+A row for lunch on 1405/07/27 carried two options:
+
+```
+drpFood -> 62726  چلو خورشت قیمه,ماست, میوه 350000 ریال
+         62729  چلو خورشت مسما بادمجان,سالاد فصل, میوه 350000 ریال
+```
+
+Two distinct menu option IDs in one row. The row is *a meal slot for a date*;
+the **options within the row are the purchasable items**. So a "listing" is
+`(date, slot, optionId)` — the option ID is the thing a student has released and
+another student buys.
+
+This reframes the model the whole app is built on. `Listing.id` must therefore
+be **composite** — date + slot + option id — not a single portal identifier.
+The recon note that the buy grid has "columns رزرو/وعده/سلف/غذا/تعداد/کالری/مبلغ
+خرید/وضعیت" is right about the columns but misleading about granularity: the
+grid is one row per (date, slot), and the food column is a *multi-select*.
+
+**`FoodBasketSale.aspx` is the seller side**: a form to list the student's own
+held meal for sale (`drpReserveType` = رزرو هفتگی/روزفروش, `drpFoodType` =
+صبحانه/ناهار/شام, `btnFoodReload` = بارگذاری غذا). It had no grid of other
+students' listings in the snapshot, and a live `btnFoodReload` postback for
+1405/08/02 lunch produced zero rows.
+
+### Consequences for the design
+
+1. **`Listing.id` becomes composite.** `date|slot|optionId` is the identity.
+   The tombstone set, the ranker, and the claim path all key on it, so this
+   must be settled before the adapter is written — retrofitting it later would
+   touch the tombstone, the ledger and the ranker at once.
+
+2. **A "row" is a slot, an "option" is a listing.** The engine's poll must
+   flatten rows × options into listings, and the claim must re-submit the row's
+   `chkReserve` + `drpSelf` + `drpFood` + `drpFoodCount` + `btnSave` set.
+
+3. **The market is thin, and now measurably so.** With 1–3 rows per date and
+   1–2 options per row, the entire basket for a date is at most a handful of
+   items. This corroborates F2 from the product owner: the market really is
+   thin, which is exactly why auto-buy must not wait for a tap.
+
+4. **Not yet verified:** whether `btnFoodReload` on the sale page surfaces
+   *other students'* released meals (the read-only probe returned zero rows,
+   possibly because the date had no released meals rather than because the
+   mechanism is different), and whether a claim actually transfers a meal
+   between students or instead books a cafeteria meal. The write path is
+   therefore **not yet safe to implement blind** — it needs a live check of
+   what `btnSave` on the buy page does, which is a real purchase.
+
+### Read-only status
+
+All probing above was read-only: GETs plus the page's own *filter* postbacks
+(date navigation, and `btnFoodReload`, which only populates a dropdown). **No
+reservation, purchase, cancellation or listing was submitted.** The credentials
+were used for login only and are not stored by any of this tooling.

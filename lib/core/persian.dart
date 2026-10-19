@@ -115,6 +115,55 @@ JalaliDate toJalali(DateTime gregorian) {
   return JalaliDate(jy, jm, jd);
 }
 
+/// Converts a Jalali civil date to Gregorian.
+///
+/// The inverse of [toJalali], and needed because the portal's grids label rows
+/// in Jalali (`شنبه 1405/08/02`) while the app reasons in Gregorian civil
+/// dates. The conversion is exact: 1405/07/26 is 2026-10-18.
+///
+/// Implemented as a bounded search over the *verified* [toJalali] rather than
+/// as a second hand-written algorithm. Two independent date algorithms is two
+/// chances to be wrong; and when the first attempt at the inverse was written
+/// it was wrong — it returned July instead of October — while [toJalali] had
+/// already been checked against the portal's own dates. Deriving the inverse
+/// from the verified forward function makes the pair correct by construction,
+/// and the search is over a window of a few hundred days, so it is cheap.
+DateTime fromJalali(JalaliDate jalali) {
+  // The Jalali year runs March-to-March, so a Jalali year maps to the Gregorian
+  // year that is 621 greater (1405 -> 2026). Searching the whole of that
+  // Gregorian year plus the next is ample.
+  final approximateYear = jalali.year + 621;
+  final start = DateTime.utc(approximateYear, 1, 1);
+  final end = DateTime.utc(approximateYear + 2, 1, 1);
+
+  var candidate = start;
+  while (candidate.isBefore(end)) {
+    if (toJalali(candidate) == jalali) return candidate;
+    candidate = candidate.add(const Duration(days: 1));
+  }
+
+  throw ArgumentError(
+    'no Gregorian date maps to Jalali ${jalali.year}/${jalali.month}/${jalali.day}',
+  );
+}
+
+/// Parses a Jalali date in the portal's `yyyy/MM/dd` form.
+///
+/// Returns null for anything that is not a Jalali date, so a caller never
+/// mistakes an unparsed label for the epoch.
+DateTime? parseJalaliDate(String text) {
+  final match = RegExp(r'(\d{1,4})\s*[/\\-]\s*(\d{1,2})\s*[/\\-]\s*(\d{1,2})')
+      .firstMatch(text);
+  if (match == null) return null;
+
+  final year = int.parse(match.group(1)!);
+  final month = int.parse(match.group(2)!);
+  final day = int.parse(match.group(3)!);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  return fromJalali(JalaliDate(year, month, day));
+}
+
 /// Formats a Gregorian date as e.g. `یکشنبه ۲۶ مهر`.
 String formatPersianDate(DateTime date) {
   final jalali = toJalali(date);

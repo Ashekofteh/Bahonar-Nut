@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/portal.dart';
@@ -85,8 +86,8 @@ class FakePortalClient implements PortalClient {
       throw const PortalUnreachableException('connection refused');
     }
     return issueChallenge
-        ? const LoginChallenge(
-            imageBytes: [1, 2, 3], kind: ChallengeKind.digits4)
+        ? LoginChallenge(
+            imageBytes: Uint8List.fromList([1, 2, 3]), kind: ChallengeKind.digits4)
         : null;
   }
 

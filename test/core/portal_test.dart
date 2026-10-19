@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/portal.dart';
 import 'package:test/test.dart';
@@ -65,8 +67,8 @@ void main() {
 
   group('LoginChallenge', () {
     test('carries image bytes and a kind', () {
-      const challenge = LoginChallenge(
-        imageBytes: [1, 2, 3, 4],
+      final challenge = LoginChallenge(
+        imageBytes: Uint8List.fromList([1, 2, 3, 4]),
         kind: ChallengeKind.digits4,
       );
       expect(challenge.imageBytes.length, 4);
@@ -74,7 +76,7 @@ void main() {
     });
 
     test('unknown kind exists so unrecognised challenges are representable', () {
-      const challenge = LoginChallenge(imageBytes: [], kind: ChallengeKind.unknown);
+      final challenge = LoginChallenge(imageBytes: Uint8List(0), kind: ChallengeKind.unknown);
       expect(challenge.kind, ChallengeKind.unknown);
     });
   });

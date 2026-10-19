@@ -7,6 +7,8 @@
 /// the domain core and UI be built and tested without the live portal.
 library;
 
+import 'dart:typed_data';
+
 import 'models.dart';
 
 /// An authenticated session. Treated as an opaque bearer credential.
@@ -39,7 +41,10 @@ class LoginChallenge {
   });
 
   /// Raw image payload as served by the portal.
-  final List<int> imageBytes;
+  ///
+  /// A `Uint8List` because the image decoders (and the solver) want bytes,
+  /// not a list of boxed ints.
+  final Uint8List imageBytes;
   final ChallengeKind kind;
 
   @override

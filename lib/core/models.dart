@@ -101,6 +101,16 @@ class Reservation {
 }
 
 /// A listing in the Food Basket: another student's released reservation.
+///
+/// **Identity is composite.** The portal's buy grid renders one row per
+/// (date, meal slot), and the individual purchasable meals live in the row's
+/// food dropdown as separate option ids. A "listing" is therefore one option
+/// within one row: `(date, slot, option id)`. There is no single portal
+/// identifier for it.
+///
+/// Getting this wrong would silently break the tombstone set, the ledger and
+/// the ranker at once, all keyed on [id], so the identity is constructed in one
+/// place and reused everywhere.
 class Listing {
   const Listing({
     required this.id,
@@ -110,6 +120,40 @@ class Listing {
     required this.option,
     this.expiresAt,
   });
+
+  /// Builds a listing and derives its composite id.
+  factory Listing.composite({
+    required DateTime date,
+    required MealSlot slot,
+    required Hall hall,
+    required MenuOption option,
+    DateTime? expiresAt,
+  }) {
+    final id = compositeListingId(date: date, slot: slot, optionId: option.id);
+    return Listing(
+      id: id,
+      date: date,
+      slot: slot,
+      hall: hall,
+      option: option,
+      expiresAt: expiresAt,
+    );
+  }
+
+  /// The composite identity of a listing: `date|slot|optionId`.
+  ///
+  /// Uses only the civil date, never a time component: a listing is a meal on
+  /// a day, and including a time would make the same meal two different ids.
+  static String compositeListingId({
+    required DateTime date,
+    required MealSlot slot,
+    required String optionId,
+  }) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}'
+      '|${slot.name}'
+      '|$optionId';
 
   final ListingId id;
   final DateTime date;
@@ -125,7 +169,7 @@ class Listing {
   int get priceRial => option.priceRial;
 
   @override
-  String toString() => 'Listing($id, $slot, ${option.name})';
+  String toString() => 'Listing($id, ${option.name})';
 }
 
 /// Account balance snapshot.
