@@ -74,6 +74,22 @@ class HuntConfig {
   /// The meal this rule hunts for, which decides the peak window.
   final MealSlot targetSlot;
 
+  /// The date the hunt targets.
+  final DateTime targetDate;
+
+  /// The dishes to buy, in priority order.
+  ///
+  /// A one-element list means "only this dish". A two-element list means
+  /// "either will do, this one first".
+  final List<HuntDish> dishPriority;
+
+  /// The halls to buy from, in priority order.
+  ///
+  /// An empty list means "any hall the portal offers this dish in". A
+  /// one-element list means only that hall. A two-element list means either,
+  /// this one first.
+  final List<HallId> hallPriority;
+
   final HuntRate rate;
 
   /// Off by default: a hunt spends money and makes requests.
@@ -81,6 +97,26 @@ class HuntConfig {
 
   /// Hard cap on requests in one window, per account.
   final int requestBudget;
+}
+
+/// One dish the hunt may buy.
+class HuntDish {
+  const HuntDish({
+    required this.optionId,
+    required this.name,
+    required this.priceRial,
+  });
+
+  final OptionId optionId;
+  final String name;
+
+  /// The price **for the target date and slot**, as the portal quoted it.
+  ///
+  /// Not a property of the dish: the same option id costs 2,150,000 as a
+  /// breakfast and 500,000 as a lunch (verified). The ceiling is therefore
+  /// always checked against the live offering for the target date, never a
+  /// remembered price and never another date's price.
+  final int priceRial;
 }
 ```
 
@@ -186,6 +222,141 @@ comparison is portal-local time from the **server clock**, never the device
 clock — a device whose clock is an hour off would otherwise poll hard at the
 wrong time, or sleep through the peak.
 
+**The peak window is selected dynamically from the target meal**, not fixed:
+lunch hunts peak 09:00–15:30, dinner and breakfast hunts peak 16:30–20:30.
+The hunt's *own* window (when it may run at all) is separate and user-set; the
+peak window is a property of the meal being hunted.
+
+---
+
+## 6A. Pre-flight checks
+
+Two conditions are validated before a hunt is allowed to start. Both are
+**refusals, not warnings** — a hunt that starts without them would spend money
+on the wrong thing.
+
+### 1. No existing booking for the target date and slot
+
+This is the single-meal invariant, and it is exactly the same rule the rest of
+the app enforces: a student holds at most one meal per slot per date, from
+either source.
+
+The check reads the account's reservations and refuses the hunt if the target
+(date, slot) is already held. Without it, a hunt would buy a **second** meal
+for a slot the student already has — and since a basket purchase is
+irreversible, that is money spent on food the student cannot collect and
+cannot cancel.
+
+### 2. Sufficient credit for the priority list
+
+The credit must cover the meals the rule would place on its priority list.
+The check is:
+
+```
+required = sum of the prices of the dishes in the priority list
+```
+
+The sum is over the **priority list**, not the cheapest dish, because the hunt
+may buy the second-choice dish if the first is unavailable — and the second
+choice is the one that determines whether there is enough money to complete
+the purchase. Using only the first-choice price would pass a hunt that then
+fails for lack of funds at the moment of claiming, which is the worst moment
+to discover it.
+
+The price used is the **live** price for the target date and slot (§6B), never
+a remembered one.
+
+### Why both are checked before the hunt, not during it
+
+A pre-flight failure is free: no requests beyond the reads the check itself
+needs, and the user is told why before anything is bought. A failure discovered
+mid-hunt — after twenty minutes of polling — has already spent the request
+budget and possibly the money.
+
+---
+
+## 6B. The dishes and halls the hunt may buy
+
+### The dish list comes from the portal, never from the app
+
+When the user picks a target date and a meal slot, the app fetches that
+date's official offering for that slot and shows a selection menu of exactly
+those dishes. The app never invents a dish and never offers one the portal
+does not serve that day.
+
+This is already implemented: `fetchOfferings` returns the live list, verified
+against the portal.
+
+### Dish priority
+
+- **Both dishes, in order** — "either will do, this one first". The hunt takes
+  the first choice if it appears, and the second if the first does not.
+- **One dish only** — the hunt buys that dish and nothing else.
+
+The existing `SlotPreference` model already expresses this: an ordered list of
+`(hall, option)` pairs with a reject toggle, and the ranker takes the first
+available. The hunt configuration is a thin, dated, persisted form of it.
+
+### Hall priority
+
+- **Only Central** — buy only from hall 1.
+- **Only Engineering** — buy only from hall 2.
+- **Both, in order** — prefer Central, fall back to Engineering.
+
+### Halls are identified by id, never by name
+
+**The portal serves different hall names depending on the account.** Checked
+against a male and a female account on every page:
+
+| | Male account | Female account |
+|---|---|---|
+| Weekly grid | `1=مرکزی برادران`, `2=فنی برادران` | identical |
+| Daily cafeteria | `7=رستوران پسران`, `8=رستوران فنی` | identical |
+
+These two accounts happen to see the same names, but the cafeteria set is named
+**by gender** («رستوران پسران» = boys' restaurant), so a female student at a
+university with separate dining would legitimately see a different set.
+
+Therefore:
+
+- The app keys on the **hall id**, and displays the name the portal supplied.
+- The app never matches, compares or stores a Persian hall name.
+- The user's "Central / Engineering" choice maps to the ids the portal itself
+  used for that account, resolved at setup time from the live page.
+
+The domain already does this — `Hall` carries `id` and `name`, and the
+priority model is built on `(hall, option)` pairs — so this needs no model
+change, only a rule: **the name is display, the id is identity.**
+
+### A price is per (date, slot), not per dish
+
+Verified: the same option id costs **2,150,000** as a breakfast and
+**500,000** as a lunch. So a price is only meaningful together with the date
+and slot it was quoted for. The hunt's ceiling is therefore always evaluated
+against the **live offering for the target date and slot**, and the priority
+list is rebuilt from the live offering at the start of the hunt rather than
+reused from the setup screen.
+
+---
+
+## 6C. On success, the hunt stops and the user is told
+
+When a meal is successfully claimed:
+
+1. **The hunt terminates immediately.** No further polling, no waiting for a
+   second dish, no "shall I try the other option". A purchase is final, and
+   continuing to hunt would risk a second, unwanted purchase. This is not a
+   nicety: the never-retry-an-ambiguous-claim rule exists for the same reason.
+2. **A success notification is posted immediately**, naming the meal, the date
+   and the amount — the same Persian format as the reminder notifications, and
+   through the same channel, so it is visually consistent.
+3. The foreground service is released and the alarms are cancelled, because
+   there is nothing left to hunt for.
+
+The notification is posted **after** the outcome is known, never optimistically
+when the claim is sent: an ambiguous claim must not produce a success
+notification, because it may not have been a purchase at all.
+
 ---
 
 ## 7. How the engine uses it
@@ -194,11 +365,23 @@ The engine's existing `PollingPolicy` gains a mode where the interval depends
 on the current time:
 
 ```
+setup (once, before the loop):
+  read the live offering for the target date and slot
+  rebuild the priority list from it, with live prices
+  preflight:
+     - does the account already hold this (date, slot)?  -> refuse if so
+     - is the credit >= the sum of the priority list?     -> refuse if not
+     - is the server clock synced?                       -> refuse if not
+     - is the session alive?                             -> refuse if not
+  schedule the alarms
+
 loop:
-  preflight (clock synced? session alive? funds enough?)
   poll the basket
   parse and rank
   if matched -> claim (with the existing ambiguity rules)
+     if the claim SUCCEEDED:
+         post the success notification
+         stop the hunt, release the service, cancel the alarms
   wait:
     now = serverClock.now
     if inside the hunt window:
@@ -212,6 +395,10 @@ loop:
 Outside the hunt window the engine does **not** poll at all. It sleeps until
 the window opens, which is what keeps the request count near zero for a user
 who only hunts in the evening.
+
+The priority list is rebuilt from the **live offering at setup time**, not
+reused from the setup screen: a price belongs to a (date, slot), and a hunt
+that starts hours after the screen was filled must use the current figure.
 
 ### What does not change
 
@@ -231,7 +418,47 @@ safer, and it must not be allowed to weaken any of the rules above.
 ## 8. The UI
 
 A dedicated **"شکار" (hunt)** section in the reminders/settings area, using the
-portal's own phrase **"تعیین بازه زمانی و وعده غذایی"**.
+portal's own phrase **"تعیین بازه زمانی و وعده غذایی"** — "set the time range
+and the meal".
+
+The screen is a **wizard**, because each step depends on the one before it and
+because the portal's own vocabulary orders it that way:
+
+```
+  1. date      ─▶  2. meal slot  ─▶  3. dishes  ─▶  4. halls  ─▶  5. rate
+```
+
+### Step 1–2: the date and the meal
+
+Picking a date and a slot **fetches that date's official offering** and shows
+the dishes the portal actually serves then. The app never offers a dish the
+portal does not serve that day.
+
+The meal slot also sets the **peak window**, shown inline so the connection is
+visible rather than implied:
+
+> ناهار — بازه اوج: ۰۹:۰۰ تا ۱۵:۳۰
+
+### Step 3: the dishes
+
+The offered dishes appear as a list, each with its price in Toman. The user
+picks:
+
+- **both, in order** — the first is marked «اول» and the second «دوم», so the
+  order is unambiguous; or
+- **one** — a single dish, and the second is left unselected.
+
+Selecting a second choice is optional and never implied.
+
+### Step 4: the halls
+
+The same pattern for halls: **فقط مرکزی**, **فقط فنی**, or **هر دو** with an
+order. The hall names come from the portal for that account — the app never
+writes them itself.
+
+### Step 5: the rate
+
+The range slider, as below.
 
 ### The range slider
 
@@ -263,6 +490,28 @@ Reaching below 10s raises a modal (not a snackbar — it must be acknowledged)
 in Persian, stating the ban risk, the scope of that risk, and the projected
 request count. The confirm button is distinct from the cancel button; the
 default focus is cancel.
+
+### The pre-flight result
+
+When the user starts a hunt, the pre-flight (§6A) runs and its outcome is
+shown plainly:
+
+- **Refused** — the reason, in Persian, and which of the two conditions failed:
+  the account already holds that meal, or there is not enough credit. The hunt
+  does not start.
+- **Ready** — the summary: the dish, the hall, the window, the peak rate, and
+  the projected request count. One button starts it.
+
+### The success notification
+
+When the meal is claimed, the notification says what was bought, in the same
+Persian format as the reminders:
+
+> 🌙 خرید موفق
+> ناهار ۲۸ مهر — چلو اکبرجوجه، دوغ — مرکزی برادران
+> مبلغ: ۵۰٬۰۰۰ تومان
+
+Tapping it opens the reservations screen, where the meal now appears.
 
 ---
 
@@ -310,16 +559,26 @@ because crossing into peak mid-hunt is exactly when the rate should change.
 |---|---|
 | Clamping | Unit: values below/above the bounds are clamped, never rejected |
 | Peak detection | Unit: the boundary instants of each distribution window, in portal-local time |
+| The peak window follows the target meal | Unit: a lunch hunt peaks at 09:00–15:30, a dinner hunt at 16:30–20:30 |
 | Interval selection | Unit: peak inside the window, off-peak outside it, and the hunt window itself |
 | The timing rule | Unit with an injected clock: the next request starts at least `interval` after the previous one **finished** |
 | The ban warning | Widget: the modal appears below 10s and does not appear at or above it |
 | The slider | Widget: the projected count moves with the value |
+| Pre-flight: existing booking | Unit: refused when the account already holds that (date, slot) |
+| Pre-flight: credit | Unit: refused when the credit is below the sum of the priority list, and accepted when it is not |
+| The price is per (date, slot) | Unit: the ceiling is evaluated against the live offering, never a remembered price |
+| Halls by id, not name | Unit: a hall with a female name and the same id is still the same hall |
+| Terminate on success | Unit: the engine stops after one successful claim, does not poll again, and posts the success notification |
 | End to end | The engine with a fake clock and a scripted client: the request timeline is asserted against the expected schedule |
 
 The timing test is the important one. It is easy to write an engine that
 respects the interval when responses are instant and violates it when a
 response is slow, so the test uses a deliberately slow response and asserts the
 gap is measured from the response's end.
+
+The terminate-on-success test matters just as much: an engine that keeps
+hunting after a purchase would, with a two-dish priority list, buy a second
+meal the user did not ask for.
 
 ---
 
