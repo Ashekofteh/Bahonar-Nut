@@ -83,8 +83,16 @@ class ScriptedClient implements PortalClient {
   int reserveCalls = 0;
   int cancelCalls = 0;
 
+  /// Called at the start of each basket read.
+  ///
+  /// Lets a test observe *when* a poll happened, which is the only honest way
+  /// to assert the window invariant: a hunt outside its window must not poll
+  /// at all.
+  void Function()? onPoll;
+
   @override
   Future<BasketPage> fetchBasket(Session session, {String? cursor}) async {
+    onPoll?.call();
     final index = basketCalls < _basketPages.length
         ? basketCalls
         : (_basketPages.isEmpty ? -1 : _basketPages.length - 1);
@@ -217,17 +225,25 @@ class NoopSolver implements ChallengeSolver {
 
 /// Builds an engine whose sleep resolves immediately, so the poll loop runs
 /// synchronously in tests instead of waiting real jittered seconds.
-DefaultSnipeEngine buildEngine(ScriptedClient client) {
+///
+/// The clock is movable so a test can move the server time and watch the
+/// hunt's window behaviour: a hunt waits for its window rather than ending,
+/// and ends when the window closes.
+DefaultSnipeEngine buildEngine(
+  ScriptedClient client, {
+  MovableServerClock? clock,
+}) {
+  final theClock = clock ?? MovableServerClock(DateTime.utc(2026, 10, 18, 7, 0));
   final sessions = SessionManager(
     client: client,
     store: AlwaysStore(),
     solver: NoopSolver(),
-    clock: FixedServerClock.now(DateTime.utc(2026, 10, 18, 7, 0)),
+    clock: theClock,
   );
   return DefaultSnipeEngine(
     client: client,
     sessions: sessions,
-    clock: FixedServerClock.now(DateTime.utc(2026, 10, 18, 7, 0)),
+    clock: theClock,
     // Poll fast and deterministically: no real delay, no jitter surprises.
     defaultPolicy: const PollingPolicy(
       baseInterval: Duration.zero,
@@ -235,7 +251,16 @@ DefaultSnipeEngine buildEngine(ScriptedClient client) {
       jitterMax: 1.0,
     ),
     random: Random(1),
-    sleep: (_) async {},
+    // The sleep advances the server clock, because the engine's behaviour
+    // over time — waiting for a window, ending when it closes — is read off
+    // the clock. A sleep that did not advance it would leave the engine
+    // waiting forever.
+    sleep: (d) async => theClock.advance(d),
+    // A short wait slice, so a test that waits for a window does not need
+    // a real minute per check. It is an hour, because the fake sleep advances
+    // the clock by the whole slice: a one-second slice would race the clock
+    // through the entire window in a few milliseconds of real time.
+    waitSlice: const Duration(hours: 1),
   );
 }
 
@@ -535,12 +560,58 @@ void main() {
       );
     });
 
-    test('a window that is closed aborts rather than hunting', () async {
+    test('a window that is closed waits rather than hunting', () async {
       final client = ScriptedClient(basketPages: [
         [listing('L1')],
       ]);
-      final engine = buildEngine(client);
-      // Portal-local 10:00 UTC = 13:30, outside 08:00-09:00.
+      // Portal-local 10:30 — half an hour before the 11:00-12:00 window.
+      final clock = MovableServerClock(DateTime.utc(2026, 10, 18, 7, 0));
+      final engine = buildEngine(client, clock: clock);
+      final rule = SnipeRule(
+        id: 'r1',
+        account: 'a1',
+        slots: const {MealSlot.lunch},
+        windowStart: const ClockTime(11, 0),
+        windowEnd: const ClockTime(12, 0),
+        preferences: {
+          MealSlot.lunch: SlotPreference(
+            slot: MealSlot.lunch,
+            ranked: const [PreferencePair(hallId: '1', optionId: '62702')],
+          ),
+        },
+      );
+
+      // The time of every poll, as the clock saw it. The invariant is about
+      // *when* the hunt asked, not how many times: a hunt outside its window
+      // must not poll at all.
+      final pollTimes = <ClockTime>[];
+      client.onPoll = () => pollTimes.add(ClockTime(
+            clock.portalNow.hour,
+            clock.portalNow.minute,
+          ));
+
+      await engine.start(rule);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(
+        pollTimes.every((t) => t >= const ClockTime(11, 0) &&
+            t <= const ClockTime(12, 0)),
+        isTrue,
+        reason: 'a closed window must not be polled at all. Polls at: '
+            '$pollTimes',
+      );
+
+      await engine.stop('r1');
+    });
+
+    test('the run ends when the window closes after the hunt has run',
+        () async {
+      final client = ScriptedClient(basketPages: [
+        [listing('L1')],
+      ]);
+      // Portal-local 08:30 — inside an 08:00-09:00 window.
+      final clock = MovableServerClock(DateTime.utc(2026, 10, 18, 5, 0));
+      final engine = buildEngine(client, clock: clock);
       final rule = SnipeRule(
         id: 'r1',
         account: 'a1',
@@ -556,9 +627,14 @@ void main() {
       );
 
       await engine.start(rule);
-      await waitFor(() => !engine.isRunning('r1'));
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(client.basketCalls, greaterThan(0));
 
-      expect(client.basketCalls, 0);
+      // The window closes: the hunt is over.
+      clock.set(DateTime.utc(2026, 10, 18, 6, 0)); // 09:30 portal-local.
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(engine.isRunning('r1'), isFalse);
     });
   });
 

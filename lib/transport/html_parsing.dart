@@ -227,18 +227,47 @@ String? _attribute(String attributes, String name) {
 /// Parses a Rial amount, tolerating separators and Persian digits.
 ///
 /// The portal writes `225,000 ريال`; the value we need is the integer.
+///
+/// Only the *last* number in the string is the price. A dish name may carry
+/// digits of its own — `تخم مرغ2عدد/نان/چای/قند 150000 ریال` — and reading
+/// every digit in the string would make that dish cost 2,150,000 Rial instead
+/// of 150,000. The currency word marks the amount when it is there; without
+/// it, the amount is the last number the string carries.
 int? parseRial(String text) {
+  final source = _amountIn(text) ?? _lastNumberIn(text);
+  if (source == null) return null;
+
   final buffer = StringBuffer();
-  for (final rune in text.runes) {
+  for (final rune in source.runes) {
     if (rune >= 0x06F0 && rune <= 0x06F9) {
       // Persian digit -> ASCII.
       buffer.writeCharCode(rune - 0x06F0 + 0x30);
     } else if (rune >= 0x30 && rune <= 0x39) {
       buffer.writeCharCode(rune);
     }
-    // Separators and the currency word are dropped.
+    // Separators are dropped.
   }
   final digits = buffer.toString();
   if (digits.isEmpty) return null;
   return int.tryParse(digits);
+}
+
+/// The number immediately before the currency word, if there is one.
+///
+/// The word the portal writes the price with is matched here, so the amount
+/// can be told apart from the digits in a dish's own name. That is parsing
+/// portal text, never displaying an amount.
+String? _amountIn(String text) {
+  final pattern = RegExp(r'([\d۰-۹][\d۰-۹\s٬,]*)\s*' 'ریال');
+  return pattern.firstMatch(text)?.group(1);
+}
+
+/// The last run of digits in the string.
+String? _lastNumberIn(String text) {
+  final matches = RegExp(r'[\d۰-۹][\d۰-۹\s٬,]*').allMatches(text).toList();
+  if (matches.isEmpty) return null;
+
+  final last = matches.last.group(0)!;
+  // A trailing separator or space is not part of the number.
+  return last.trim().replaceFirst(RegExp(r'[\s٬,]+$'), '');
 }

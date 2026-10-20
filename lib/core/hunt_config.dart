@@ -393,6 +393,45 @@ class HuntConfig {
         riskAcknowledged: riskAcknowledged ?? this.riskAcknowledged,
       );
 
+  /// A copy aimed at a different date or meal slot.
+  ///
+  /// The dish and hall priority lists are **cleared**, because they belong to
+  /// the (date, slot) they were chosen for.
+  ///
+  /// A price is a property of a (date, slot): the same dish costs 150,000 Rial
+  /// as a breakfast and 500,000 Rial as a lunch. So a lunch dish left in the
+  /// list after the slot becomes breakfast is a dish the portal is not
+  /// offering — and the pre-flight, which demands the credit for the *sum* of
+  /// the priority list, would then refuse a hunt for 15,000 Toman because a
+  /// stale 50,000 Toman lunch dish was still on the list.
+  ///
+  /// The halls have the same problem in a milder form: the portal names the
+  /// halls it serves for a given day, and a hall it does not serve that day
+  /// cannot be bought from.
+  HuntConfig retargeted({
+    MealSlot? targetSlot,
+    DateTime? targetDate,
+  }) {
+    final slot = targetSlot ?? this.targetSlot;
+    final date = targetDate ?? this.targetDate;
+
+    final sameSlot = slot == this.targetSlot;
+    final sameDate = _sameDay(date, this.targetDate);
+    if (sameSlot && sameDate) return this;
+
+    return copyWith(
+      targetSlot: slot,
+      targetDate: date,
+      dishPriority: const [],
+      hallPriority: const [],
+    );
+  }
+
+  static bool _sameDay(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return a == b;
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
   /// The ranker's preference, built from the dish and hall priority lists.
   ///
   /// The cartesian product of the two lists, ordered dish-first: the first

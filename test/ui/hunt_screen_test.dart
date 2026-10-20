@@ -78,20 +78,114 @@ class _HuntHarnessState extends State<_HuntHarness> {
   }
 }
 
+/// Whether any match of [finder] is inside the viewport and can be tapped.
+///
+/// A widget that is built but scrolled out of the viewport cannot be tapped,
+/// so "it exists" is not the same as "it is reachable".
+bool _isVisible(Finder finder) {
+  for (final element in finder.evaluate()) {
+    final object = element.renderObject;
+    if (object is! RenderBox || !object.hasSize) continue;
+    final topLeft = object.localToGlobal(Offset.zero);
+    if (topLeft.dy + object.size.height > 0 && topLeft.dy < 600) return true;
+  }
+  return false;
+}
+
 void main() {
-  /// Scrolls until [text] is found, the way a user would.
+  /// Scrolls until [text] is found **and visible**, the way a user would.
   ///
   /// Matches on a substring, because a Persian amount is one `Text` whose
   /// content is a number and a unit — an exact match on the unit alone would
   /// never find it.
+  ///
+  /// Visibility matters: a widget that is built but scrolled out of the
+  /// viewport cannot be tapped, so stopping at "it exists" would leave the
+  /// tap landing on nothing.
   Future<void> scrollTo(WidgetTester tester, String text) async {
     final finder = find.textContaining(text);
     for (var attempt = 0; attempt < 12; attempt++) {
-      if (finder.evaluate().isNotEmpty) return;
+      if (_isVisible(finder)) return;
       await tester.drag(find.byType(Scrollable).first, const Offset(0, -400));
       await tester.pumpAndSettle();
     }
   }
+
+  group('the target', () {
+    testWidgets('the meal slot can be chosen', (tester) async {
+      HuntConfig? changed;
+
+      await tester.pumpWidget(wrap(HuntScreen(
+        config: HuntConfig(targetSlot: MealSlot.dinner),
+        dishes: dishes,
+        halls: const [central, technical],
+        onConfigChanged: (c) => changed = c,
+      )));
+
+      await scrollTo(tester, 'ناهار');
+      await tester.tap(find.text('ناهار'));
+      await tester.pumpAndSettle();
+
+      expect(changed!.targetSlot, MealSlot.lunch);
+    });
+
+    testWidgets('a new slot clears the dishes chosen for the old one',
+        (tester) async {
+      // The dishes belong to a (date, slot). A lunch dish left on the list
+      // after the slot becomes breakfast is a dish the portal is not
+      // offering, and the pre-flight demands the credit for the sum of the
+      // priority list — so it would refuse a hunt the balance could pay for.
+      HuntConfig? changed;
+
+      await tester.pumpWidget(wrap(HuntScreen(
+        config: HuntConfig(
+          targetSlot: MealSlot.lunch,
+          dishPriority: [
+            HuntDish(
+              optionId: '99999',
+              name: 'شوید پلو با تن ماهی',
+              priceRial: 500000,
+            ),
+          ],
+        ),
+        dishes: dishes,
+        halls: const [central, technical],
+        onConfigChanged: (c) => changed = c,
+      )));
+
+      await scrollTo(tester, 'صبحانه');
+      await tester.tap(find.text('صبحانه'));
+      await tester.pumpAndSettle();
+
+      expect(changed!.targetSlot, MealSlot.breakfast);
+      expect(changed!.dishPriority, isEmpty);
+    });
+
+    testWidgets('the target date is shown in Persian', (tester) async {
+      await tester.pumpWidget(wrap(HuntScreen(
+        config: HuntConfig(targetDate: DateTime.utc(2026, 10, 28)),
+        dishes: dishes,
+        halls: const [central, technical],
+        onConfigChanged: (_) {},
+      )));
+
+      // 28 October 2026 is 6 Aban 1405.
+      expect(find.textContaining('آبان'), findsOneWidget);
+    });
+
+    testWidgets('the peak window follows the chosen meal', (tester) async {
+      await tester.pumpWidget(wrap(HuntScreen(
+        config: HuntConfig(targetSlot: MealSlot.lunch),
+        dishes: dishes,
+        halls: const [central, technical],
+        onConfigChanged: (_) {},
+      )));
+
+      await scrollTo(tester, 'بازه اوج');
+      expect(find.textContaining('۰۹:۰۰'), findsWidgets,
+          reason: 'a lunch hunt peaks in the morning');
+    });
+  });
 
   group('the screen', () {
     testWidgets('shows the peak window for the target meal', (tester) async {

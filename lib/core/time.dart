@@ -104,6 +104,40 @@ class FixedServerClock implements ServerClock {
   Duration get staleness => _syncAge;
 }
 
+/// A [`ServerClock`] whose time the test moves.
+///
+/// The hunt's behaviour depends on the passage of time: it waits for its
+/// window to open, and it stops when the window closes. A clock frozen at one
+/// instant cannot exercise either, so a test that needs the transition drives
+/// this clock instead.
+///
+/// It is in `lib/core` rather than in the test tree because the engine's
+/// behaviour over time is a *domain* property, and a test double for a domain
+/// property belongs next to the property.
+class MovableServerClock implements ServerClock {
+  MovableServerClock(DateTime serverNowUtc)
+      : _nowUtc = serverNowUtc.toUtc(),
+        _syncedAt = DateTime.now().toUtc();
+
+  DateTime _nowUtc;
+  final DateTime _syncedAt;
+
+  /// Moves the clock forward.
+  void advance(Duration d) => _nowUtc = _nowUtc.add(d);
+
+  /// Moves the clock to an absolute instant.
+  void set(DateTime serverNowUtc) => _nowUtc = serverNowUtc.toUtc();
+
+  @override
+  DateTime get nowUtc => _nowUtc;
+
+  @override
+  bool get isSynced => true;
+
+  @override
+  Duration get staleness => DateTime.now().toUtc().difference(_syncedAt);
+}
+
 /// A [`ServerClock`] kept in step with the portal by observing its responses.
 ///
 /// The portal sends a standard RFC 1123 `Date` header. Treating that as the
@@ -146,6 +180,30 @@ class SyncedServerClock implements ServerClock {
       );
     }
     return _localNowUtc().add(offset);
+  }
+
+  /// Records an observation from a portal response.
+  ///
+  /// The portal sends a `Date` header on every response, so the clock does not
+  /// need a request of its own: any response is an opportunity to sync. A
+  /// response with no `Date` header is simply not an observation, and is
+  /// ignored rather than treated as a failure — the next response will carry
+  /// one.
+  ///
+  /// [serverDateUtc] is the parsed `Date` header, [roundTrip] the measured time
+  /// from sending the request to receiving the response, and [localReceivedAt]
+  /// the local instant the response arrived.
+  void observe({
+    DateTime? serverDateUtc,
+    required Duration roundTrip,
+    required DateTime localReceivedAt,
+  }) {
+    if (serverDateUtc == null) return;
+    syncFrom(
+      serverDateUtc: serverDateUtc,
+      roundTrip: roundTrip,
+      localReceivedAt: localReceivedAt,
+    );
   }
 
   /// Records a sync from a response.

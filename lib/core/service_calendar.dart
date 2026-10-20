@@ -92,4 +92,17 @@ class ServiceCalendar {
 
   /// True when no meal is served on the weekday of [date].
   bool isClosedOn(DateTime date) => isClosedAllDayOn(Weekday.fromDateTime(date));
+
+  /// The dates among [candidates] on which [slot] is served, in order.
+  ///
+  /// A date the halls are closed for [slot] is left out, because a hunt
+  /// aimed at it has nothing to buy: the market carries no listing for a
+  /// meal that is never served. The order of [candidates] is preserved, and
+  /// a candidate is compared by its civil date, so a date built in a
+  /// different time zone still matches.
+  List<DateTime> servableDates(
+    List<DateTime> candidates,
+    MealSlot slot,
+  ) =>
+      candidates.where((d) => isServedOn(d, slot)).toList();
 }

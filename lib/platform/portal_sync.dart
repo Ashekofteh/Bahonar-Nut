@@ -18,7 +18,6 @@ import '../core/local_meal_store.dart';
 import '../core/meal_invariant.dart';
 import '../core/models.dart';
 import '../core/portal.dart';
-import '../core/session.dart';
 import '../core/session_manager.dart';
 
 /// The outcome of a sync for one account.
@@ -65,51 +64,46 @@ class PortalSync {
   /// A failure is reported, not thrown: the user may have several accounts and
   /// one of them may be misconfigured, and the others should still work.
   Future<AccountSyncResult> sync(AccountId accountId) async {
-    final sessionResult = await sessions.ensureSession(accountId);
-    if (sessionResult is! SessionReady) {
+    try {
+      return await sessions.withSession(accountId, (session) async {
+        final balance = await client.fetchBalance(session);
+        final reservations = await client.fetchReservations(session);
+
+        // Replace this account's meals in the local mirror, so a meal the portal
+        // no longer lists does not linger in the reminders.
+        final others = mealStore
+            .all
+            .where((m) => m.accountId != accountId)
+            .toList();
+        final refreshed = <StoredMeal>[
+          ...others,
+          for (final reservation in reservations)
+            StoredMeal(
+              accountId: accountId,
+              date: reservation.date,
+              slot: reservation.slot,
+              source: MealSource.weeklyReservation,
+              capturedAt: DateTime.now().toUtc(),
+              optionId: reservation.option.id,
+              dishName: reservation.option.name,
+              hallName: reservation.hall.name,
+              priceRial: reservation.option.priceRial,
+            ),
+        ];
+        mealStore.replaceAll(refreshed);
+
+        return AccountSyncResult(
+          accountId: accountId,
+          ok: true,
+          balanceRial: balance.amountRial,
+          reservations: reservations,
+        );
+      });
+    } on SessionUnavailableException catch (e) {
       return AccountSyncResult(
         accountId: accountId,
         ok: false,
-        error: sessionResult is SessionUnavailable
-            ? sessionResult.reason
-            : 'ورود ناموفق بود.',
-      );
-    }
-
-    final session = sessionResult.session;
-
-    try {
-      final balance = await client.fetchBalance(session);
-      final reservations = await client.fetchReservations(session);
-
-      // Replace this account's meals in the local mirror, so a meal the portal
-      // no longer lists does not linger in the reminders.
-      final others = mealStore
-          .all
-          .where((m) => m.accountId != accountId)
-          .toList();
-      final refreshed = <StoredMeal>[
-        ...others,
-        for (final reservation in reservations)
-          StoredMeal(
-            accountId: accountId,
-            date: reservation.date,
-            slot: reservation.slot,
-            source: MealSource.weeklyReservation,
-            capturedAt: DateTime.now().toUtc(),
-            optionId: reservation.option.id,
-            dishName: reservation.option.name,
-            hallName: reservation.hall.name,
-            priceRial: reservation.option.priceRial,
-          ),
-      ];
-      mealStore.replaceAll(refreshed);
-
-      return AccountSyncResult(
-        accountId: accountId,
-        ok: true,
-        balanceRial: balance.amountRial,
-        reservations: reservations,
+        error: e.reason,
       );
     } catch (e) {
       return AccountSyncResult(

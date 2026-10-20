@@ -101,6 +101,45 @@ void main() {
     });
   });
 
+  group('month lengths', () {
+    test('the leap rule agrees with the conversion, for 200 years', () {
+      // The month length and the conversion have to agree: the conversion
+      // decides which day a month ends on, and the length says how many days
+      // it has. If they disagree, a calendar renders a day that does not
+      // exist — or swallows one that does.
+      //
+      // The check is over the whole range rather than a sample, because the
+      // leap year falls in a 33-year cycle with eight leap years in it, and a
+      // sample of a few years would not exercise the cycle at all.
+      for (var year = 1300; year <= 1500; year++) {
+        final nextFarvardin = fromJalali(JalaliDate(year + 1, 1, 1));
+        final lastDay = toJalali(
+          nextFarvardin.subtract(const Duration(days: 1)),
+        );
+
+        expect(
+          lastDay.month,
+          12,
+          reason: 'the day before Farvardin is in Esfand of $year',
+        );
+        expect(
+          lastDay.day,
+          jalaliMonthLength(year, 12),
+          reason: 'Esfand $year must have ${jalaliMonthLength(year, 12)} days',
+        );
+      }
+    });
+
+    test('the first six months have 31 days and the next five have 30', () {
+      for (var month = 1; month <= 6; month++) {
+        expect(jalaliMonthLength(1405, month), 31);
+      }
+      for (var month = 7; month <= 11; month++) {
+        expect(jalaliMonthLength(1405, month), 30);
+      }
+    });
+  });
+
   group('persian digits', () {
     test('converts ASCII digits', () {
       expect(toPersianDigits('1405'), '۱۴۰۵');

@@ -80,6 +80,26 @@ class PlatformBridge {
     await _call<void>('cancelAlarm', {'requestCode': requestCode});
   }
 
+  /// Starts the hunt's foreground service.
+  ///
+  /// The service keeps the process alive for the length of the hunt, which a
+  /// background job cannot be relied on to do: the system may defer it past
+  /// the very cutoff it is trying to hit.
+  ///
+  /// [payload] identifies the account whose hunt it is, so the Dart side knows
+  /// whose configuration to read.
+  Future<void> startHuntService({String? payload}) async {
+    await _call<void>('startHuntService', {'payload': payload});
+  }
+
+  /// Stops the hunt's foreground service.
+  ///
+  /// Called on every exit path, including a successful purchase: the service
+  /// is released the moment there is nothing left to hunt for.
+  Future<void> stopHuntService() async {
+    await _call<void>('stopHuntService');
+  }
+
   /// Invokes a platform method, surfacing any failure.
   ///
   /// A silent failure here is the worst kind: the app would appear to have

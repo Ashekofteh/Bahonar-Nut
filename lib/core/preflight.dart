@@ -25,9 +25,6 @@ enum PreflightFailure {
   /// The ruleset selects nothing this rule's slots could ever match.
   noPreferences,
 
-  /// The hunt window has already closed.
-  windowClosed,
-
   /// The portal is reachable but returned a balance we could not read.
   balanceUnreadable,
 
@@ -136,15 +133,21 @@ class PreflightChecker {
       notes.add('هیچ گزینه‌ای برای این وعده‌ها اولویت‌بندی نشده است.');
     }
 
-    // Window check, using portal-local time.
-    if (clock.isSynced) {
-      final portalNow = clock.portalNow;
-      final clockTime = ClockTime(portalNow.hour, portalNow.minute);
-      if (!rule.isWithinWindow(clockTime)) {
-        failures.add(PreflightFailure.windowClosed);
-        notes.add('بازه زمانی این قانون فعال نیست.');
-      }
-    }
+    // The window is deliberately NOT checked here.
+    //
+    // The spec's pre-flight is a list of *refusals*: conditions where starting
+    // the hunt would spend money on the wrong thing — the account already holds
+    // the meal, or the credit does not cover the priority list. A closed
+    // window is not on that list, because it is not a mistake: a hunt set up in
+    // the morning for the evening window is the normal case, and refusing it
+    // would make the feature unusable for every user who configures it ahead
+    // of time.
+    //
+    // Instead the engine *waits*: outside the window it does not poll at all,
+    // and starts when the window opens. That is the spec's behaviour, and it
+    // is also the safer one — the alternative (refusing) would push the user
+    // to start the hunt at 16:30 by hand, and a hunt started at the buzzer is
+    // a hunt that has not yet established its session.
 
     // The one-meal invariant, checked up front rather than at claim time.
     //

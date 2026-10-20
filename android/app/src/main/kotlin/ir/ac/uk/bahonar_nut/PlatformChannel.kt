@@ -146,10 +146,19 @@ class PlatformChannel(
 
                 // --- foreground service ---
                 "startHuntService" -> {
+                    // The service keeps the process alive for the length of the
+                    // hunt, and asks the Dart side to run it. The payload
+                    // identifies which account's hunt, so the Dart side knows
+                    // whose configuration to read.
+                    HuntService.start(context, call.argument<String>("payload"))
                     result.success(null)
                 }
 
                 "stopHuntService" -> {
+                    // Called on every exit path, including a purchase: the
+                    // service is released the moment there is nothing left to
+                    // hunt for, so it never becomes a battery drain.
+                    HuntService.stop(context)
                     result.success(null)
                 }
 

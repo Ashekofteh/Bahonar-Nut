@@ -126,8 +126,7 @@ class SessionManager {
       );
     }
 
-    return _login(accountId, credentials);
-  }
+    return _login(accountId, credentials);  }
 
   Future<SessionResult> _login(
     AccountId accountId,
@@ -211,6 +210,42 @@ class SessionManager {
   /// The cached session for an account, or null when none is live.
   Session? sessionFor(AccountId accountId) => _live[accountId];
 
+  /// Runs [read] with a live session, re-logging in if the portal has expired it.
+  ///
+  /// The portal answers an expired session by serving its login page — a
+  /// perfectly valid response that every parser would read as "the page had no
+  /// rows". For the hunt's reads that is the dangerous direction: an account
+  /// that already holds the meal would read as holding nothing, and the
+  /// one-meal pre-flight would pass on a false negative.
+  ///
+  /// So a bounced session is not an error the caller has to handle. It is
+  /// retried once with a fresh login, and only the second failure is reported.
+  ///
+  /// Throws [SessionUnavailable] when no session can be established at all.
+  Future<T> withSession<T>(
+    AccountId accountId,
+    Future<T> Function(Session session) read,
+  ) async {
+    var result = await ensureSession(accountId);
+    if (result is! SessionReady) {
+      throw SessionUnavailableException(result as SessionUnavailable);
+    }
+
+    try {
+      return await read(result.session);
+    } on LoginRejectedException {
+      // The session was rejected. It may be an expired session rather than
+      // bad credentials, so a fresh login is worth one attempt.
+    }
+
+    await invalidate(accountId);
+    result = await ensureSession(accountId, force: true);
+    if (result is! SessionReady) {
+      throw SessionUnavailableException(result as SessionUnavailable);
+    }
+    return read(result.session);
+  }
+
   /// Drops all in-memory sessions. Used when the app is backgrounded long
   /// enough that a clock offset may no longer hold.
   void clearMemory() => _live.clear();
@@ -224,6 +259,22 @@ class LoginRejectedException implements Exception {
 
   @override
   String toString() => 'LoginRejectedException: $message';
+}
+
+/// No session could be established for the account.
+///
+/// Thrown by [SessionManager.withSession], so a caller that only wants to make
+/// a read does not have to branch on [SessionResult] itself.
+class SessionUnavailableException implements Exception {
+  const SessionUnavailableException(this.unavailable);
+
+  final SessionUnavailable unavailable;
+
+  /// The reason, in the user's language.
+  String get reason => unavailable.reason;
+
+  @override
+  String toString() => 'SessionUnavailableException: ${unavailable.reason}';
 }
 
 /// The portal could not be reached, or returned something unusable.

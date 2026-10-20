@@ -174,6 +174,63 @@ void main() {
     });
   });
 
+  group('retargeting the hunt', () {
+    HuntConfig configured() => HuntConfig(
+          targetSlot: MealSlot.lunch,
+          targetDate: DateTime.utc(2026, 10, 22),
+          dishPriority: [
+            dish('a', 'شوید پلو با تن ماهی', 500000),
+          ],
+          hallPriority: [const HuntHall(id: '1', name: 'مرکزی برادران')],
+        );
+
+    test('a new slot clears the dish and hall lists', () {
+      // A price belongs to a (date, slot): the same dish costs 150,000 as a
+      // breakfast and 500,000 as a lunch. A lunch dish left on the list after
+      // the slot becomes breakfast is a dish the portal is not offering, and
+      // the pre-flight would demand credit for a meal the hunt cannot buy.
+      final retargeted = configured().retargeted(targetSlot: MealSlot.breakfast);
+
+      expect(retargeted.targetSlot, MealSlot.breakfast);
+      expect(retargeted.dishPriority, isEmpty);
+      expect(retargeted.hallPriority, isEmpty);
+    });
+
+    test('a new date clears the dish and hall lists', () {
+      final retargeted =
+          configured().retargeted(targetDate: DateTime.utc(2026, 10, 23));
+
+      expect(retargeted.targetDate, DateTime.utc(2026, 10, 23));
+      expect(retargeted.dishPriority, isEmpty);
+      expect(retargeted.hallPriority, isEmpty);
+    });
+
+    test('the same target keeps the lists', () {
+      final config = configured();
+
+      expect(config.retargeted(targetSlot: MealSlot.lunch), same(config));
+      expect(
+        config.retargeted(targetDate: DateTime.utc(2026, 10, 22)),
+        same(config),
+      );
+    });
+
+    test('the window and the rate are not disturbed', () {
+      final config = HuntConfig(
+        windowStart: const ClockTime(16, 30),
+        windowEnd: const ClockTime(20, 30),
+        targetSlot: MealSlot.lunch,
+        targetDate: DateTime.utc(2026, 10, 22),
+        dishPriority: [dish('a', 'لوبیا پلو', 350000)],
+      );
+
+      final retargeted = config.retargeted(targetSlot: MealSlot.dinner);
+
+      expect(retargeted.windowStart, const ClockTime(16, 30));
+      expect(retargeted.windowEnd, const ClockTime(20, 30));
+    });
+  });
+
   group('the projected request count', () {
     test('counts the peak and off-peak parts of the window', () {
       // A four-hour window fully inside the peak, at one request per five

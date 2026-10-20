@@ -23,6 +23,7 @@ import '../core/session_manager.dart';
 import '../core/snipe_engine.dart';
 import '../core/time.dart';
 import '../transport/http_transport.dart';
+import 'hunt_service.dart';
 import 'platform_bridge.dart';
 import 'reminder_service.dart';
 
@@ -46,11 +47,17 @@ class AppServices {
     DateTime Function()? now,
   }) {
     final theBridge = bridge ?? PlatformBridge();
-    final transport = PortalTransport(baseUri: Uri.parse(portalBaseUrl));
+    final clock = SyncedServerClock();
+    // The transport carries the clock so every response can sync it: the
+    // portal's `Date` header rides along on the reads the app was making
+    // anyway, and a hunt cannot start without a trustworthy server time.
+    final transport = PortalTransport(
+      baseUri: Uri.parse(portalBaseUrl),
+      clock: clock,
+    );
     final client = CullinanPortalClient(transport: transport);
     final credentialStore = theBridge.credentialStore;
     final plainStore = theBridge.plainStore;
-    final clock = SyncedServerClock();
 
     return AppServices(
       bridge: theBridge,
@@ -104,6 +111,9 @@ class AppServices {
     sessions: sessions,
     clock: clock,
   );
+
+  /// The hunt's platform service: runs the hunt and reports its outcome.
+  late final HuntService hunts = HuntService(bridge: bridge, engine: engine);
 
   /// The reminder service: builds digests, posts notifications, arms alarms.
   late final ReminderService reminders = ReminderService(

@@ -32,7 +32,7 @@ void main() {
       );
       expect(set.isTombstoned('a1', 'L1', t0), isTrue);
       expect(
-        set.isTombstoned('a1', 'L1', t0.add(const Duration(minutes: 14))),
+        set.isTombstoned('a1', 'L1', t0.add(const Duration(hours: 2))),
         isTrue,
       );
     });
@@ -46,8 +46,28 @@ void main() {
         now: t0,
       );
       expect(
-        set.isTombstoned('a1', 'L1', t0.add(const Duration(minutes: 16))),
+        set.isTombstoned('a1', 'L1', t0.add(const Duration(days: 2))),
         isFalse,
+      );
+    });
+
+    test('a lost listing is off-limits for a whole hunting window', () {
+      // The spec's rule is that a claimed-and-lost listing is "never
+      // re-attempted for the life of that listing". A cooldown measured in
+      // minutes would breach it: a hunt running past the cooldown would
+      // re-claim a listing it already lost, which is the tight loop against
+      // one dead resource that gets an account banned.
+      final set = TombstoneSet();
+      set.add(
+        accountId: 'a1',
+        listingId: 'L1',
+        reason: TombstoneReason.lostRace,
+        now: t0,
+      );
+      expect(
+        set.isTombstoned('a1', 'L1', t0.add(const Duration(hours: 6))),
+        isTrue,
+        reason: 'an evening hunt must not come back to a listing it lost',
       );
     });
 
@@ -140,12 +160,12 @@ void main() {
         accountId: 'a1',
         listingId: 'L1',
         reason: TombstoneReason.lostRace,
-        now: t0.add(const Duration(minutes: 14)),
+        now: t0.add(const Duration(hours: 20)),
       );
       expect(
-        set.isTombstoned('a1', 'L1', t0.add(const Duration(minutes: 16))),
+        set.isTombstoned('a1', 'L1', t0.add(const Duration(days: 2))),
         isFalse,
-        reason: 'the original 15-minute cooldown must still hold',
+        reason: 'the original cooldown must still hold, not be extended',
       );
     });
 

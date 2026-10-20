@@ -1473,3 +1473,138 @@ proven (`drpSelf` + `drpFood` + `btnSave`), and reads the hall list from the
 row that carries the dish. If a pair the portal does not offer is ever posted,
 the portal rejects it, and the engine tombstones that listing rather than
 retrying.
+
+---
+
+## 2026-10-20 — Session: the hunt wizard, verified on the emulator
+
+### F39 — A dish name may carry a digit, and the price parser took it for money
+
+The portal writes a dish as `تخم مرغ2عدد/نان/چای/قند 150000 ریال` — a name
+with a digit of its own, then the price, then the currency word. `parseRial`
+collected **every** digit in the string, so that dish cost **2,150,000 Rial**
+instead of 150,000: a fourteen-fold overcharge.
+
+It reached the user. The hunt screen showed `۲۱۵٬۰۰۰ تومان` for a dish the
+portal sells for `۱۵٬۰۰۰ تومان`, and the same figure fed the price ceiling
+and the pre-flight's credit check.
+
+**The rule:** the amount is the number immediately before the currency word;
+without that word, it is the *last* number the string carries. The currency
+word marks the amount, and the digits in a dish's name are not the amount.
+
+Verified live: the raw option text for `62758` is exactly
+`تخم مرغ2عدد/نان/چای/قند 150000 ریال`, and the portal's own price is 150,000.
+
+### F40 — A restored session's cookies were never put in the jar
+
+The cookie jar is filled by the portal's `Set-Cookie` headers. A session
+**restored from storage** was never a response, so the jar stayed empty and
+every request went out unauthenticated. The portal answered with the login
+page, and the app read that as an *expired session* — reported to the user as
+"اطلاعات ورود این حساب ذخیره نشده است" ("this account's login details are not
+stored"), which is a different problem entirely and sends the user to re-enter
+a password that *is* stored.
+
+The symptom is worth recording precisely because the two causes look alike:
+the account's credentials were gone (a real cause) and the session was fine
+but never applied (the bug). Both produced the same message.
+
+**The fix:** the client applies the session's cookies to the jar before every
+authenticated read or write. `AccountCookieJar.replaceAll` existed and had no
+caller — the method was written for this and never wired up.
+
+The cookies already in the jar are kept, not replaced: the portal's own
+`Set-Cookie` headers are fresher than what was stored, and replacing them
+wholesale would discard a rotated anti-XSRF token.
+
+### F41 — A dish list belongs to a (date, slot), and a stale one breaks the credit check
+
+A price is a property of a (date, slot): the same option costs 150,000 Rial as
+a breakfast and 500,000 Rial as a lunch. A lunch dish left on the priority
+list after the slot became breakfast is a dish the portal is not offering.
+
+The pre-flight demands the credit for the **sum** of the priority list, so a
+stale 500,000 Rial lunch dish refused a breakfast hunt that 150,000 Rial would
+have paid for — with "موجودی حساب برای خرید کافی نیست" ("your balance is not
+enough"), which points at the student's money rather than at the stale list.
+
+**Two rules, one idea:**
+
+1. The wizard **clears** the dish and hall lists when the date or the slot
+   changes. Those choices were made for a (date, slot) that is no longer the
+   target.
+2. The engine's rebuild **drops** a dish the portal serves for a *different*
+   meal on the target date, while **keeping** a dish the market is simply not
+   offering yet. The distinction matters: a listing that is not there *yet* is
+   exactly what a hunt waits for, because the market fills up during the
+   window. A dish from another meal is not that — it is a leftover.
+
+The hall list is cleared with the dishes for the same reason: the portal names
+the halls it serves for a given day, and a hall it does not serve that day
+cannot be bought from.
+
+### F42 — An empty market on a Friday is correct data, not a bug
+
+The hunt screen showed no dishes, and the stored configuration named 29 Aban
+1405 — a **Friday**, on which the halls are shut all day (F7). The portal
+serves nothing, so the market is empty. The empty list was the truth.
+
+The real defect was upstream of it: the date picker ranged over `now ± 60 days`
+off the **device** clock, with no notion of the serving calendar, so it offered
+a day the halls are shut. The picker now takes its range from the portal's
+own targetable dates and **disables** the days the chosen meal is not served —
+a day the halls are closed for that meal has no listing, so offering it and
+then finding it empty is a small lie.
+
+The picker also opens on a month it can actually offer, and its month arrows
+are disabled on a month with nothing in range.
+
+### F43 — Flutter mirrors the chevrons under RTL, so both arrows pointed inward
+
+`Icons.chevron_left` and `Icons.chevron_right` carry `matchTextDirection:
+true`, so under RTL Flutter draws the mirror image. In a row whose first
+child is the *rightmost* one, both arrows pointed **inward** at the month
+name — a calendar whose arrows point the wrong way.
+
+The fix is `textDirection: TextDirection.ltr` on the `Icon`, which draws the
+glyph as authored: the right-hand arrow points right, the left-hand one left.
+
+### F44 — The clock is unsynced until the first portal response, so the hunt tab starts empty
+
+`SyncedServerClock` syncs **only** from a portal response's `Date` header, and
+there is no request of its own. On a cold launch the clock is unsynced, so
+`_targetDates()` returns nothing and the hunt tab shows the red message
+"هنوز هیچ تاریخی برای شکار در دسترس نیست" ("no date is available for the
+hunt yet").
+
+That is honest — the app cannot know the portal's cutoff without the portal's
+clock — but it must not look like a broken screen. The reason is stated on
+screen rather than left to be inferred, and a refresh from the accounts tab
+syncs the clock and the hunt tab fills in.
+
+### F45 — The hunt was verified end to end on the emulator
+
+The full path, on the device, with the real portal:
+
+- The Jalali picker opens, its arrows point outwards, and only the served days
+  are enabled (Saturday is greyed out for breakfast; a Thursday is greyed out
+  for dinner).
+- Choosing a date reloads the market for **that** date, with live prices and
+  the portal's halls: `_onConfigChanged` → `loadMarket(date:, slot:)`.
+- The pre-flight **refused** with "already booked" for a lunch the account
+  held — confirmed against the live reservation grid, so the refusal was
+  correct.
+- With a (date, slot) the account did not hold, the pre-flight passed, the
+  button became "توقف شکار", and `HuntService` ran in the foreground with the
+  "پایش سبد غذا" notification:
+  `ServiceRecord{... ir.ac.uk.bahonar_nut/.HuntService} isForeground=true`.
+- Stopping the hunt released the service: `dumpsys activity services` reported
+  `(nothing)`.
+
+### F46 — The portal's own session, kept outside the app, is enough to read it
+
+The app's session survives a reinstall only as long as the portal keeps it.
+The session cookies can be replayed directly against the portal, which is what
+made the read-only probes possible — and it is why the reconnaissance
+directory is excluded from the repository: those cookies are a live credential.

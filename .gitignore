@@ -25,6 +25,10 @@ captures/
 auth_jar.txt
 cookies.txt
 
+# Device screenshots and UI dumps taken while verifying on the emulator.
+# Same reason: they are authenticated page snapshots.
+.shots/
+
 # Probe output — scratch diagnostics from the read-only portal probes.
 probe_*.txt
 .probe_out.txt

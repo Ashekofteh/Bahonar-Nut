@@ -59,15 +59,21 @@ class Tombstone {
 /// set would answer "was this ever tombstoned" rather than "is it tombstoned
 /// now", and the difference is exactly the bug this guards against.
 class TombstoneSet {
-  TombstoneSet({this.defaultCooldown = const Duration(minutes: 15)})
+  TombstoneSet({this.defaultCooldown = const Duration(days: 1)})
       : assert(defaultCooldown > Duration.zero, 'cooldown must be positive');
 
   /// How long to tombstone a listing whose own expiry is unknown.
   ///
-  /// A wrong value here is not dangerous in the "buys the wrong thing" sense —
-  /// too long merely forgoes a listing we would probably have lost anyway, too
-  /// short risks a re-poll. Fifteen minutes spans a normal hunting window
-  /// without outliving the listing.
+  /// The portal does not publish a listing's expiry, so this fallback decides
+  /// how long a lost listing is off-limits. The spec's rule is that a
+  /// claimed-and-lost listing is "never re-attempted for the life of that
+  /// listing", and a life measured in minutes would breach it: a hunt that
+  /// runs past the fallback would re-claim a listing it already lost, which
+  /// is the exact request pattern — a tight loop against one dead resource —
+  /// that gets an account banned.
+  ///
+  /// A day is long enough to cover any window a hunt runs in, and short
+  /// enough that the set cannot grow without bound.
   final Duration defaultCooldown;
 
   final List<Tombstone> _entries = [];

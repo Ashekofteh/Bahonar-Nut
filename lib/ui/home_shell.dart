@@ -4,6 +4,9 @@ import '../core/hunt_config.dart';
 import '../core/models.dart';
 import '../core/persian.dart';
 import '../core/preflight.dart';
+import '../core/session_manager.dart' show SessionUnavailableException;
+import '../core/time.dart';
+import '../platform/hunt_service.dart';
 import '../platform/platform_services.dart';
 import '../platform/portal_sync.dart';
 import 'app_state.dart';
@@ -65,21 +68,48 @@ class _HomeShellState extends State<HomeShell> {
   /// buy page is the marketplace, and its option ids do not even match the
   /// menu's. A hunt built from the official menu would let the user choose a
   /// dish that never appears in the market.
-  Future<void> loadMarket() async {
+  ///
+  /// The read is for the hunt's **target date and slot**, because the market
+  /// is a per-date view: the buy page is date-filtered, and a listing for
+  /// another day is not what the hunt is waiting for. A hunt for tomorrow's
+  /// dinner must show tomorrow's market, not today's.
+  ///
+  /// The read **establishes a session** rather than reusing one that happens
+  /// to be lying around. A hunt screen opened on a cold start would otherwise
+  /// show an empty market, and an empty market looks exactly like a market with
+  /// nothing on it — a message the user would read as "no food today" rather
+  /// than "the app could not reach the portal".
+  Future<void> loadMarket({DateTime? date, MealSlot? slot}) async {
     final accounts = widget.state.accounts;
     if (accounts.isEmpty) return;
 
-    final session = widget.services.sessions.sessionFor(accounts.first.id);
-    if (session == null) return;
+    final accountId = accounts.first.id;
+    final targetSlot = slot ?? _currentHuntConfig?.targetSlot;
+    final targetDate = date ?? _currentHuntConfig?.targetDate;
+
+    // Remember what this read is for, so a later change of target knows the
+    // list on screen is stale.
+    _marketFor = _currentHuntConfig;
 
     try {
-      final page = await widget.services.client.fetchBasket(session);
+      final page = await widget.services.sessions.withSession(
+        accountId,
+        (session) => widget.services.client.fetchBasket(
+          session,
+          cursor: targetDate == null ? null : _jalaliOf(targetDate),
+        ),
+      );
       if (!mounted) return;
 
       final byName = <String, HuntDishOption>{};
       final halls = <String, Hall>{};
 
       for (final listing in page.listings) {
+        // The market serves three meals a day. Only the chosen one is
+        // offered, because a hunt for dinner must not be shown a breakfast
+        // dish it would never buy.
+        if (targetSlot != null && listing.slot != targetSlot) continue;
+
         halls[listing.hall.id] = listing.hall;
         final key = normalizeDishName(listing.option.name);
         byName.putIfAbsent(
@@ -96,12 +126,30 @@ class _HomeShellState extends State<HomeShell> {
       setState(() {
         _marketDishes = byName.values.toList();
         _marketHalls = halls.values.toList();
+        _marketError = null;
       });
-    } catch (_) {
-      // A failed read leaves the list empty, and the screen says so. A hunt
-      // with no dishes would buy nothing, so there is no harm in the failure
-      // being quiet here — the pre-flight is what actually guards the money.
+    } on SessionUnavailableException catch (e) {
+      _reportMarketError(e.reason);
+    } catch (e) {
+      _reportMarketError('خواندن سبد غذا از سامانه ممکن نشد.');
     }
+  }
+
+  /// A civil date as the portal's `yyyy/MM/dd` Jalali string.
+  static String _jalaliOf(DateTime date) {
+    final jalali = toJalali(date);
+    return '${jalali.year}/${jalali.month.toString().padLeft(2, '0')}/'
+        '${jalali.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Records a failed market read, so the screen says why it is empty.
+  void _reportMarketError(String message) {
+    if (!mounted) return;
+    setState(() {
+      _marketDishes = const [];
+      _marketHalls = const [];
+      _marketError = message;
+    });
   }
 
   /// Reads every account's balance and reservations from the portal.
@@ -203,17 +251,27 @@ class _HomeShellState extends State<HomeShell> {
           });
         }
 
+        // A hunt with no stored target starts on the portal's today, not the
+        // device's. The device clock is not trusted for anything the portal
+        // decides, and the date it names is one of them.
+        final clock = widget.services.clock;
         final config = state.activeHuntConfig ??
-            HuntConfig(targetDate: DateTime.now().toUtc());
+            HuntConfig(
+              targetDate: clock.isSynced
+                  ? clock.portalTodayUtc
+                  : DateTime.now().toUtc(),
+            );
 
         return HuntScreen(
           config: config,
           dishes: _marketDishes,
           halls: _marketHalls,
+          marketError: _marketError,
+          targetDates: _targetDates(),
           isRunning: state.huntRunning,
           preflightSummary: state.huntPreflightSummary,
           preflightRefusal: state.huntPreflightRefusal,
-          onConfigChanged: (updated) => state.saveHuntConfig(updated),
+          onConfigChanged: (updated) => _onConfigChanged(updated),
           onStart: () => _startHunt(activeId, config),
           onStop: () => _stopHunt(activeId),
         );
@@ -228,9 +286,63 @@ class _HomeShellState extends State<HomeShell> {
   List<HuntDishOption> _marketDishes = const [];
   List<Hall> _marketHalls = const [];
 
+  /// Why the market could not be read, when it could not.
+  ///
+  /// Null means the read succeeded. An empty dish list is ambiguous on its
+  /// own — it reads as "the market has nothing" — so the failure is stated
+  /// rather than left for the user to infer.
+  String? _marketError;
+
+  /// The hunt configuration the market was last read for.
+  ///
+  /// Held so a stale read is not mistaken for a current one: the market is
+  /// read for a specific (date, slot), and a read for yesterday's dinner must
+  /// not be shown for today's.
+  HuntConfig? _marketFor;
+
+  /// The hunt configuration currently being edited.
+  HuntConfig? get _currentHuntConfig => widget.state.activeHuntConfig;
+
+  /// The dates the hunt may target.
+  ///
+  /// Only the dates whose reservation cutoff has not passed, because a hunt
+  /// for a locked date could never buy anything.
+  List<DateTime> _targetDates() {
+    final clock = widget.services.clock;
+    if (!clock.isSynced) return const [];
+
+    final first = clock.firstReservableDate();
+    return List.generate(
+      7,
+      (i) => DateTime.utc(first.year, first.month, first.day + i),
+    );
+  }
+
+  /// Saves a changed hunt configuration, and re-reads the market if the
+  /// target moved.
+  ///
+  /// The market is a per-(date, slot) view, so a change of target means the
+  /// dish list on screen is stale. The read is skipped when only the rate
+  /// changed — the dishes do not depend on the rate, and every read is a
+  /// request the portal sees.
+  Future<void> _onConfigChanged(HuntConfig updated) async {
+    await widget.state.saveHuntConfig(updated);
+
+    final previous = _marketFor;
+    final targetMoved = previous == null ||
+        previous.targetDate != updated.targetDate ||
+        previous.targetSlot != updated.targetSlot;
+
+    if (!targetMoved) return;
+
+    _marketFor = updated;
+    await loadMarket(date: updated.targetDate, slot: updated.targetSlot);
+  }
+
   /// Starts a hunt, after the pre-flight passes.
   Future<void> _startHunt(AccountId accountId, HuntConfig config) async {
     final engine = widget.services.engine;
+    final hunts = widget.services.hunts;
 
     // The ban risk is acknowledged before the hunt starts, not after: a rate
     // below ten seconds is a decision, and the decision is the user's.
@@ -259,12 +371,17 @@ class _HomeShellState extends State<HomeShell> {
     widget.state.setHuntPreflight(summary: _describeReady(config));
     widget.state.setHuntRunning(true);
 
-    await engine.start(rule, hunt: config);
+    // The listener must be in place before the hunt starts: the purchase
+    // notification is posted from it, and a hunt that wins in its first
+    // second must not find the listener missing.
+    engine.listener = HuntNotifier(service: hunts, accountId: accountId);
+
+    await hunts.start(accountId: accountId, config: config);
   }
 
   /// Stops a running hunt.
   Future<void> _stopHunt(AccountId accountId) async {
-    await widget.services.engine.stop('hunt-$accountId');
+    await widget.services.hunts.stop(accountId);
     widget.state.setHuntRunning(false);
   }
 

@@ -116,8 +116,14 @@ void main() {
       expect(result.failures, contains(PreflightFailure.noPreferences));
     });
 
-    test('window closed', () {
+    test('a closed window does not refuse the hunt', () {
       // Portal-local 10:00 UTC+3:30 = 13:30, outside an 08:00-09:00 window.
+      //
+      // The window is not a pre-flight condition. The spec's pre-flight is a
+      // list of refusals — the account already holds the meal, the credit does
+      // not cover the priority list — and a window that has not opened yet is
+      // the ordinary case for a hunt configured in advance. The engine waits
+      // for the window instead of refusing the hunt.
       final result = checker.check(
         rule: ruleWith(
           start: const ClockTime(8, 0),
@@ -126,7 +132,8 @@ void main() {
         clock: clock,
         session: readySession(),
       );
-      expect(result.failures, contains(PreflightFailure.windowClosed));
+      expect(result.failures, isEmpty);
+      expect(result.passed, isTrue);
     });
 
     test('insufficient funds', () {

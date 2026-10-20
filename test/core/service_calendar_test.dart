@@ -113,6 +113,40 @@ void main() {
       });
       expect(calendar.servedSlots(Weekday.sunday), MealSlot.values.toSet());
     });
+
+    test('servableDates leaves out the days the meal is not served', () {
+      // 19 October 2026 is a Monday, so the week runs Monday..Sunday.
+      final week = List.generate(
+        7,
+        (i) => DateTime.utc(2026, 10, 19 + i),
+      );
+
+      // Dinner is not served on Thursday, and Friday is shut all day.
+      final dinner = calendar.servableDates(week, MealSlot.dinner);
+      expect(dinner.length, 5);
+      expect(dinner.any((d) => d.weekday == DateTime.friday), isFalse);
+      expect(dinner.any((d) => d.weekday == DateTime.thursday), isFalse);
+
+      // Breakfast is not served on Saturday, and Friday is shut all day.
+      final breakfast = calendar.servableDates(week, MealSlot.breakfast);
+      expect(breakfast.length, 5);
+      expect(breakfast.any((d) => d.weekday == DateTime.saturday), isFalse);
+      expect(breakfast.any((d) => d.weekday == DateTime.friday), isFalse);
+
+      // Lunch is served on every day but Friday.
+      final lunch = calendar.servableDates(week, MealSlot.lunch);
+      expect(lunch.length, 6);
+      expect(lunch.any((d) => d.weekday == DateTime.friday), isFalse);
+    });
+
+    test('servableDates keeps the order it was given', () {
+      final dates = [
+        DateTime.utc(2026, 10, 20), // Tuesday.
+        DateTime.utc(2026, 10, 19), // Monday.
+      ];
+      final served = calendar.servableDates(dates, MealSlot.lunch);
+      expect(served, dates);
+    });
   });
 
   group('Persian names are present for every weekday', () {

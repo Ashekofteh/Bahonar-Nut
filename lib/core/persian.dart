@@ -147,6 +147,34 @@ DateTime fromJalali(JalaliDate jalali) {
   );
 }
 
+/// The number of days in a Jalali month.
+///
+/// The first six months have 31 days, the next five have 30, and Esfand has
+/// 29 — 30 in a leap year.
+int jalaliMonthLength(int year, int month) {
+  if (month <= 6) return 31;
+  if (month <= 11) return 30;
+  return isJalaliLeapYear(year) ? 30 : 29;
+}
+
+/// The years, modulo 33, that are leap years.
+///
+/// The Jalali calendar's leap year falls in a 33-year cycle, of which eight
+/// years are leap. A year is one of them when its remainder modulo 33 is in
+/// this set.
+///
+/// The set is not a simple arithmetic progression: the cycle skips a year at
+/// two points, which is why the rule is a list rather than a formula.
+const Set<int> _jalaliLeapRemainders = {1, 5, 9, 13, 17, 22, 26, 30};
+
+/// Whether a Jalali year is a leap year.
+///
+/// Verified against [toJalali] across 1300..1500 — see
+/// `persian_test.dart`. The rule and the conversion have to agree, because
+/// the conversion decides which day a month ends on.
+bool isJalaliLeapYear(int year) =>
+    _jalaliLeapRemainders.contains(year % 33);
+
 /// Parses a Jalali date in the portal's `yyyy/MM/dd` form.
 ///
 /// Returns null for anything that is not a Jalali date, so a caller never

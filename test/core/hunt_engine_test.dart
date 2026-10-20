@@ -85,8 +85,32 @@ class TimelineClient implements PortalClient {
   /// The date filter each poll was given, null for the page's default.
   final List<String?> cursors = [];
 
+  /// The portal-local time of each poll, as the clock saw it.
+  ///
+  /// Recorded because the window invariant is about *when* a poll happened:
+  /// a hunt outside its window must not poll at all, and the only honest way
+  /// to assert that is to check the time of every poll.
+  final List<ClockTime> pollTimes = [];
+
+  /// Called at the start of each poll, so a test can observe the clock.
+  void Function()? onPoll;
+
+  /// How many times the market was read for the run's setup.
+  int setupReads = 0;
+
+  /// The date filter the setup read was given.
+  String? setupCursor;
+
   /// The length of each simulated response.
   Duration responseDuration = Duration.zero;
+
+  /// The market as the *setup* read sees it.
+  ///
+  /// The engine reads the offering once at the start of a run, to rebuild the
+  /// priority list with live prices, and then polls. The two are different
+  /// requests and a test that scripted only the polls would find the setup
+  /// read consuming the first page.
+  List<Listing> offering = const [];
 
   int claimCalls = 0;
   int clock = 0;
@@ -95,8 +119,16 @@ class TimelineClient implements PortalClient {
 
   @override
   Future<BasketPage> fetchBasket(Session session, {String? cursor}) async {
+    // The first read of a run is the setup read; the rest are polls.
+    if (pollStarts.isEmpty && setupReads == 0) {
+      setupReads++;
+      setupCursor = cursor;
+      return BasketPage(listings: offering);
+    }
+
     pollStarts.add(clock);
     cursors.add(cursor);
+    onPoll?.call();
 
     final index = pages.isEmpty
         ? -1
@@ -257,7 +289,23 @@ class Harness {
     required this.config,
     required this.listener,
     DateTime? now,
-  }) : clock = FixedServerClock.now(now ?? DateTime.utc(2026, 10, 28, 12, 0)) {
+  }) : clock = MovableServerClock(now ?? DateTime.utc(2026, 10, 28, 12, 0)) {
+    // The setup read sees the same market the polls will.
+    //
+    // A hunt's priority list is rebuilt from the live offering, so the market
+    // a test scripts must be available to both reads. The offering is every
+    // listing the test scripted, deduplicated by name — a test that scripts
+    // "the market has this dish" means the same thing whether the listing
+    // appears on the first poll or the second.
+    final seen = <String>{};
+    final offering = <Listing>[];
+    for (final page in client.pages) {
+      for (final listing in page) {
+        if (seen.add(listing.option.dishKey)) offering.add(listing);
+      }
+    }
+    client.offering = offering;
+
     engine = DefaultSnipeEngine(
       client: client,
       sessions: SessionManager(
@@ -272,14 +320,21 @@ class Harness {
       sleep: (d) async {
         client.sleeps.add(d);
         client.advance(d);
+        // The server clock moves with the timeline: a hunt that waits for its
+        // window has to see the window open on the *clock*, not just on the
+        // client timeline.
+        clock.advance(d);
       },
+      // A short wait slice, so a test that waits for a window does not need
+      // a real minute per check.
+      waitSlice: const Duration(seconds: 1),
     );
   }
 
   final TimelineClient client;
   final HuntConfig config;
   final RecordingListener listener;
-  final FixedServerClock clock;
+  final MovableServerClock clock;
   late final DefaultSnipeEngine engine;
 }
 
@@ -531,6 +586,156 @@ void main() {
     });
   });
 
+  group('the live offering', () {
+    test('the priority list is rebuilt with the live price', () async {
+      // The setup screen quoted 350,000 for this dish; the market now says
+      // 500,000. A hunt that started hours later must use the current
+      // figure, both to cap what it pays and to demand the right credit.
+      final client = TimelineClient(pages: [
+        [
+          marketListing(
+            optionId: '99999',
+            name: 'لوبیا پلو',
+            priceRial: 500000,
+          ),
+        ],
+      ]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          dishes: [
+            HuntDish(optionId: '62742', name: 'لوبیا پلو', priceRial: 350000),
+          ],
+        ),
+        listener: RecordingListener(),
+        now: DateTime.utc(2026, 10, 28, 14, 30),
+      );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await harness.engine.stop('r1');
+
+      expect(client.setupReads, 1,
+          reason: 'the hunt reads the offering once, to rebuild the list');
+
+      // The hunt bought the listing at 500,000 — the live price — not the
+      // 350,000 the setup screen quoted. The rebuild is what made it.
+      expect(client.claimCalls, 1);
+      final ledger = harness.engine.ledgerFor('r1')!;
+      expect(
+        ledger.entries.any((e) => e.message.contains('قیمت')),
+        isTrue,
+        reason: 'the rebuild must be recorded, so the price used is explainable',
+      );
+    });
+
+    test('a dish the market is not offering yet stays on the list',
+        () async {
+      // The market offers a different dish. The hunt must keep waiting for
+      // the one the user named: a listing that is not there *yet* is exactly
+      // what a hunt waits for, and the market fills up during the window.
+      final client = TimelineClient(pages: [
+        [
+          marketListing(optionId: '99999', name: 'چلو گوشت', priceRial: 400000),
+        ],
+      ]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          dishes: [
+            HuntDish(optionId: '62742', name: 'لوبیا پلو', priceRial: 350000),
+          ],
+        ),
+        listener: RecordingListener(),
+        now: DateTime.utc(2026, 10, 28, 14, 30),
+      );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await harness.engine.stop('r1');
+
+      expect(client.claimCalls, 0,
+          reason: 'a hunt must never buy a dish the user did not name');
+      expect(client.pollStarts, isNotEmpty,
+          reason: 'the hunt must keep waiting for the dish it was asked for');
+    });
+
+    test('a dish the portal serves for another meal is dropped', () async {
+      // The market offers a lunch dish and the hunt is for breakfast. The
+      // lunch dish is not "not on offer yet" — it is a leftover from an
+      // earlier target — and the pre-flight demands the credit for the *sum*
+      // of the priority list, so keeping it would refuse a hunt that the
+      // balance could easily pay for.
+      final client = TimelineClient(pages: [
+        [
+          marketListing(
+            optionId: '99999',
+            name: 'شوید پلو با تن ماهی',
+            priceRial: 500000,
+            slot: MealSlot.lunch,
+          ),
+          marketListing(
+            optionId: '88888',
+            name: 'تخم مرغ2عدد',
+            priceRial: 150000,
+            slot: MealSlot.breakfast,
+          ),
+        ],
+      ]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          slot: MealSlot.breakfast,
+          dishes: [
+            HuntDish(
+              optionId: '99999',
+              name: 'شوید پلو با تن ماهی',
+              priceRial: 500000,
+            ),
+            HuntDish(
+              optionId: '88888',
+              name: 'تخم مرغ2عدد',
+              priceRial: 150000,
+            ),
+          ],
+        ),
+        listener: RecordingListener(),
+        now: DateTime.utc(2026, 10, 28, 14, 30),
+      );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await harness.engine.stop('r1');
+
+      // The breakfast dish was bought, and only that one. The lunch dish was
+      // dropped rather than paid for.
+      expect(client.claimCalls, 1);
+      final ledger = harness.engine.ledgerFor('r1')!;
+      expect(
+        ledger.entries.any((e) => e.message.contains('حذف شد')),
+        isTrue,
+        reason: 'the removal must be recorded, so the list is explainable',
+      );
+    });
+
+    test('the setup read is for the target date', () async {
+      final client = TimelineClient(pages: [[]]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(),
+        listener: RecordingListener(),
+        now: DateTime.utc(2026, 10, 28, 14, 30),
+      );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await harness.engine.stop('r1');
+
+      expect(client.setupCursor, '1405/08/06',
+          reason: 'the offering is per (date, slot), so the read is filtered');
+    });
+  });
+
   group('the hunt polls the target date', () {
     test('the basket is read with the target date as its filter', () async {
       final client = TimelineClient(pages: [[]]);
@@ -547,6 +752,83 @@ void main() {
 
       expect(client.cursors, isNotEmpty);
       expect(client.cursors.first, '1405/08/06');
+    });
+  });
+
+  group('waiting for the window', () {
+    test('a hunt never polls outside its window', () async {
+      final client = TimelineClient(pages: [[]]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          windowStart: const ClockTime(16, 30),
+          windowEnd: const ClockTime(20, 30),
+        ),
+        listener: RecordingListener(),
+        // 08:00 portal-local: well before the evening window opens.
+        now: DateTime.utc(2026, 10, 28, 4, 30),
+      );
+
+      // The clock is observed at every poll, so the assertion is about the
+      // *time* of each request rather than about how many there were.
+      client.onPoll = () => client.pollTimes.add(
+            portalTime(harness.clock.nowUtc),
+          );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await harness.engine.stop('r1');
+
+      expect(
+        client.pollTimes.every((t) => t >= const ClockTime(16, 30) &&
+            t <= const ClockTime(20, 30)),
+        isTrue,
+        reason: 'outside the window the hunt must not poll at all — that is '
+            'what keeps the request count near zero. Polls at: '
+            '${client.pollTimes}',
+      );
+    });
+
+    test('the hunt starts polling once its window opens', () async {
+      final client = TimelineClient(pages: [[]]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          windowStart: const ClockTime(16, 30),
+          windowEnd: const ClockTime(20, 30),
+        ),
+        listener: RecordingListener(),
+        // 16:29 portal-local: one minute before the window opens.
+        now: DateTime.utc(2026, 10, 28, 12, 59),
+      );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await harness.engine.stop('r1');
+
+      expect(client.pollStarts, isNotEmpty,
+          reason: 'the hunt must start polling once its window opens');
+    });
+
+    test('the hunt ends when the window closes', () async {
+      final client = TimelineClient(pages: [[]]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          windowStart: const ClockTime(16, 30),
+          windowEnd: const ClockTime(20, 30),
+        ),
+        listener: RecordingListener(),
+        // 20:29 portal-local: inside the window, one minute before it closes.
+        now: DateTime.utc(2026, 10, 28, 16, 59),
+      );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(harness.engine.isRunning('r1'), isFalse,
+          reason: 'the window closed, so the hunt is over');
+      expect(harness.listener.ends, isNotEmpty);
     });
   });
 

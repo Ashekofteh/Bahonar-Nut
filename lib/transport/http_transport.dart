@@ -16,6 +16,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../core/models.dart';
+import '../core/time.dart';
 import 'cookie_jar.dart';
 
 /// A response, with the server's clock reading attached.
@@ -78,6 +79,7 @@ class PortalTransport {
     this.timeout = const Duration(seconds: 30),
     this.userAgent =
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    this.clock,
   }) : _http = httpClient ?? http.Client();
 
   /// The portal's root. Every request path is resolved against it.
@@ -85,6 +87,18 @@ class PortalTransport {
   final http.Client _http;
   final Duration timeout;
   final String userAgent;
+
+  /// The clock kept in step with the portal's `Date` header.
+  ///
+  /// Optional: a transport used only for parsing, or in a test, has no clock to
+  /// sync. The app always supplies one — without a synced clock the hunt's
+  /// pre-flight refuses to start, because peak detection would otherwise be
+  /// guessing at the portal's time.
+  ///
+  /// The sync rides along on the reads the app was making anyway: every portal
+  /// response carries a `Date` header, so the clock never needs a request of
+  /// its own.
+  final SyncedServerClock? clock;
 
   /// One jar per account. Never mixed.
   final CookieJarStore jars = CookieJarStore();
@@ -114,6 +128,29 @@ class PortalTransport {
     Map<String, String>? headers,
   }) =>
       _send(accountId, 'POST', path, body: body, headers: headers);
+
+  /// Puts [cookies] into [accountId]'s jar.
+  ///
+  /// The jar is the only thing that sends cookies, and it is filled by the
+  /// responses the portal sends. A session that was **restored from storage**
+  /// was never a response: its cookies came from disk, so the jar is empty and
+  /// every request would go out unauthenticated — the portal would answer with
+  /// the login page, and the read would look like an expired session rather
+  /// than like a session that was never applied.
+  ///
+  /// The cookies already in the jar are kept: the portal's own `Set-Cookie`
+  /// headers are fresher than what was stored, and replacing them wholesale
+  /// would discard a rotated anti-XSRF token.
+  void restoreSession(
+    AccountId accountId,
+    Map<String, String> cookies,
+  ) {
+    if (cookies.isEmpty) return;
+    final jar = jars.jarFor(accountId);
+    for (final entry in cookies.entries) {
+      jar.setCookie('${entry.key}=${entry.value}');
+    }
+  }
 
   /// Fetches raw bytes, for the CAPTCHA image.
   ///
@@ -201,11 +238,25 @@ class PortalTransport {
       jar.setCookie(raw);
     }
 
+    final serverDateUtc = parseServerDate(response.headers['date']);
+
+    // Sync the clock from the response's `Date` header.
+    //
+    // The header reflects when the *server* generated the response, which was
+    // about half a round trip ago, so the observation is corrected by half the
+    // measured round trip. A response with no `Date` header is not an
+    // observation and is ignored: the next response will carry one.
+    clock?.observe(
+      serverDateUtc: serverDateUtc,
+      roundTrip: completedAt.difference(startedAt),
+      localReceivedAt: completedAt,
+    );
+
     return TransportResponse(
       statusCode: response.statusCode,
       body: _decodeBody(response),
       bytes: response.bodyBytes,
-      serverDateUtc: parseServerDate(response.headers['date']),
+      serverDateUtc: serverDateUtc,
       requestStartedAt: startedAt,
       requestCompletedAt: completedAt,
       headers: response.headers,

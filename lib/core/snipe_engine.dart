@@ -98,6 +98,13 @@ abstract class SnipeEngine {
   /// anything is bought.
   Future<PreflightResult> preflight(SnipeRule rule, {HuntConfig? hunt});
 
+  /// Where the engine reports a hunt's outcome.
+  ///
+  /// Settable rather than fixed, because the listener usually needs to know
+  /// *which* account the hunt belongs to — and the account is only known when
+  /// the hunt starts, long after the engine was built.
+  set listener(HuntOutcomeListener value);
+
   /// Stops a running rule and releases its resources.
   Future<void> stop(String ruleId);
 
@@ -119,8 +126,10 @@ class DefaultSnipeEngine implements SnipeEngine {
     this._listener = const NoopHuntListener(),
     Random? random,
     Future<void> Function(Duration)? sleep,
+    Duration? waitSlice,
   })  : _random = random ?? Random(),
-        _sleep = sleep ?? Future<void>.delayed;
+        _sleep = sleep ?? Future<void>.delayed,
+        _waitSlice = waitSlice ?? const Duration(minutes: 1);
 
   final PortalClient _client;
   final SessionManager _sessions;
@@ -130,8 +139,24 @@ class DefaultSnipeEngine implements SnipeEngine {
   final PreflightChecker _preflight;
   final ClaimReconciler _reconciler;
   final PollingPolicy _defaultPolicy;
-  final HuntOutcomeListener _listener;
   final Random _random;
+
+  /// How long the engine sleeps between checks while waiting for a window.
+  ///
+  /// Injected so a test can drive the wait without waiting a real minute per
+  /// check — the wait is a *clock* question, so the test controls the clock
+  /// and the cadence together.
+  final Duration _waitSlice;
+
+  /// Where the engine reports a hunt's outcome.
+  ///
+  /// Settable rather than fixed, because the listener usually needs to know
+  /// *which* account the hunt belongs to — and the account is only known when
+  /// the hunt starts, long after the engine was built.
+  HuntOutcomeListener _listener;
+
+  @override
+  set listener(HuntOutcomeListener value) => _listener = value;
 
   /// Injected so tests advance the loop without waiting real time.
   ///
@@ -234,11 +259,28 @@ class DefaultSnipeEngine implements SnipeEngine {
     if (session != null) {
       try {
         balance = await _client.fetchBalance(session);
+      } on LoginRejectedException {
+        // The portal expired the session. Re-authenticating and reading again
+        // is the only way to know whether the account already holds the meal:
+        // reading the bounced page would report "no rows" and the one-meal
+        // check would pass on a false negative.
+        final refreshed = await _sessions.withSession(
+          rule.account,
+          (fresh) => _client.fetchBalance(fresh),
+        );
+        balance = refreshed;
       } catch (_) {
         balance = null; // The checker reports this as balanceUnreadable.
       }
+
       try {
         holdings = await _client.fetchReservations(session);
+      } on LoginRejectedException {
+        final refreshed = await _sessions.withSession(
+          rule.account,
+          (fresh) => _client.fetchReservations(fresh),
+        );
+        holdings = refreshed;
       } catch (_) {
         holdings = null; // The checker reports this as holdingsUnreadable.
       }
@@ -272,7 +314,26 @@ class DefaultSnipeEngine implements SnipeEngine {
       final inputs = await _readPreflightInputs(rule);
       final session = _sessions.sessionFor(rule.account);
 
+      // A hunt's priority list is rebuilt from the **live** offering for the
+      // target date and slot, not reused from the setup screen.
+      //
+      // A price belongs to a (date, slot): the same option costs 2,150,000
+      // as a breakfast and 500,000 as a lunch. So a hunt that starts hours
+      // after the screen was filled — or for a different date than the one
+      // the screen was filled for — must use the current figure, both for the
+      // price it will pay and for the credit the pre-flight demands.
+      if (run.hunt != null) {
+        final rebuilt = await _rebuildFromLiveOffering(run, session);
+        if (rebuilt == null) return; // The read failed; the run has ended.
+        run.hunt = rebuilt;
+      }
+
+      // The pre-flight judges the *rebuilt* list. A dish the portal is not
+      // offering for the target date and slot has been dropped, and a hunt
+      // with nothing left to buy must be refused — not left polling a market
+      // it will never match.
       final hunt = run.hunt;
+
       final verdict = _preflight.check(
         rule: rule,
         clock: _clock,
@@ -308,6 +369,7 @@ class DefaultSnipeEngine implements SnipeEngine {
       _transition(run, SnipeState.hunting);
 
       // --- Hunt ---
+      run.session = session;
       await _hunt(run, session!, inputs.balance);
     } on SnipeCancelled {
       _finish(run, SnipeState.windowExpired, 'stopped by user');
@@ -344,25 +406,46 @@ class DefaultSnipeEngine implements SnipeEngine {
     final budget = RequestBudget(hunt?.requestBudget ?? policy.requestBudget);
 
     while (!run.isCancelled) {
-      // Window check each cycle: the window can close mid-hunt.
+      // The window is re-evaluated every cycle, because crossing into the
+      // window mid-hunt is exactly when the rate should change — and because
+      // a window that closes mid-hunt has to end the run.
       final now = _now();
       final clockTime = _clock.isSynced
           ? ClockTime(_clock.portalNow.hour, _clock.portalNow.minute)
           : null;
 
       if (clockTime != null && !rule.isWithinWindow(clockTime)) {
-        run.ledger.record(
-          at: now,
-          kind: LedgerEventKind.runEnded,
-          message: 'بازه زمانی به پایان رسید.',
-        );
-        _finish(run, SnipeState.windowExpired, 'window closed');
-        await _listener.onEnded(
-          ruleId: rule.id,
-          state: SnipeState.windowExpired,
-          reason: 'window closed',
-        );
-        return;
+        // Outside the window the hunt does **not** poll at all. It waits.
+        //
+        // The spec is explicit: outside the hunt window the engine does not
+        // poll, it sleeps until the window opens, which is what keeps the
+        // request count near zero for a user who only hunts in the evening.
+        //
+        // The distinction that matters is *which* side of the window we are
+        // on. A window that has not opened yet is a wait; a window that has
+        // closed after the hunt was running is the end of the hunt. The run
+        // knows the difference because it remembers whether it has ever polled
+        // inside the window.
+        if (run.hasHunted) {
+          run.ledger.record(
+            at: now,
+            kind: LedgerEventKind.runEnded,
+            message: 'بازه زمانی به پایان رسید.',
+          );
+          _finish(run, SnipeState.windowExpired, 'window closed');
+          await _listener.onEnded(
+            ruleId: rule.id,
+            state: SnipeState.windowExpired,
+            reason: 'window closed',
+          );
+          return;
+        }
+
+        // Wait for the window to open. No request is spent on the wait, so
+        // the request budget is untouched and the account sees no traffic.
+        final outcome = await _waitForWindow(run, clockTime);
+        if (outcome != _WindowWait.opened) return; // Cancelled, or gave up.
+        continue;
       }
 
       if (budget.isExhausted) {
@@ -381,7 +464,13 @@ class DefaultSnipeEngine implements SnipeEngine {
       }
 
       budget.spend();
-      final pollOk = await _pollOnce(run, session, balance);
+      // The run has now hunted: from here on, being outside the window means
+      // the window has closed rather than that it has yet to open.
+      run.hasHunted = true;
+      // The session is read from the run each cycle, not captured once: a hunt
+      // outlives the session it started with, and a poll that kept using the
+      // expired one would never see the market again.
+      final pollOk = await _pollOnce(run, run.session ?? session, balance);
 
       if (pollOk) {
         breaker.recordSuccess();
@@ -475,6 +564,250 @@ class DefaultSnipeEngine implements SnipeEngine {
     );
   }
 
+  /// Rebuilds the hunt's priority list from the live offering.
+  ///
+  /// Returns null when the offering could not be read, in which case the run
+  /// has already been ended — a hunt that proceeds with a stale price list
+  /// would demand the wrong credit and could buy at the wrong price.
+  ///
+  /// The **prices** are refreshed; the **dishes** are kept. A dish the market
+  /// is not offering right now is what a hunt waits for.
+  Future<HuntConfig?> _rebuildFromLiveOffering(_Run run, Session? session) async {
+    final hunt = run.hunt!;
+    final effectiveSession = session ?? run.session;
+    if (effectiveSession == null) return hunt;
+
+    final cursor = hunt.targetDate == null ? null : _jalaliOf(hunt.targetDate!);
+
+    BasketPage page;
+    try {
+      page = await _client.fetchBasket(effectiveSession, cursor: cursor);
+    } on LoginRejectedException {
+      try {
+        page = await _sessions.withSession(
+          run.rule.account,
+          (fresh) => _client.fetchBasket(fresh, cursor: cursor),
+        );
+        run.session = _sessions.sessionFor(run.rule.account);
+      } catch (error) {
+        run.ledger.record(
+          at: _now(),
+          kind: LedgerEventKind.runEnded,
+          message: 'خواندن غذاهای روز از سامانه ممکن نشد: $error',
+        );
+        _finish(run, SnipeState.aborted, 'offering unreadable');
+        await _listener.onEnded(
+          ruleId: run.rule.id,
+          state: SnipeState.aborted,
+          reason: 'offering unreadable',
+        );
+        return null;
+      }
+    } catch (error) {
+      run.ledger.record(
+        at: _now(),
+        kind: LedgerEventKind.runEnded,
+        message: 'خواندن غذاهای روز از سامانه ممکن نشد: $error',
+      );
+      _finish(run, SnipeState.aborted, 'offering unreadable');
+      await _listener.onEnded(
+        ruleId: run.rule.id,
+        state: SnipeState.aborted,
+        reason: 'offering unreadable',
+      );
+      return null;
+    }
+
+    // The live price for each dish, taken from the offering for the target
+    // date and slot.
+    final livePrice = <String, int>{};
+    final liveOptionId = <String, String>{};
+    // Which slots offer each dish on this date, so a dish that belongs to a
+    // *different* meal can be told apart from one that is simply not on
+    // offer yet.
+    final offeredIn = <String, Set<MealSlot>>{};
+
+    for (final listing in page.listings) {
+      final key = listing.option.dishKey;
+      offeredIn.putIfAbsent(key, () => <MealSlot>{}).add(listing.slot);
+      if (listing.slot != hunt.targetSlot) continue;
+      livePrice.putIfAbsent(key, () => listing.priceRial);
+      liveOptionId.putIfAbsent(key, () => listing.option.id);
+    }
+
+    // The prices are refreshed; a dish the market is not offering *right now*
+    // is **not** dropped.
+    //
+    // A dish the market is not offering right now is exactly what a hunt
+    // waits for — the market fills up during the window, which is the whole
+    // point of hunting. Dropping it would end the hunt before the listing it
+    // is waiting for appears.
+    //
+    // The price is the part that must be refreshed: it belongs to a
+    // (date, slot), and the hunt may start for a different one than the
+    // setup screen quoted. A dish the market is not offering keeps the price
+    // the setup screen quoted, because there is no live figure to use and a
+    // hunt with no price could not be credit-checked.
+    //
+    // A dish the portal serves for a **different** meal on this date is a
+    // different matter: it is not "not on offer yet", it is a dish left in
+    // the list from an earlier target. The pre-flight demands the credit for
+    // the *sum* of the priority list, so a stale 500,000 Rial lunch dish in a
+    // breakfast hunt would refuse a hunt that 150,000 Rial would have paid
+    // for. Such a dish is dropped.
+    final rebuilt = <HuntDish>[];
+    var repriced = 0;
+    var dropped = 0;
+    for (final dish in hunt.dishPriority) {
+      final price = livePrice[dish.dishKey];
+      if (price == null) {
+        final slots = offeredIn[dish.dishKey];
+        if (slots != null && !slots.contains(hunt.targetSlot)) {
+          dropped++;
+          continue;
+        }
+        rebuilt.add(dish);
+        continue;
+      }
+      if (price != dish.priceRial) repriced++;
+      rebuilt.add(HuntDish(
+        optionId: liveOptionId[dish.dishKey] ?? dish.optionId,
+        name: dish.name,
+        priceRial: price,
+      ));
+    }
+
+    run.ledger.record(
+      at: _now(),
+      kind: LedgerEventKind.preflightPassed,
+      message: _rebuildMessage(repriced: repriced, dropped: dropped),
+    );
+
+    return hunt.copyWith(dishPriority: rebuilt);
+  }
+
+  /// The ledger line describing what the rebuild did.
+  static String _rebuildMessage({required int repriced, required int dropped}) {
+    final parts = <String>[];
+    if (repriced > 0) {
+      parts.add('قیمت ${toPersianDigits(repriced)} غذا با پیشنهاد زنده سامانه '
+          'به‌روزرسانی شد');
+    } else {
+      parts.add('قیمت غذاها با پیشنهاد زنده سامانه بررسی شد');
+    }
+    if (dropped > 0) {
+      parts.add('${toPersianDigits(dropped)} غذای این وعده نبود و از فهرست '
+          'حذف شد');
+    }
+    return '${parts.join('، و ')}.';
+  }
+
+  /// Sleeps until the hunt's window opens.
+  ///
+  /// ## Why the wait is bounded
+  ///
+  /// A window is a time of day, so its next occurrence is either today or
+  /// tomorrow — the wait is bounded by construction. A hunt configured for a
+  /// window that can never open therefore cannot sleep forever, holding the
+  /// foreground service and the alarm with it.
+  ///
+  /// ## Why the wait re-reads the clock
+  ///
+  /// The wait is driven by the *server* clock, not by counting down. A device
+  /// that was dozing, or a clock that drifted while the hunt waited, would
+  /// otherwise wake up hours late and miss the very window it was waiting for.
+  ///
+  /// ## Why the wait is chopped up
+  ///
+  /// The wait is a sequence of short sleeps rather than one long one, so a
+  /// cancellation is noticed within a slice instead of at the end of the
+  /// window. The user pressing "stop" must not have to wait until evening.
+  ///
+  /// The slice is a minute: short enough that a cancellation is prompt, long
+  /// enough that a hunt waiting for an evening window does not wake the radio
+  /// hundreds of times before it opens.
+  Future<_WindowWait> _waitForWindow(_Run run, ClockTime now) async {
+    final rule = run.rule;
+
+    run.ledger.record(
+      at: _now(),
+      kind: LedgerEventKind.waiting,
+      message: 'بازه زمانی هنوز باز نشده است؛ شکار تا زمان باز شدن آن '
+          'منتظر می‌ماند و درخواستی نمی‌فرستد.',
+    );
+
+    // The wait ends at the window's own end, on the day the window next
+    // occurs.
+    //
+    // A window is a time of day, so it occurs today if it has not ended yet
+    // and tomorrow if it has. The deadline is that occurrence's *end*, which
+    // is exactly the moment the hunt would have been over had it been
+    // hunting. It is deliberately not a fixed number of hours: a hunt started
+    // at 16:00 for a 16:30 window must get its window today, and one started
+    // at 22:00 must get tomorrow's.
+    final deadline = _clock.isSynced
+        ? _windowEndUtc(rule, now)
+        : null;
+
+    final slice = _waitSlice;
+
+    while (!run.isCancelled) {
+      // The clock, not the countdown, decides when the wait is over: the hunt
+      // opens as soon as the portal says the window is open.
+      final current = _clock.isSynced
+          ? ClockTime(_clock.portalNow.hour, _clock.portalNow.minute)
+          : now;
+
+      if (rule.isWithinWindow(current)) return _WindowWait.opened;
+
+      if (deadline != null && !_clock.nowUtc.isBefore(deadline)) {
+        run.ledger.record(
+          at: _now(),
+          kind: LedgerEventKind.runEnded,
+          message: 'بازه زمانی باز نشد؛ شکار متوقف شد.',
+        );
+        _finish(run, SnipeState.windowExpired, 'window never opened');
+        await _listener.onEnded(
+          ruleId: rule.id,
+          state: SnipeState.windowExpired,
+          reason: 'window never opened',
+        );
+        return _WindowWait.gaveUp;
+      }
+
+      await _sleep(slice);
+    }
+
+    return _WindowWait.cancelled;
+  }
+
+  /// The instant the hunt's window ends, on the day it next occurs.
+  ///
+  /// Null when the clock is not synced, because the answer is a date and a
+  /// date cannot be guessed.
+  DateTime? _windowEndUtc(SnipeRule rule, ClockTime now) {
+    final today = _clock.portalTodayUtc;
+    final endMinutes = rule.windowEnd.minutesSinceMidnight;
+    final nowMinutes = now.minutesSinceMidnight;
+
+    // The window has already ended today, so its next occurrence is
+    // tomorrow's.
+    final day = endMinutes <= nowMinutes
+        ? today.add(const Duration(days: 1))
+        : today;
+
+    // The window is a *portal-local* wall-clock time, so the instant is that
+    // time minus the portal's offset — the same arithmetic the reservation
+    // cutoff uses.
+    return DateTime.utc(
+      day.year,
+      day.month,
+      day.day,
+      rule.windowEnd.hour,
+      rule.windowEnd.minute,
+    ).subtract(ServerClock.portalUtcOffset);
+  }
+
   /// One poll cycle. Returns false when the poll itself failed.
   ///
   /// Returns true when the poll succeeded, whether or not a match was found —
@@ -485,15 +818,34 @@ class DefaultSnipeEngine implements SnipeEngine {
     final hunt = run.hunt;
     final now = _now();
 
-    final BasketPage page;
+    // A hunt reads the basket for its *target date*: the buy page is
+    // date-filtered, and the market's listings for another day are not what
+    // the hunt is waiting for.
+    final cursor = hunt?.targetDate == null ? null : _jalaliOf(hunt!.targetDate!);
+
+    BasketPage page;
     try {
-      // A hunt reads the basket for its *target date*: the buy page is
-      // date-filtered, and the market's listings for another day are not
-      // what the hunt is waiting for.
-      page = await _client.fetchBasket(
-        session,
-        cursor: hunt?.targetDate == null ? null : _jalaliOf(hunt!.targetDate!),
-      );
+      page = await _client.fetchBasket(session, cursor: cursor);
+    } on LoginRejectedException {
+      // The portal expired the session mid-hunt. Re-authenticate and read
+      // again: the bounced page carries no listings, so a hunt that treated it
+      // as an empty market would keep polling against a dead session and
+      // never see the listing it is waiting for.
+      try {
+        page = await _sessions.withSession(
+          rule.account,
+          (fresh) => _client.fetchBasket(fresh, cursor: cursor),
+        );
+        run.session = _sessions.sessionFor(rule.account);
+      } catch (error) {
+        run.bumpPoll(now, error: error.toString());
+        run.ledger.record(
+          at: now,
+          kind: LedgerEventKind.polled,
+          message: 'خطا در دریافت سبد: $error',
+        );
+        return false;
+      }
     } catch (error) {
       run.bumpPoll(now, error: error.toString());
       run.ledger.record(
@@ -839,6 +1191,18 @@ class _PreflightInputs {
   final List<Reservation>? holdings;
 }
 
+/// How a wait for the hunt's window ended.
+enum _WindowWait {
+  /// The window opened, and the hunt may poll.
+  opened,
+
+  /// The run was cancelled while waiting.
+  cancelled,
+
+  /// The window never opened, and the run gave up.
+  gaveUp,
+}
+
 /// Mutable state for one running rule.
 class _Run {
   _Run({required this.rule, required this.status, this.hunt})
@@ -847,7 +1211,12 @@ class _Run {
   final SnipeRule rule;
 
   /// The hunt configuration, when this run is a hunt.
-  final HuntConfig? hunt;
+  ///
+  /// Replaced once at the start of the run, with the priority list rebuilt
+  /// from the live offering — the prices the setup screen quoted belong to
+  /// the date and slot it was filled for, and a hunt may start for a
+  /// different one.
+  HuntConfig? hunt;
 
   final SnipeLedger ledger;
   final TombstoneSet tombstones = TombstoneSet();
@@ -858,9 +1227,39 @@ class _Run {
   Future<void> future = Future<void>.value();
   bool _cancelled = false;
 
+  /// Completes when the run is cancelled.
+  ///
+  /// A hunt can wait hours for its window to open, and a wait that ignored
+  /// cancellation would make "stop" block for the whole wait — the user would
+  /// tap stop and the app would keep the hunt alive until evening.
+  final Completer<void> _cancelledSignal = Completer<void>();
+
+  /// The session the run is polling with.
+  ///
+  /// Held on the run rather than passed down, because a hunt outlives the
+  /// session it started with: the portal expires it, and the run has to be
+  /// able to pick up a fresh one without being restarted.
+  Session? session;
+
+  /// Whether the run has ever polled inside its window.
+  ///
+  /// This is what separates a window that has *not opened yet* from one that
+  /// has *closed*. Before the first poll inside the window, being outside it
+  /// means "wait"; after it, being outside it means the hunt is over. Without
+  /// this the run would either end before it ever started, or wait forever
+  /// after its window had already passed.
+  bool hasHunted = false;
+
   bool get isCancelled => _cancelled;
 
-  void cancel() => _cancelled = true;
+  /// Completes when the run is cancelled.
+  Future<void> get cancelled => _cancelledSignal.future;
+
+  void cancel() {
+    if (_cancelled) return;
+    _cancelled = true;
+    if (!_cancelledSignal.isCompleted) _cancelledSignal.complete();
+  }
 
   void emit() {
     if (!controller.isClosed) controller.add(status);

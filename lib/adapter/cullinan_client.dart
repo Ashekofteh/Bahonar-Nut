@@ -135,6 +135,7 @@ class CullinanPortalClient implements PortalClient {
     // A session refresh is a cheap authenticated GET: if the portal still
     // recognises the cookies it serves the page, and if not it bounces to the
     // login form.
+    _applySession(session);
     final response = await transport.get(session.account, _Paths.reservation);
     if (response.looksLikeLoginPage) {
       throw const LoginRejectedException('نشست منقضی شده است.');
@@ -145,6 +146,17 @@ class CullinanPortalClient implements PortalClient {
       cookies: jar.cookies,
       establishedAt: session.establishedAt,
     );
+  }
+
+  /// Puts [session]'s cookies into the transport's jar.
+  ///
+  /// The jar is filled by the responses the portal sends, so a session that
+  /// was restored from storage — never a response — would go out
+  /// unauthenticated. The portal would answer with the login page, and the
+  /// read would be reported as an expired session rather than as a session
+  /// that was never applied.
+  void _applySession(Session session) {
+    transport.restoreSession(session.account, session.cookies);
   }
 
   @override
@@ -164,6 +176,7 @@ class CullinanPortalClient implements PortalClient {
 
   @override
   Future<DateTime> fetchServerTime(Session session) async {
+    _applySession(session);
     // The `Date` header is authoritative and needs no page of its own.
     final response = await transport.get(session.account, _Paths.reservation);
     final serverDate = response.serverDateUtc;
@@ -175,9 +188,24 @@ class CullinanPortalClient implements PortalClient {
 
   // ---------------------------------------------------------------- reads
 
+  /// Throws when a read came back as the login form rather than the page.
+  ///
+  /// The portal answers an expired session by serving the login page, which is
+  /// a perfectly valid response — and which every parser downstream would
+  /// misread as "the page had no rows". So the bounce is detected here and
+  /// reported as [LoginRejectedException], which tells the caller to log in
+  /// again rather than to conclude the account holds nothing.
+  static void _rejectIfBounced(TransportResponse response) {
+    if (response.looksLikeLoginPage) {
+      throw const LoginRejectedException('نشست منقضی شده است.');
+    }
+  }
+
   @override
   Future<Balance> fetchBalance(Session session) async {
+    _applySession(session);
     final page = await transport.get(session.account, _Paths.reservation);
+    _rejectIfBounced(page);
     final text = labelText(page.body, 'lblCredit');
     if (text == null) {
       throw const PortalUnreachableException('موجودی خوانده نشد.');
@@ -195,18 +223,23 @@ class CullinanPortalClient implements PortalClient {
     DateTime date,
   ) async {
     final page = await transport.get(session.account, _Paths.reservation);
+    _rejectIfBounced(page);
     return _parseOfferings(page.body, date);
   }
 
   @override
   Future<List<Reservation>> fetchReservations(Session session) async {
+    _applySession(session);
     final page = await transport.get(session.account, _Paths.reservation);
+    _rejectIfBounced(page);
     return _parseReservations(page.body);
   }
 
   @override
   Future<List<Transaction>> fetchTransactions(Session session) async {
+    _applySession(session);
     final page = await transport.get(session.account, _Paths.transactions);
+    _rejectIfBounced(page);
     return CullinanParser.parseTransactions(
       page.body,
       accountId: session.account,
@@ -215,6 +248,7 @@ class CullinanPortalClient implements PortalClient {
 
   @override
   Future<BasketPage> fetchBasket(Session session, {String? cursor}) async {
+    _applySession(session);
     // The basket page is filtered by date, and the cursor is the Jalali date
     // the caller wants. Verified live 2026-10-20: the page's own `txtDate`
     // field agrees with the rows it renders, so a GET alone returns the page's
@@ -222,6 +256,7 @@ class CullinanPortalClient implements PortalClient {
     // postback.
     final wanted = cursor ?? _todayJalali();
     final first = await transport.get(session.account, _Paths.basketBuy);
+    _rejectIfBounced(first);
 
     if (CullinanParser.buyPageDate(first.body) == wanted) {
       return BasketPage(listings: _parseBasket(first.body, wanted));
@@ -253,6 +288,7 @@ class CullinanPortalClient implements PortalClient {
 
   @override
   Future<ClaimResult> claim(Session session, ListingId listingId) async {
+    _applySession(session);
     // `listingId` is the composite `date|slot|hall|option`, so it is
     // decomposed back into the parts the claim POST needs. The hall is part of
     // the identity: a purchase names a hall as well as a dish.
@@ -279,6 +315,7 @@ class CullinanPortalClient implements PortalClient {
 
   @override
   Future<Reservation> reserve(Session session, MealOffering offering) async {
+    _applySession(session);
     final page = await transport.get(session.account, _Paths.reservation);
     final grid = _gridForSlot(offering.slot);
     final body = _reservationFormBody(page.body, offering, grid);
@@ -361,6 +398,7 @@ class CullinanPortalClient implements PortalClient {
 
   @override
   Future<void> cancel(Session session, MealId mealId) async {
+    _applySession(session);
     final page = await transport.get(session.account, _Paths.reservation);
     await transport.post(session.account, _Paths.reservation, body: {
       '__VIEWSTATE': hiddenFieldValue(page.body, '__VIEWSTATE'),

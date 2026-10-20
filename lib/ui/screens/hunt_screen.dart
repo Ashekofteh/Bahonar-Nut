@@ -22,9 +22,12 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/hunt_config.dart';
+import '../../core/hunt_notify.dart';
 import '../../core/models.dart';
 import '../../core/persian.dart';
+import '../../core/service_calendar.dart';
 import '../../core/time.dart';
+import '../jalali_date_picker.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -61,13 +64,27 @@ class HuntScreen extends StatefulWidget {
     this.onStart,
     this.onStop,
     this.isRunning = false,
+    this.marketError,
+    this.targetDates = const [],
   });
+
+  /// The dates the portal will serve that the hunt may target.
+  ///
+  /// Only the dates that are still open are offered, because a hunt for a
+  /// locked date could never buy anything — the reservation cutoff has passed.
+  final List<DateTime> targetDates;
 
   /// The dishes the portal offers for the chosen date and slot.
   final List<HuntDishOption> dishes;
 
   /// The halls the portal named for this account.
   final List<Hall> halls;
+
+  /// Why the market could not be read, when it could not.
+  ///
+  /// Null means the read succeeded. An empty dish list is ambiguous on its
+  /// own — it reads as "the market has nothing" — so the failure is stated.
+  final String? marketError;
 
   /// The configuration being edited.
   final HuntConfig config;
@@ -104,11 +121,18 @@ class _HuntScreenState extends State<HuntScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         children: [
+          _TargetCard(
+            config: config,
+            dates: widget.targetDates,
+            onChanged: widget.onConfigChanged,
+          ),
+          const SizedBox(height: 12),
           _WindowCard(config: config, onChanged: widget.onConfigChanged),
           const SizedBox(height: 12),
           _DishesCard(
             config: config,
             dishes: widget.dishes,
+            error: widget.marketError,
             onChanged: widget.onConfigChanged,
           ),
           const SizedBox(height: 12),
@@ -134,6 +158,203 @@ class _HuntScreenState extends State<HuntScreen> {
   }
 }
 
+/// The target: the date and the meal the hunt is buying.
+///
+/// Wizard steps one and two. They come first because every later step depends
+/// on them — the portal serves a different set of dishes on each day, and the
+/// meal decides which distribution window the hunt peaks in.
+class _TargetCard extends StatelessWidget {
+  const _TargetCard({
+    required this.config,
+    required this.dates,
+    required this.onChanged,
+  });
+
+  final HuntConfig config;
+  final List<DateTime> dates;
+  final void Function(HuntConfig) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SectionCard(
+      title: 'تاریخ و وعده',
+      subtitle: 'شکار برای این تاریخ و این وعده انجام می‌شود؛ غذاهایی که '
+          'سامانه در همان روز ارائه می‌کند همین‌جا فهرست می‌شوند.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DateRow(
+            date: config.targetDate,
+            dates: dates,
+            slot: config.targetSlot,
+            onChanged: (d) => onChanged(config.retargeted(targetDate: d)),
+          ),
+          if (dates.isEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'هنوز هیچ تاریخی برای شکار در دسترس نیست. این معمولاً یعنی '
+              'ساعت سرور همگام نشده است یا مهلت رزرو همه تاریخ‌ها گذشته است.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text('وعده', style: theme.textTheme.bodyMedium),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final slot in MealSlot.values)
+                ChoiceChip(
+                  label: Text(mealSlotPersian(slot)),
+                  selected: config.targetSlot == slot,
+                  onSelected: (_) => onChanged(config.retargeted(targetSlot: slot)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _PeakNote(slot: config.targetSlot),
+        ],
+      ),
+    );
+  }
+}
+
+/// The peak window the chosen meal implies.
+///
+/// Shown inline with the slot picker so the connection between "which meal"
+/// and "when the hunt is hot" is visible rather than implied.
+class _PeakNote extends StatelessWidget {
+  const _PeakNote({required this.slot});
+
+  final MealSlot slot;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final peak = distributionWindows[slot]!;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.5),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.bolt, size: 20, color: theme.colorScheme.secondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'بازه اوج ${mealSlotPersian(slot)}: '
+              '${formatClockTimePersian(peak.start.hour, peak.start.minute)}'
+              ' تا '
+              '${formatClockTimePersian(peak.end.hour, peak.end.minute)}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.secondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The target date, with a picker over the dates the portal will still serve.
+class _DateRow extends StatelessWidget {
+  const _DateRow({
+    required this.date,
+    required this.dates,
+    required this.slot,
+    required this.onChanged,
+  });
+
+  final DateTime? date;
+  final List<DateTime> dates;
+  final MealSlot slot;
+  final void Function(DateTime?) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return InkWell(
+      onTap: () async {
+        // The calendar is the app's own Jalali one: Flutter's picker renders
+        // a Gregorian calendar even under the Persian locale, which is a
+        // hybrid the portal and the rest of the app never use.
+        //
+        // The range comes from [dates] — the dates the portal will still
+        // serve — and never from the device clock. The device clock is not
+        // trusted for anything the portal decides, and a date picked off it
+        // can be a day the halls are shut, which is a hunt for a meal that
+        // will never be served.
+        final calendar = const ServiceCalendar();
+
+        if (dates.isEmpty) {
+          // Nothing is reservable, so there is nothing to pick. The reason is
+          // on the screen already — the portal could not be read, or the
+          // cutoff has passed for every date in range.
+          return;
+        }
+
+        final first = dates.first;
+        final last = dates.last;
+        final servable = calendar.servableDates(dates, slot);
+
+        final picked = await showJalaliDatePicker(
+          context: context,
+          initial: date ?? first,
+          first: first,
+          last: last,
+          // A day the halls are closed for this meal has no listing, so it is
+          // drawn disabled rather than offered and then found to be empty.
+          isSelectable: (d) => calendar.isServedOn(d, slot),
+          helpText: 'تاریخ غذا',
+        );
+        if (picked == null) return;
+
+        // Guard rather than trust: the dialog disables the unserved days, but
+        // a hunt for a shut day buys nothing, and the pre-flight would then
+        // refuse a hunt the user believes they set up.
+        if (!calendar.isServedOn(picked, slot)) return;
+        if (servable.isEmpty) return;
+
+        onChanged(DateTime.utc(picked.year, picked.month, picked.day));
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.event, size: 20, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Text('تاریخ', style: theme.textTheme.bodyMedium),
+            const Spacer(),
+            Text(
+              date == null ? 'انتخاب کنید' : formatPersianDate(date!),
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// The hunt's own window, and the peak window it implies.
 class _WindowCard extends StatelessWidget {
   const _WindowCard({required this.config, required this.onChanged});
@@ -144,12 +365,11 @@ class _WindowCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final peak = config.peakWindow;
 
     return SectionCard(
       title: 'بازه زمانی',
       subtitle: 'شکار فقط در این بازه اجرا می‌شود؛ بیرون از آن هیچ درخواستی '
-          'فرستاده نمی‌شود.',
+          'فرستاده نمی‌شود و شکار تا باز شدن بازه منتظر می‌ماند.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -164,33 +384,16 @@ class _WindowCard extends StatelessWidget {
             value: config.windowEnd,
             onChanged: (t) => onChanged(config.copyWith(windowEnd: t)),
           ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.5),
+          if (config.peakOverlapSeconds == 0) ...[
+            const SizedBox(height: 12),
+            Text(
+              'این بازه با بازه اوج هم‌پوشانی ندارد، پس شکار همیشه با نرخ '
+              'بیرون از اوج بررسی می‌کند.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
             ),
-            child: Row(
-              children: [
-                Icon(Icons.bolt,
-                    size: 20, color: theme.colorScheme.secondary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'بازه اوج ${mealSlotPersian(config.targetSlot)}: '
-                    '${formatClockTimePersian(peak.start.hour, peak.start.minute)}'
-                    ' تا '
-                    '${formatClockTimePersian(peak.end.hour, peak.end.minute)}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.secondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          ],
         ],
       ),
     );
@@ -264,11 +467,15 @@ class _DishesCard extends StatelessWidget {
     required this.config,
     required this.dishes,
     required this.onChanged,
+    this.error,
   });
 
   final HuntConfig config;
   final List<HuntDishOption> dishes;
   final void Function(HuntConfig) onChanged;
+
+  /// Why the market could not be read, when it could not.
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
@@ -280,9 +487,11 @@ class _DishesCard extends StatelessWidget {
           'می‌شود. انتخاب دومی اختیاری است.',
       child: dishes.isEmpty
           ? Text(
-              'برای این تاریخ و وعده غذایی در سامانه موجود نیست.',
+              error ?? 'برای این تاریخ و وعده غذایی در سامانه موجود نیست.',
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+                color: error == null
+                    ? theme.colorScheme.onSurfaceVariant
+                    : theme.colorScheme.error,
               ),
             )
           : Column(
@@ -770,18 +979,6 @@ class _Banner extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-/// The meal slot's name, in the portal's own words.
-String mealSlotPersian(MealSlot slot) {
-  switch (slot) {
-    case MealSlot.breakfast:
-      return 'صبحانه';
-    case MealSlot.lunch:
-      return 'ناهار';
-    case MealSlot.dinner:
-      return 'شام';
   }
 }
 

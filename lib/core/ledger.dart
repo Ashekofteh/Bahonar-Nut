@@ -46,6 +46,12 @@ enum LedgerEventKind {
   /// Reconciliation established ground truth after an ambiguous claim.
   reconciled,
 
+  /// The run is waiting for its window to open, and is sending no requests.
+  ///
+  /// A distinct kind rather than a `runEnded`, because the run has not ended:
+  /// it is alive and will start polling when its window opens.
+  waiting,
+
   /// The run reached a terminal state.
   runEnded,
 }

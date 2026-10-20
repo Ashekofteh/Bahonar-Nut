@@ -847,3 +847,78 @@ which had 6.2GB free against the 7.3GB an AVD needs.
 ### Commit
 
 `0b48178` — Android verification and fixes
+
+---
+
+## 2026-10-20 — Session: the hunt wizard, and three bugs the device found
+
+The hunt screen was built over several sessions. This one finished the wizard
+and put it on the emulator, which is where the real defects turned up — three
+of them, none of which a unit test would have found on its own.
+
+### What was built
+
+- **A Jalali date picker** (`lib/ui/jalali_date_picker.dart`). Flutter's own
+  `showDatePicker` renders a **Gregorian** calendar under the `fa` locale:
+  "دوشنبه ۱۹ اکتبر ۲۰۲۶", a hybrid no Iranian reader has seen. The portal
+  dates everything in Jalali, and so does the rest of this app, so the calendar
+  is drawn on top of the app's own verified conversion.
+- **The wizard's date and slot steps**: picking a date and a slot fetches that
+  date's official offering and lists the dishes the portal actually serves
+  then, with live prices and the portal's own hall names.
+- **`ServiceCalendar.servableDates`** — the dates among the candidates on which
+  the chosen meal is served.
+
+### The three bugs
+
+1. **`parseRial` read the digits in the dish's name as money.** The portal
+   writes `تخم مرغ2عدد/نان/چای/قند 150000 ریال`; collecting every digit made
+   that dish cost 2,150,000 Rial instead of 150,000. The hunt screen showed
+   `۲۱۵٬۰۰۰ تومان` for a `۱۵٬۰۰۰ تومان` dish, and the same figure fed the
+   price ceiling and the pre-flight's credit check. (F39)
+
+2. **A restored session's cookies were never put in the jar.** The jar is
+   filled by the portal's `Set-Cookie` headers; a session restored from
+   storage was never a response, so every request went out unauthenticated
+   and the portal's login page was read as an expired session — reported to
+   the user as "your login details are not stored", which sends them to re-enter
+   a password that *is* stored. (F40)
+
+3. **A stale dish list broke the credit check.** A dish belongs to a (date,
+   slot); leaving a lunch dish on the list after switching to breakfast made
+   the pre-flight demand credit for a meal the portal is not offering, and
+   refuse with "your balance is not enough". The wizard now clears the list
+   when the target moves, and the engine drops a dish the portal serves for
+   another meal while keeping one that is merely not on offer yet. (F41)
+
+### The device run
+
+The Jalali picker was verified on the emulator: the month arrows point
+outwards (Flutter mirrors the chevrons under RTL, so both pointed inward until
+the icons were forced to LTR), and the days the chosen meal is not served are
+drawn disabled — a Saturday greyed out for breakfast, a Thursday for dinner.
+
+The hunt was then run end to end against the real portal: the pre-flight
+refused with "already booked" for a lunch the account held (confirmed against
+the live reservation grid, so the refusal was right); with a (date, slot) the
+account did not hold, the pre-flight passed and `HuntService` ran in the
+foreground with the "پایش سبد غذا" notification; stopping it released the
+service.
+
+### Testing approach
+
+**652 tests pass**, analyzer clean. The three bugs above each have a
+regression test that was checked to fail without the fix:
+
+- `test/transport/rial_parsing_test.dart` — the price of a dish whose name
+  carries a digit.
+- `test/adapter/session_restore_test.dart` — the cookies of a restored session
+  reach the request, and reach *only* that account's requests.
+- `test/core/hunt_config_test.dart` and `test/core/hunt_engine_test.dart` — the
+  dish list belongs to a (date, slot).
+
+### A note on what the device is for
+
+Every one of the three bugs was found by comparing the screen against the
+portal, not by reading the code. The unit tests confirmed the fixes; only the
+device showed that the price on the screen was fourteen times too high.
