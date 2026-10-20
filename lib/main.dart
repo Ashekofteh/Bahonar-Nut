@@ -43,7 +43,12 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
       // reservations screen reads, and the reminder service digests. A second
       // instance here would leave every one of them looking at an empty store.
       mealStore: _services.mealStore.store,
-    )..load();
+    );
+
+    // The load is started here and **not awaited**, so the first frame is not
+    // held up by the disk. The shell arms the reminder alarms when the load
+    // finishes, because the configuration only exists then.
+    _state.load();
 
     // The mirror is restored before anything reads it, so the app can answer
     // "what am I collecting" with no network — which is the whole point of

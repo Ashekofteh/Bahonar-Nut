@@ -138,7 +138,27 @@ class AppState extends ChangeNotifier {
     await _loadHuntConfigs();
     _loaded = true;
     notifyListeners();
+    // The configuration is only readable once it has been loaded, so anything
+    // derived from it — the reminder alarms — has to wait for this.
+    //
+    // Arming before the load would arm the *default* configuration, which
+    // names no accounts, so no alarm would be set at all. The failure is
+    // silent: the app looks fine and the reminders simply never fire.
+    onLoaded?.call();
   }
+
+  /// Called when the persisted state has finished loading.
+  ///
+  /// The shell uses this to arm the reminder alarms, which depend on the
+  /// configuration that only exists after the load.
+  ///
+  /// The callback is invoked on **every** load, not once. A one-shot
+  /// notification would be missed whenever the load finishes before the
+  /// subscriber exists — which is the normal cold-start order, because the
+  /// app root calls `load()` without awaiting it and the shell is built in
+  /// the meantime. The subscriber therefore checks [isLoaded] as well, and
+  /// this callback covers the other order.
+  void Function()? onLoaded;
 
   /// Loads each account's hunt configuration.
   Future<void> _loadHuntConfigs() async {

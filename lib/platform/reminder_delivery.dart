@@ -22,7 +22,9 @@ library;
 
 import '../core/account.dart';
 import '../core/models.dart';
+import '../core/next_week.dart';
 import '../core/reminder.dart';
+import '../core/time.dart';
 import 'reminder_service.dart';
 
 /// Delivers a fired reminder.
@@ -31,6 +33,8 @@ class ReminderDelivery {
     required this.service,
     required this.accounts,
     this.config,
+    this.clock,
+    this.readReservations,
   });
 
   /// Posts the digest.
@@ -59,6 +63,21 @@ class ReminderDelivery {
   /// and the platform layer is told which one to read.
   AccountId? accountId;
 
+  /// The clock, for the nudge's schedule and its cutoff arithmetic.
+  ///
+  /// The server clock is authoritative: the nudge's deadline is the portal's
+  /// own 20:00 cutoff, and a device clock an hour off would fire the nudge
+  /// at the wrong time or miss the window entirely.
+  final ServerClock? clock;
+
+  /// Reads the account's reservations from the portal, for the nudge.
+  ///
+  /// The nudge asks what an account does **not** hold, and only a live read
+  /// can answer that: the mirror is a cache of what was last seen, and a
+  /// week-old cache cannot tell "not booked" from "not read yet".
+  final Future<List<Reservation>> Function(AccountId accountId)?
+      readReservations;
+
   /// Delivers the reminder for [slot], and re-arms it for tomorrow.
   ///
   /// Returns the text that was posted, or null when there was nothing to say.
@@ -67,6 +86,13 @@ class ReminderDelivery {
   /// one, tomorrow's reminder never comes, and the user has no idea why the
   /// reminders simply stopped.
   Future<ReminderSlot?> handleFire(String? payload) async {
+    // The nudge is a different kind of fire: it asks about the coming week,
+    // not about today's meals.
+    if (payload == ReminderService.nudgePayload) {
+      await _handleNudge();
+      return null;
+    }
+
     final slot = ReminderService.slotFor(payload);
     if (slot == null) return null;
 
@@ -94,5 +120,59 @@ class ReminderDelivery {
     await service.armSlot(slot, config);
 
     return slot;
+  }
+
+  /// Handles a fired nudge: read the week, post if something is unbooked, and
+  /// arm the next check.
+  ///
+  /// The check arming happens **after** the delivery, and it happens even
+  /// when the delivery was silent — because a silent check means the week is
+  /// booked, and the next check will be silent too, which is the point.
+  Future<void> _handleNudge() async {
+    final config = this.config;
+    final clock = this.clock;
+    if (config == null || clock == null) return;
+    if (!config.nextWeekNudgeEnabled) return;
+
+    final read = readReservations;
+    if (read == null) return;
+
+    final accountNames = <AccountId, String>{
+      for (final account in accounts) account.id: account.resolvedName,
+    };
+
+    // Read every selected account. A failure is not fatal: the nudge names
+    // the accounts it could not check, so a partial answer still tells the
+    // user something true.
+    final reservations = <AccountId, List<Reservation>>{};
+    final failures = <ReminderFailure>[];
+    for (final accountId in config.accountIds) {
+      try {
+        reservations[accountId] = await read(accountId);
+      } catch (_) {
+        failures.add(ReminderFailure(
+          accountId: accountId,
+          displayName: accountNames[accountId] ?? accountId,
+          cause: ReminderFailureCause.readFailed,
+        ));
+      }
+    }
+
+    final status = detectNextWeekGaps(
+      weekStart: nextWeekStart(clock.portalTodayUtc),
+      reservationsByAccount: reservations,
+      clock: clock,
+      failures: failures,
+    );
+
+    await service.deliverNudge(
+      config: config,
+      accountNames: accountNames,
+      reservationsByAccount: reservations,
+      status: status,
+    );
+
+    // Arm the next check, whether or not this one had anything to say.
+    await service.armNudge(config, clock);
   }
 }

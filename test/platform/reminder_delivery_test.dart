@@ -3,6 +3,7 @@ import 'package:bahonar_nut/core/local_meal_store.dart';
 import 'package:bahonar_nut/core/meal_invariant.dart';
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/reminder.dart';
+import 'package:bahonar_nut/core/time.dart';
 import 'package:bahonar_nut/platform/platform_bridge.dart';
 import 'package:bahonar_nut/platform/reminder_delivery.dart';
 import 'package:bahonar_nut/platform/reminder_service.dart';
@@ -107,6 +108,30 @@ void main() {
       final scheduled = scheduledAlarms();
       expect(scheduled, hasLength(1));
       expect(scheduled.single.$2, 'lunch');
+    });
+
+    test('an unsynced clock still arms the slots', () async {
+      // The clock throws when it is not synced, and a cold start has no server
+      // time yet. Reading the clock's own "today" while arming the nudge
+      // would throw out of the whole pass — and the slot alarms, which are
+      // armed in the same call, would be lost with it.
+      //
+      // This is exactly what happened on the device: the slots were armed
+      // only because a *later* pass succeeded, and the nudge never was.
+      final service = ReminderService(bridge: bridge, mealStore: LocalMealStore());
+      final unsynced = SyncedServerClock();
+      expect(unsynced.isSynced, isFalse);
+
+      await service.schedule(
+        ReminderConfig(accountIds: {'a1'}),
+        clock: unsynced,
+      );
+
+      final scheduled = scheduledAlarms();
+      expect(scheduled, isNotEmpty,
+          reason: 'the slot alarms must survive an unsynced clock');
+      expect(scheduled.map((s) => s.$2), contains('lunch'));
+      expect(scheduled.map((s) => s.$2), contains('evening'));
     });
 
     test('arming replaces the old alarm rather than adding one', () async {
@@ -295,6 +320,95 @@ void main() {
       expect(posted.single.$2, contains('غذای شام امشب'));
       expect(posted.single.$2, contains('صبحانه فردا'));
       expect(posted.single.$2, isNot(contains('شام پس فردا')));
+    });
+  });
+
+  group('the nudge', () {
+    late ReminderDelivery nudge;
+    late FixedServerClock clock;
+
+    /// The reservations the fake portal serves.
+    final reservationsByAccount = <AccountId, List<Reservation>>{};
+
+    setUp(() {
+      reservationsByAccount.clear();
+      clock = FixedServerClock.now(DateTime.utc(2026, 10, 21, 5, 30));
+      nudge = ReminderDelivery(
+        service: ReminderService(bridge: bridge, mealStore: LocalMealStore()),
+        accounts: [
+          SavedAccount(
+            id: 'a1',
+            studentId: '401405035',
+            alias: 'مقسمی',
+            addedAt: DateTime.utc(2026, 10, 20),
+          ),
+        ],
+        config: const ReminderConfig(
+          accountIds: {'a1'},
+          nextWeekNudgeEnabled: true,
+        ),
+        clock: clock,
+        readReservations: (accountId) async =>
+            reservationsByAccount[accountId] ?? const [],
+      );
+    });
+
+    test('a fire arms the next check', () async {
+      await nudge.handleFire(ReminderService.nudgePayload);
+
+      final scheduled = scheduledAlarms();
+      expect(scheduled, isNotEmpty,
+          reason: 'the nudge is a sequence of checks: each one arms the next');
+      expect(scheduled.last.$2, ReminderService.nudgePayload);
+    });
+
+    test('a fire with an unbooked week posts the nudge', () async {
+      // No reservations: the whole coming week is missing.
+      reservationsByAccount['a1'] = const [];
+
+      await nudge.handleFire(ReminderService.nudgePayload);
+
+      final posted = postedNotifications();
+      expect(posted, hasLength(1));
+      expect(posted.single.$1, contains('رزرو'),
+          reason: 'the nudge is about reserving');
+    });
+
+    test('a fully booked week is silent, but the next check is still armed',
+        () async {
+      // The whole week is held: the nudge must stay quiet, or the user learns
+      // to ignore it.
+      reservationsByAccount['a1'] = [
+        for (var day = 24; day <= 30; day++)
+          for (final slot in MealSlot.values)
+            Reservation(
+              id: 'r$day${slot.name}',
+              date: DateTime.utc(2026, 10, day),
+              slot: slot,
+              hall: const Hall(id: '1', name: 'مرکزی برادران'),
+              option:
+                  const MenuOption(id: '1', name: 'غذا', priceRial: 150000),
+              state: ReservationState.active,
+            ),
+      ];
+
+      await nudge.handleFire(ReminderService.nudgePayload);
+
+      expect(postedNotifications(), isEmpty,
+          reason: 'a booked week is not worth a notification');
+      expect(scheduledAlarms(), isNotEmpty,
+          reason: 'the next check is still armed, and it will be silent too');
+    });
+
+    test('the nudge is switched off by the configuration', () async {
+      nudge.config = const ReminderConfig(
+        accountIds: {'a1'},
+        nextWeekNudgeEnabled: false,
+      );
+
+      await nudge.handleFire(ReminderService.nudgePayload);
+
+      expect(postedNotifications(), isEmpty);
     });
   });
 }

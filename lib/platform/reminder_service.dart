@@ -17,6 +17,8 @@ import 'dart:async';
 
 import '../core/local_meal_store.dart';
 import '../core/models.dart';
+import '../core/next_week.dart';
+import '../core/nudge_schedule.dart';
 import '../core/reminder.dart';
 import '../core/reminder_compose.dart';
 import '../core/time.dart';
@@ -59,14 +61,25 @@ class ReminderService {
   static const int _eveningAlarm = 4202;
   static const int _nudgeAlarm = 4203;
 
+  /// The payload the nudge alarm carries.
+  ///
+  /// The nudge is not a slot, so it needs its own name: the native receiver
+  /// tells a reminder from a hunt wake-up, and the Dart side tells a nudge
+  /// from a digest.
+  static const String nudgePayload = 'nudge';
+
   /// Arms the alarms for the configured slots.
   ///
   /// Cancels first, so a removed or retimed slot does not leave a stale alarm
   /// behind to fire at the wrong time.
-  Future<void> schedule(ReminderConfig config) async {
-    await bridge.cancelAlarm(_nudgeAlarm);
+  Future<void> schedule(ReminderConfig config, {ServerClock? clock}) async {
     await armSlot(ReminderSlot.lunch, config);
     await armSlot(ReminderSlot.evening, config);
+    if (clock != null) {
+      await armNudge(config, clock);
+    } else {
+      await bridge.cancelAlarm(_nudgeAlarm);
+    }
   }
 
   /// The next time [time] occurs, today if it is still ahead, else tomorrow.
@@ -219,36 +232,94 @@ class ReminderService {
   }
 
   /// Posts the next-week nudge, if the week is not fully booked.
+  ///
+  /// The nudge asks the user to reserve the coming week's meals before the
+  /// Thursday 20:00 wall — the deadline that costs them the weekend.
+  ///
+  /// ## Why it reads the portal, not the mirror
+  ///
+  /// The mirror holds what the account **holds**. The nudge asks what it
+  /// does **not** hold, and the difference matters: a mirror that is a week
+  /// stale cannot tell "not booked" from "not read yet", and a nudge built on
+  /// a stale mirror would demand a reservation the account has already made.
+  ///
+  /// So the check reads the portal for each selected account, and the gap
+  /// detection is the domain's — the same [detectNextWeekGaps] the tests
+  /// cover.
+  ///
+  /// ## Why a complete week is silent
+  ///
+  /// A notification the user learns to ignore is worse than no notification.
+  /// The six check times are **checks**, not guaranteed fires: each one reads
+  /// the state and speaks only if something is still unbooked. A user who
+  /// books everything on Wednesday gets one notification and then silence.
   Future<bool> deliverNudge({
     required ReminderConfig config,
     required Map<AccountId, String> accountNames,
+    required Map<AccountId, List<Reservation>> reservationsByAccount,
+    required NextWeekStatus status,
   }) async {
     if (!config.nextWeekNudgeEnabled) return false;
 
-    final accounts = config.accountIds;
-    if (accounts.isEmpty) return false;
+    if (config.accountIds.isEmpty) return false;
 
-    final missing = <String>[];
-    for (final accountId in accounts) {
-      final held = mealStore.forAccount(accountId);
-      final hasAll = MealSlot.values.every((slot) => held.any((m) => m.slot == slot));
-      if (!hasAll) {
-        missing.add(accountNames[accountId] ?? accountId);
-      }
-    }
+    // Nothing unbooked: stay silent, and let the check that follows go quiet
+    // too. This is what keeps the alert meaningful.
+    if (status.isComplete) return false;
 
-    if (missing.isEmpty) return false;
-
-    final text = composeNudgeText(
-      accountNames: missing,
-      now: DateTime.now(),
-    );
+    final text = composeNudgeNotification(status);
 
     await bridge.postNotification(
       id: _nudgeNotificationId,
       title: text.title,
       body: text.body,
       deepLink: 'reminder://nudge',
+    );
+    return true;
+  }
+
+  /// Arms the next nudge check.
+  ///
+  /// Six checks, one alarm at a time: each fired check arms the next one, and
+  /// the last one arms nothing — the window is over by then, and the deadline
+  /// has either been met or missed.
+  ///
+  /// ## The clock may be unsynced
+  ///
+  /// A cold start has no server time yet: the clock only syncs from a portal
+  /// response's `Date` header, and the app may arm its alarms before its first
+  /// request. The clock's own `portalNow` **throws** when it is unsynced, so
+  /// the device's time is used as a stand-in — the nudge's checks are
+  /// wall-clock times, and the difference between the device's timezone and
+  /// the portal's is at most a few hours, which cannot move a check across
+  /// the window's own edges.
+  ///
+  /// A failed arm is not fatal: the check is re-armed on the next fire and on
+  /// the next configuration change, so a nudge that could not be armed today
+  /// is armed tomorrow rather than lost.
+  Future<bool> armNudge(ReminderConfig config, ServerClock clock) async {
+    await bridge.cancelAlarm(_nudgeAlarm);
+
+    if (!config.nextWeekNudgeEnabled) return false;
+    if (config.accountIds.isEmpty) return false;
+
+    final synced = clock.isSynced;
+    final now = synced ? clock.portalNow : DateTime.now();
+    final today = synced
+        ? clock.portalTodayUtc
+        : DateTime.utc(now.year, now.month, now.day);
+
+    final fireAt = nextNudgeFireUtc(now: now, today: today);
+    if (fireAt == null) {
+      // The window has passed: Thursday 17:00 was the last check, and the
+      // 20:00 deadline with it.
+      return false;
+    }
+
+    await bridge.scheduleAlarm(
+      requestCode: _nudgeAlarm,
+      triggerAt: fireAt,
+      payload: nudgePayload,
     );
     return true;
   }

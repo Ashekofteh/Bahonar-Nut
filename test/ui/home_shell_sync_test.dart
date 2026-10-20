@@ -2,6 +2,7 @@ import 'package:bahonar_nut/core/account_store.dart';
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/platform_stores.dart';
 import 'package:bahonar_nut/core/portal.dart';
+import 'package:bahonar_nut/core/reminder.dart';
 import 'package:bahonar_nut/core/session.dart';
 import 'package:bahonar_nut/core/session_manager.dart';
 import 'package:bahonar_nut/core/time.dart';
@@ -10,6 +11,7 @@ import 'package:bahonar_nut/platform/platform_services.dart';
 import 'package:bahonar_nut/ui/app_state.dart';
 import 'package:bahonar_nut/ui/home_shell.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -24,6 +26,22 @@ import 'package:flutter_test/flutter_test.dart';
 /// So the assertion here is deliberately about the *screen*, not about a store:
 /// the user must see the meal after a refresh.
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  const channel = MethodChannel('ir.ac.uk.bahonar_nut/platform');
+
+  /// The platform calls the app made, so a test can assert on what was armed.
+  final platformCalls = <MethodCall>[];
+
+  setUp(() {
+    platformCalls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      platformCalls.add(call);
+      return null;
+    });
+  });
+
   late _FakePortalClient portal;
   late AppState state;
   late AppServices services;
@@ -36,16 +54,8 @@ void main() {
   Future<void> pumpShell(WidgetTester tester) async {
     portal = _FakePortalClient();
 
-    state = AppState(
-      accountStore: InMemoryAccountStore(),
-      reminderConfigStore: InMemoryReminderConfigStore(),
-      huntConfigStore: InMemoryHuntConfigStore(),
-    );
-    await state.upsertAccount(studentId: '401405035');
-    await state.load();
-
     services = AppServices(
-      bridge: PlatformBridge(),
+      bridge: PlatformBridge(channel: channel),
       client: portal,
       sessions: SessionManager(
         client: portal,
@@ -190,6 +200,78 @@ void main() {
 
     expect(state.transactions, isNotEmpty,
         reason: 'the dashboard reads the ledger the sync read');
+  });
+
+  testWidgets('the reminder alarms are armed on startup, from the stored '
+      'configuration', (tester) async {
+    // The configuration is read from disk asynchronously, so arming the
+    // alarms before the load finishes would use the *default* configuration —
+    // which names no accounts, so no alarm would be set. The failure is
+    // silent: the app looks healthy and the reminders never fire.
+    //
+    // The configuration is **already stored** before the shell is built, so
+    // this exercises the startup path alone. A config change also arms, and
+    // that would mask a broken startup.
+    portal = _FakePortalClient();
+
+    services = AppServices(
+      bridge: PlatformBridge(channel: channel),
+      client: portal,
+      sessions: SessionManager(
+        client: portal,
+        store: _MemorySessionStore(),
+        solver: _NoSolver(),
+        clock: clock,
+      ),
+      credentialStore: _MemorySecureStore(),
+      plainStore: _MemoryPlainStore(),
+      clock: clock,
+    );
+
+    // A configuration store that already holds a selected account.
+    final configStore = InMemoryReminderConfigStore();
+    await configStore.save(ReminderConfig(
+      accountIds: {'acc-1'},
+    ));
+
+    state = AppState(
+      accountStore: InMemoryAccountStore(),
+      reminderConfigStore: configStore,
+      huntConfigStore: InMemoryHuntConfigStore(),
+      mealStore: services.mealStore.store,
+    );
+    await state.upsertAccount(studentId: '401405035');
+    await state.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('fa', 'IR'),
+        supportedLocales: const [Locale('fa', 'IR')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: HomeShell(state: state, services: services),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scheduled = <(int, String?)>[
+      for (final call in platformCalls)
+        if (call.method == 'scheduleAlarm')
+          (
+            (call.arguments as Map)['requestCode'] as int,
+            (call.arguments as Map)['payload'] as String?,
+          ),
+    ];
+
+    expect(scheduled, isNotEmpty,
+        reason: 'the alarms must be armed at startup, from the configuration '
+            'that was loaded — otherwise the reminders silently never fire');
   });
 }
 

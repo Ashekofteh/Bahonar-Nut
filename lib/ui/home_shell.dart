@@ -67,12 +67,23 @@ class _HomeShellState extends State<HomeShell> {
     _delivery = ReminderDelivery(
       service: widget.services.reminders,
       accounts: widget.state.accounts,
+      clock: widget.services.clock,
+      // The nudge asks what an account does not hold, so it needs a live read
+      // rather than the mirror: a cache cannot tell "not booked" from "not
+      // read yet".
+      readReservations: (accountId) => widget.services.sessions
+          .withSession(
+            accountId,
+            (session) => widget.services.client.fetchReservations(session),
+          ),
     );
 
     // A configuration change re-arms the alarms, so the alarms always match
     // the settings the user sees.
     widget.state.onReminderConfigChanged = (config) {
-      widget.services.reminders.schedule(config).catchError((_) {});
+      widget.services.reminders
+          .schedule(config, clock: widget.services.clock)
+          .catchError((_) {});
     };
 
     // The platform can ask for a hunt, or report that a reminder alarm fired.
@@ -82,7 +93,8 @@ class _HomeShellState extends State<HomeShell> {
         refreshFromPortal();
         return;
       }
-      if (ReminderService.slotFor(payload) != null) {
+      if (ReminderService.slotFor(payload) != null ||
+          payload == ReminderService.nudgePayload) {
         _onReminderFired(payload);
       }
     });
@@ -90,15 +102,33 @@ class _HomeShellState extends State<HomeShell> {
     // The alarms are armed from the configuration, so they exist as soon as
     // the app starts. A reminder that only works after the user has opened
     // the app once is not a reminder.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    //
+    // **After the load, not on the first frame.** The configuration lives on
+    // disk and is read asynchronously, so arming on the first frame would use
+    // the *default* configuration — which names no accounts, so no alarm
+    // would be set. The failure is silent: the app looks healthy and the
+    // reminders never fire.
+    //
+    // Both orders are handled. The load may finish before this shell is
+    // built, or after — and the app root starts the load without awaiting it,
+    // so "after" is the normal cold-start order. The callback covers the
+    // second, and the check below covers the first.
+    widget.state.onLoaded = () {
       if (mounted) _armReminders();
+    };
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.state.isLoaded) _armReminders();
     });
   }
 
   /// Arms the reminder alarms for the current configuration.
   Future<void> _armReminders() async {
     try {
-      await widget.services.reminders.schedule(widget.state.reminderConfig);
+      await widget.services.reminders.schedule(
+        widget.state.reminderConfig,
+        clock: widget.services.clock,
+      );
     } catch (_) {
       // The platform may not be ready, or the exact-alarm permission may not
       // be granted. The reminder screen states the permission situation, and a
