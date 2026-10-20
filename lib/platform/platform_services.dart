@@ -96,7 +96,14 @@ class AppServices {
   /// A cache of portal state rather than a secret, so it does not need the
   /// Keystore, but it does need to survive a restart for the offline reminders
   /// to work.
-  LocalMealStoreHolder get mealStore => LocalMealStoreHolder(plainStore);
+  ///
+  /// **One instance, owned here.** The store is shared by the sync that writes
+  /// it, the UI that reads it, and the reminder service that digests it — so
+  /// they must be the *same* object. It was a getter that built a fresh
+  /// holder (and a fresh store inside it) on every call, which left the
+  /// reservations screen and the reminders permanently empty: the sync filled
+  /// one store and the readers looked at another.
+  late final LocalMealStoreHolder mealStore = LocalMealStoreHolder(plainStore);
 
   /// The hunt configuration, persisted in the plain store.
   HuntConfigStore get huntConfigStore => PreferencesHuntConfigStore(plainStore);
@@ -116,9 +123,13 @@ class AppServices {
   late final HuntService hunts = HuntService(bridge: bridge, engine: engine);
 
   /// The reminder service: builds digests, posts notifications, arms alarms.
+  ///
+  /// It reads the **same** store the sync writes. A separate instance here
+  /// would make every digest empty, because the digest is built from the
+  /// store and the store is what the sync fills.
   late final ReminderService reminders = ReminderService(
     bridge: bridge,
-    mealStore: LocalMealStore(),
+    mealStore: mealStore.store,
   );
 }
 
@@ -142,6 +153,16 @@ class _SolverAdapter implements ChallengeSolver {
 }
 
 /// The local meal store, backed by the plain store.
+///
+/// Holds the **one** [LocalMealStore] the app shares, and keeps it and the
+/// disk copy in step.
+///
+/// ## Why the holder exists rather than the store itself
+///
+/// The store is a synchronous, in-memory value type — pure Dart, testable on
+/// the VM. Reading and writing it is asynchronous, and belongs to the platform
+/// layer. The holder is the seam: one object owning both halves, so a caller
+/// cannot accidentally hold a store that is not the persisted one.
 class LocalMealStoreHolder {
   LocalMealStoreHolder(this._store);
 
@@ -155,20 +176,29 @@ class LocalMealStoreHolder {
 
   static const String _key = 'meals.held';
 
-  /// Reads the stored meals.
-  Future<List<StoredMeal>> load() async {
+  /// Reads the persisted meals into the live store.
+  ///
+  /// Called once at startup, before anything reads the store. Without it the
+  /// app would start with an empty mirror and report "no reservations" for a
+  /// student who has them — the offline-first promise broken at exactly the
+  /// moment it matters, which is when the phone has no network.
+  Future<void> restore() async {
     final raw = await _store.readString(_key);
-    if (raw == null) return const [];
+    if (raw == null) return;
     try {
-      final decoded = decodeMealList(raw);
-      return decoded;
+      store.replaceAll(decodeMealList(raw));
     } catch (_) {
-      return const [];
+      // A corrupt cache is not worth surfacing: the next sync fills it again.
     }
   }
 
-  /// Replaces the stored meals.
-  Future<void> save(List<StoredMeal> meals) async {
-    await _store.writeString(_key, encodeMealList(meals));
+  /// Writes the live store to disk.
+  ///
+  /// Called after every change, so a restart finds what the app knew. A meal
+  /// that passed is still written — the retention policy prunes at read time,
+  /// which is a decision made with the whole picture, not a reason to risk
+  /// losing the write.
+  Future<void> persist() async {
+    await _store.writeString(_key, encodeMealList(store.all));
   }
 }

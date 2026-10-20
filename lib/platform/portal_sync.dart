@@ -18,6 +18,7 @@ import '../core/local_meal_store.dart';
 import '../core/meal_invariant.dart';
 import '../core/models.dart';
 import '../core/portal.dart';
+import '../core/persian.dart';
 import '../core/session_manager.dart';
 
 /// The outcome of a sync for one account.
@@ -27,6 +28,7 @@ class AccountSyncResult {
     required this.ok,
     this.balanceRial,
     this.reservations = const [],
+    this.transactions = const [],
     this.profileName,
     this.error,
   });
@@ -35,6 +37,12 @@ class AccountSyncResult {
   final bool ok;
   final int? balanceRial;
   final List<Reservation> reservations;
+
+  /// The account's transaction history, as read for this sync.
+  ///
+  /// The dashboard's spend metric is computed from it, and the newest event
+  /// per (date, slot) also tells the mirror which meals came from the basket.
+  final List<Transaction> transactions;
 
   /// The student's real name, as the portal knows it. Null when the account
   /// could not be read.
@@ -53,11 +61,23 @@ class PortalSync {
     required this.client,
     required this.sessions,
     required this.mealStore,
+    this.onMealsChanged,
+    this.persist,
   });
 
   final PortalClient client;
   final SessionManager sessions;
   final LocalMealStore mealStore;
+
+  /// Called after the mirror changes, so the platform can write it to disk.
+  ///
+  /// The store cannot persist itself — it is a plain value type with no I/O —
+  /// so the platform layer owns that and is told when there is something to
+  /// save.
+  final void Function()? onMealsChanged;
+
+  /// Persists the mirror. Supplied by the platform layer; null in tests.
+  final Future<void> Function()? persist;
 
   /// Reads one account.
   ///
@@ -69,10 +89,17 @@ class PortalSync {
         final balance = await client.fetchBalance(session);
         final reservations = await client.fetchReservations(session);
 
-        // Replace this account's meals in the local mirror, so a meal the portal
-        // no longer lists does not linger in the reminders.
-        final others = mealStore
-            .all
+        // The ledger is read as well, because a **Food Basket purchase never
+        // appears in the weekly reservation grid**. Verified by a live purchase
+        // (2026-10-19): the grids were byte-for-byte identical before and
+        // after, and the meal existed only as a ledger row. A mirror built from
+        // the grids alone would tell the student they have no lunch on a day
+        // they in fact bought one.
+        final transactions = await _readTransactions(session);
+
+        // Replace this account's meals in the local mirror, so a meal the
+        // portal no longer lists does not linger in the reminders.
+        final others = mealStore.all
             .where((m) => m.accountId != accountId)
             .toList();
         final refreshed = <StoredMeal>[
@@ -89,14 +116,18 @@ class PortalSync {
               hallName: reservation.hall.name,
               priceRial: reservation.option.priceRial,
             ),
+          ..._basketMeals(accountId, transactions, reservations),
         ];
         mealStore.replaceAll(refreshed);
+        await persist?.call();
+        onMealsChanged?.call();
 
         return AccountSyncResult(
           accountId: accountId,
           ok: true,
           balanceRial: balance.amountRial,
           reservations: reservations,
+          transactions: transactions,
         );
       });
     } on SessionUnavailableException catch (e) {
@@ -112,6 +143,88 @@ class PortalSync {
         error: '$e',
       );
     }
+  }
+
+  /// Reads the ledger, tolerating a failure.
+  ///
+  /// The ledger is a bonus source, not the primary one: a portal that serves
+  /// the transaction page but not the grid is still worth mirroring, and a
+  /// ledger that cannot be read must not cost the whole sync.
+  Future<List<Transaction>> _readTransactions(Session session) async {
+    try {
+      return await client.fetchTransactions(session);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// The meals this account holds that came from the basket.
+  ///
+  /// The ledger is an **event log**, not a set of possessions: the same
+  /// (date, slot) can appear several times — booked, released, booked again.
+  /// Only the most recent event counts, and document order is recency order
+  /// (verified live: the newest transaction appears second, not last), so the
+  /// first event seen for a key is the most recent one.
+  ///
+  /// A weekly reservation is already in the mirror from the grid, so a
+  /// reservation that appears in *both* sources is the same meal and must not
+  /// be counted twice. The grid wins for those: it carries the hall, which the
+  /// ledger does not.
+  List<StoredMeal> _basketMeals(
+    AccountId accountId,
+    List<Transaction> transactions,
+    List<Reservation> reservations,
+  ) {
+    final newest = <String, Transaction>{};
+    for (final transaction in transactions) {
+      final slot = transaction.slot;
+      if (slot == null) continue;
+      final key = '${transaction.date}|${slot.name}';
+      newest.putIfAbsent(key, () => transaction);
+    }
+
+    // The meals the grid already accounts for. A reservation that appears in
+    // both sources is the same meal, and the grid's version is the better one
+    // — it carries the hall and the option id.
+    //
+    // The check is against the reservations just read, not against the store:
+    // the store still holds the *previous* mirror at this point, and a meal
+    // the portal has since dropped would wrongly suppress a real basket
+    // purchase.
+    //
+    // The key is the **civil** date, because the two sources spell the date
+    // differently: the grid carries a `DateTime` and the ledger carries the
+    // portal's Jalali string.
+    final fromGrid = <String>{};
+    for (final reservation in reservations) {
+      fromGrid.add('${HeldMeal.dateKey(reservation.date)}|'
+          '${reservation.slot.name}');
+    }
+
+    final out = <StoredMeal>[];
+    for (final transaction in newest.values) {
+      // A release means the meal was given up, so it is not held.
+      if (!transaction.isAcquisition) continue;
+
+      final date = parseJalaliDate(transaction.date);
+      if (date == null) continue;
+
+      if (fromGrid.contains('${HeldMeal.dateKey(date)}|'
+          '${transaction.slot!.name}')) {
+        continue;
+      }
+
+      out.add(StoredMeal(
+        accountId: accountId,
+        date: date,
+        slot: transaction.slot!,
+        source: MealSource.basketPurchase,
+        capturedAt: DateTime.now().toUtc(),
+        dishName: transaction.foodName,
+        priceRial: transaction.amountRial,
+      ));
+    }
+    return out;
   }
 
   /// Reads every account, one after another.

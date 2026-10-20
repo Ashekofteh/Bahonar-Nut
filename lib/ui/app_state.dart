@@ -49,6 +49,11 @@ class AppState extends ChangeNotifier {
 
   /// The local mirror of what the student holds. The reminders read from here,
   /// so they work offline.
+  ///
+  /// **The same instance the sync writes and the reminders read.** It is
+  /// injected rather than created here, so there is exactly one mirror in the
+  /// app: three separate ones meant the reservations screen and the digest
+  /// looked at a store nothing ever filled.
   final LocalMealStore mealStore;
 
   List<SavedAccount> _accounts = const [];
@@ -149,6 +154,15 @@ class AppState extends ChangeNotifier {
   /// Replaces the transaction history, e.g. after a live read.
   void setTransactions(List<Transaction> transactions) {
     _transactions = transactions;
+    notifyListeners();
+  }
+
+  /// Tells the UI that the shared meal store changed.
+  ///
+  /// The store is a plain value type shared with the platform layer, so it
+  /// cannot notify on its own. The platform writes it and calls this; the
+  /// screens that read it redraw.
+  void mealsChanged() {
     notifyListeners();
   }
 

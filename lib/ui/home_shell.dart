@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/hunt_config.dart';
 import '../core/models.dart';
 import '../core/persian.dart';
+import '../core/portal.dart';
 import '../core/preflight.dart';
 import '../core/session_manager.dart'
     show PortalUnreachableException, SessionUnavailableException;
@@ -52,6 +53,10 @@ class _HomeShellState extends State<HomeShell> {
       client: widget.services.client,
       sessions: widget.services.sessions,
       mealStore: widget.services.mealStore.store,
+      // The mirror is shared with the UI and the reminder service, so a
+      // change has to be persisted and the screens have to redraw.
+      persist: widget.services.mealStore.persist,
+      onMealsChanged: widget.state.mealsChanged,
     );
 
     // The platform can ask for a hunt.
@@ -162,15 +167,21 @@ class _HomeShellState extends State<HomeShell> {
 
     widget.state.setSyncing(true);
     try {
+      final transactions = <Transaction>[];
       for (final account in accounts) {
         final result = await _sync.sync(account.id);
         if (!mounted) return;
         if (result.ok) {
           widget.state.setBalance(account.id, result.balanceRial ?? 0);
+          transactions.addAll(result.transactions);
         } else {
           widget.state.setSyncError(account.id, result.error ?? 'خطای نامشخص');
         }
       }
+      // The dashboard's spend metric is computed from the ledger, so it needs
+      // the transactions the sync just read. Without them the chart was
+      // permanently empty, whatever the portal said.
+      widget.state.setTransactions(transactions);
     } finally {
       if (mounted) widget.state.setSyncing(false);
     }

@@ -39,7 +39,16 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
       reminderConfigStore: _services.reminderConfigStore,
       huntConfigStore: _services.huntConfigStore,
       credentialStore: _services.credentialStore,
+      // The **shared** mirror: the same store the portal sync writes, the
+      // reservations screen reads, and the reminder service digests. A second
+      // instance here would leave every one of them looking at an empty store.
+      mealStore: _services.mealStore.store,
     )..load();
+
+    // The mirror is restored before anything reads it, so the app can answer
+    // "what am I collecting" with no network — which is the whole point of
+    // the offline-first design.
+    _services.mealStore.restore().then((_) => _state.mealsChanged());
   }
 
   @override
