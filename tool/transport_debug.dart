@@ -1,13 +1,26 @@
-// Diagnostic CLI tool: stdout printing is the entire point.
+/// Diagnostic CLI tool: stdout printing is the entire point.
 // ignore_for_file: avoid_print, prefer_interpolation_to_compose_strings
+///
+/// Usage: `dart run tool/transport_debug.dart <studentId> <password>`
+///
+/// The credentials are taken from argv and never written to disk or logged.
+library;
+
+import 'dart:io';
 
 import 'package:bahonar_nut/adapter/captcha_solver.dart';
 import 'package:bahonar_nut/transport/http_transport.dart';
 
 Future<void> main(List<String> args) async {
+  if (args.length < 2) {
+    stderr.writeln(
+        'usage: dart run tool/transport_debug.dart <studentId> <password>');
+    exitCode = 2;
+    return;
+  }
   final t = PortalTransport(baseUri: Uri.parse('https://nut.uk.ac.ir/'));
-  const user = '401405035';
-  const pass = '@Armin1383';
+  final user = args[0];
+  final pass = args[1];
   try {
     final page = await t.get(user, '/');
     final vs = _input(page.body, '__VIEWSTATE');
