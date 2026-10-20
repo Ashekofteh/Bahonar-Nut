@@ -1,0 +1,300 @@
+import 'package:bahonar_nut/core/account.dart';
+import 'package:bahonar_nut/core/local_meal_store.dart';
+import 'package:bahonar_nut/core/meal_invariant.dart';
+import 'package:bahonar_nut/core/models.dart';
+import 'package:bahonar_nut/core/reminder.dart';
+import 'package:bahonar_nut/platform/platform_bridge.dart';
+import 'package:bahonar_nut/platform/reminder_delivery.dart';
+import 'package:bahonar_nut/platform/reminder_service.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// The reminder delivery, at the level the platform sees it.
+///
+/// The defect these guard against was a **wiring** one: the alarms were never
+/// armed, and a fired alarm never reached the Dart side. The service had
+/// `schedule` and `deliver`, and nothing called them, so a reminder could
+/// never fire — while the screen showed the switches working.
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  const channel = MethodChannel('ir.ac.uk.bahonar_nut/platform');
+  final calls = <MethodCall>[];
+
+  setUp(() {
+    calls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+  });
+
+  final bridge = PlatformBridge(channel: channel);
+
+  /// The alarms that were scheduled, as (requestCode, payload) pairs.
+  List<(int, String?)> scheduledAlarms() => [
+        for (final call in calls)
+          if (call.method == 'scheduleAlarm')
+            (
+              (call.arguments as Map)['requestCode'] as int,
+              (call.arguments as Map)['payload'] as String?,
+            ),
+      ];
+
+  /// The alarm request codes that were cancelled.
+  List<int> cancelledAlarms() => [
+        for (final call in calls)
+          if (call.method == 'cancelAlarm')
+            (call.arguments as Map)['requestCode'] as int,
+      ];
+
+  /// The notifications that were posted.
+  List<(String, String)> postedNotifications() => [
+        for (final call in calls)
+          if (call.method == 'postNotification')
+            (
+              (call.arguments as Map)['title'] as String,
+              (call.arguments as Map)['body'] as String,
+            ),
+      ];
+
+  group('arming the alarms', () {
+    test('the configured slots are armed', () async {
+      final service = ReminderService(bridge: bridge, mealStore: LocalMealStore());
+
+      await service.schedule(const ReminderConfig(
+        accountIds: {'a1'},
+      ));
+
+      final scheduled = scheduledAlarms();
+      expect(scheduled, hasLength(2),
+          reason: 'the lunch and the evening slot are both armed');
+      expect(scheduled.map((s) => s.$2), containsAll(['lunch', 'evening']));
+    });
+
+    test('the master switch off arms nothing', () async {
+      final service = ReminderService(bridge: bridge, mealStore: LocalMealStore());
+
+      await service.schedule(const ReminderConfig(
+        masterEnabled: false,
+        accountIds: {'a1'},
+      ));
+
+      expect(scheduledAlarms(), isEmpty,
+          reason: 'the switch says off, so no alarm may fire');
+    });
+
+    test('a slot with no account is not armed', () async {
+      final service = ReminderService(bridge: bridge, mealStore: LocalMealStore());
+
+      await service.schedule(const ReminderConfig(
+        accountIds: {},
+      ));
+
+      expect(scheduledAlarms(), isEmpty,
+          reason: 'a reminder about no account is noise');
+    });
+
+    test('one slot switched off is not armed, and the other is', () async {
+      final service = ReminderService(bridge: bridge, mealStore: LocalMealStore());
+
+      await service.schedule(ReminderConfig(
+        accountIds: {'a1'},
+        evening: ReminderSlotConfig.eveningDefault.copyWith(enabled: false),
+      ));
+
+      final scheduled = scheduledAlarms();
+      expect(scheduled, hasLength(1));
+      expect(scheduled.single.$2, 'lunch');
+    });
+
+    test('arming replaces the old alarm rather than adding one', () async {
+      final service = ReminderService(bridge: bridge, mealStore: LocalMealStore());
+
+      await service.schedule(const ReminderConfig(accountIds: {'a1'}));
+
+      expect(cancelledAlarms(), isNotEmpty,
+          reason: 'a re-armed slot must not leave the old alarm behind, or it '
+              'would fire at the old time as well');
+    });
+  });
+
+  group('a fired alarm', () {
+    late LocalMealStore store;
+    late ReminderService service;
+    late ReminderDelivery delivery;
+
+    setUp(() {
+      store = LocalMealStore();
+      service = ReminderService(bridge: bridge, mealStore: store);
+      delivery = ReminderDelivery(
+        service: service,
+        accounts: [
+          SavedAccount(
+            id: 'a1',
+            studentId: '401405035',
+            alias: 'مقسمی',
+            addedAt: DateTime.utc(2026, 10, 20),
+          ),
+        ],
+        config: const ReminderConfig(accountIds: {'a1'}),
+      );
+    });
+
+    test('a lunch fire posts the digest', () async {
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: DateTime.utc(2026, 10, 20),
+        slot: MealSlot.lunch,
+        source: MealSource.weeklyReservation,
+        capturedAt: DateTime.utc(2026, 10, 20),
+        dishName: 'چلو خورشت قیمه',
+      ));
+
+      await delivery.handleFire('lunch');
+
+      final posted = postedNotifications();
+      expect(posted, hasLength(1));
+      expect(posted.single.$2, contains('چلو خورشت قیمه'));
+      expect(posted.single.$2, contains('مقسمی'));
+    });
+
+    test('a fired alarm re-arms itself for tomorrow', () async {
+      // An exact alarm is one-shot. Without a successor, the reminder works
+      // exactly once and then stops, silently.
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: DateTime.utc(2026, 10, 20),
+        slot: MealSlot.lunch,
+        source: MealSource.weeklyReservation,
+        capturedAt: DateTime.utc(2026, 10, 20),
+      ));
+
+      await delivery.handleFire('lunch');
+
+      final scheduled = scheduledAlarms();
+      expect(scheduled, isNotEmpty,
+          reason: 'the alarm must re-arm itself, or tomorrow has no reminder');
+      expect(scheduled.last.$2, 'lunch');
+    });
+
+    test('a payload that is not a reminder is ignored', () async {
+      final result = await delivery.handleFire('refresh');
+
+      expect(result, isNull);
+      expect(postedNotifications(), isEmpty);
+    });
+
+    test('a slot the user has switched off does not fire', () async {
+      delivery.config = const ReminderConfig(
+        masterEnabled: false,
+        accountIds: {'a1'},
+      );
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: DateTime.utc(2026, 10, 20),
+        slot: MealSlot.lunch,
+        source: MealSource.weeklyReservation,
+        capturedAt: DateTime.utc(2026, 10, 20),
+      ));
+
+      await delivery.handleFire('lunch');
+
+      expect(postedNotifications(), isEmpty,
+          reason: 'a reminder the user switched off is noise');
+    });
+
+    test('the evening slot covers dinner and breakfast together', () async {
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: DateTime.utc(2026, 10, 20),
+        slot: MealSlot.dinner,
+        source: MealSource.weeklyReservation,
+        capturedAt: DateTime.utc(2026, 10, 20),
+        dishName: 'خوراک سالاد الویه',
+      ));
+
+      await delivery.handleFire('evening');
+
+      final posted = postedNotifications();
+      expect(posted, hasLength(1));
+      expect(posted.single.$2, contains('خوراک سالاد الویه'));
+    });
+
+    test('an account with nothing to say produces no notification', () async {
+      await delivery.handleFire('lunch');
+
+      expect(postedNotifications(), isEmpty,
+          reason: 'a reminder with nothing in it is noise');
+    });
+
+    test('the digest is about today, not about every meal held', () async {
+      // The mirror holds a fortnight. A digest listing all of it would say
+      // "you have 17 lunches", and the heading would name one date while the
+      // body listed another. Seen on the device.
+      final today = DateTime.now();
+      final todayUtc = DateTime.utc(today.year, today.month, today.day);
+
+      for (final offset in [0, 1, 2, 3, 5]) {
+        store.put(StoredMeal(
+          accountId: 'a1',
+          date: todayUtc.add(Duration(days: offset)),
+          slot: MealSlot.lunch,
+          source: MealSource.weeklyReservation,
+          capturedAt: todayUtc,
+          dishName: 'غذای روز $offset',
+        ));
+      }
+
+      await delivery.handleFire('lunch');
+
+      final posted = postedNotifications();
+      expect(posted, hasLength(1));
+      expect(posted.single.$2, contains('غذای روز 0'));
+      expect(posted.single.$2, isNot(contains('غذای روز 1')),
+          reason: "another day's lunch is not what today's reminder is about");
+      expect(posted.single.$2, isNot(contains('غذای روز 2')));
+    });
+
+    test('the evening digest covers tonight and tomorrow morning', () async {
+      // Dinner and the next breakfast are collected together, so the evening
+      // reminder spans two days.
+      final today = DateTime.now();
+      final todayUtc = DateTime.utc(today.year, today.month, today.day);
+
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: todayUtc,
+        slot: MealSlot.dinner,
+        source: MealSource.weeklyReservation,
+        capturedAt: todayUtc,
+        dishName: 'غذای شام امشب',
+      ));
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: todayUtc.add(const Duration(days: 1)),
+        slot: MealSlot.breakfast,
+        source: MealSource.weeklyReservation,
+        capturedAt: todayUtc,
+        dishName: 'صبحانه فردا',
+      ));
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: todayUtc.add(const Duration(days: 3)),
+        slot: MealSlot.dinner,
+        source: MealSource.weeklyReservation,
+        capturedAt: todayUtc,
+        dishName: 'شام پس فردا',
+      ));
+
+      await delivery.handleFire('evening');
+
+      final posted = postedNotifications();
+      expect(posted, hasLength(1));
+      expect(posted.single.$2, contains('غذای شام امشب'));
+      expect(posted.single.$2, contains('صبحانه فردا'));
+      expect(posted.single.$2, isNot(contains('شام پس فردا')));
+    });
+  });
+}

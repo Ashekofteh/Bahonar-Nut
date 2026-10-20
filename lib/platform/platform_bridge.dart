@@ -120,9 +120,19 @@ class PlatformBridge {
   }
 
   /// Registers a handler for the platform asking for a hunt.
+  ///
+  /// The handler is called for the platform's own requests: a hunt, a
+  /// reminder alarm that fired, a reboot, and a notification tap.
+  ///
+  /// The payload distinguishes them. A reminder's payload names a slot
+  /// (`lunch`, `evening`); anything else is the platform asking the app to
+  /// act on its own state.
   void onHuntRequested(void Function(String? payload) handler) {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'huntRequested') {
+        handler(call.arguments as String?);
+      }
+      if (call.method == 'reminderFired') {
         handler(call.arguments as String?);
       }
       if (call.method == 'rebootCompleted') {

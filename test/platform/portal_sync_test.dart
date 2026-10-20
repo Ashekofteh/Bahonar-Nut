@@ -315,5 +315,26 @@ void main() {
       expect(result.transactions, hasLength(1),
           reason: 'the spend metric is computed from the ledger');
     });
+
+    test('a meal that is already behind is not mirrored', () async {
+      // The ledger is the account's whole history. Mirroring all of it would
+      // put every lunch the student has had since the semester began into
+      // the reminder — which is what the device run showed: a digest
+      // listing 17 lunches.
+      //
+      // 1405/07/20 = 2026-10-11, ten days before the clock's today.
+      portal.transactions = [
+        _tx(date: '1405/07/20', slot: MealSlot.lunch),
+        _tx(date: '1405/08/05', slot: MealSlot.lunch),
+      ];
+
+      await buildSync().sync('a1');
+
+      expect(store.count, 1, reason: 'only the meal that is still ahead');
+      expect(store.find('a1', DateTime.utc(2026, 10, 27), MealSlot.lunch),
+          isNotNull);
+      expect(store.find('a1', DateTime.utc(2026, 10, 11), MealSlot.lunch),
+          isNull);
+    });
   });
 }

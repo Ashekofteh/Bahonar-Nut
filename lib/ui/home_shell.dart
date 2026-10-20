@@ -11,6 +11,8 @@ import '../core/time.dart';
 import '../platform/hunt_service.dart';
 import '../platform/platform_services.dart';
 import '../platform/portal_sync.dart';
+import '../platform/reminder_delivery.dart';
+import '../platform/reminder_service.dart';
 import 'app_state.dart';
 import 'screens/accounts_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -45,6 +47,9 @@ class _HomeShellState extends State<HomeShell> {
   /// Reads the portal for the saved accounts and refreshes the local mirror.
   late final PortalSync _sync;
 
+  /// Delivers a fired reminder alarm.
+  late final ReminderDelivery _delivery;
+
   @override
   void initState() {
     super.initState();
@@ -59,13 +64,54 @@ class _HomeShellState extends State<HomeShell> {
       onMealsChanged: widget.state.mealsChanged,
     );
 
-    // The platform can ask for a hunt.
+    _delivery = ReminderDelivery(
+      service: widget.services.reminders,
+      accounts: widget.state.accounts,
+    );
+
+    // A configuration change re-arms the alarms, so the alarms always match
+    // the settings the user sees.
+    widget.state.onReminderConfigChanged = (config) {
+      widget.services.reminders.schedule(config).catchError((_) {});
+    };
+
+    // The platform can ask for a hunt, or report that a reminder alarm fired.
     widget.services.bridge.onHuntRequested((payload) {
       if (!mounted) return;
       if (payload == 'refresh') {
         refreshFromPortal();
+        return;
+      }
+      if (ReminderService.slotFor(payload) != null) {
+        _onReminderFired(payload);
       }
     });
+
+    // The alarms are armed from the configuration, so they exist as soon as
+    // the app starts. A reminder that only works after the user has opened
+    // the app once is not a reminder.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _armReminders();
+    });
+  }
+
+  /// Arms the reminder alarms for the current configuration.
+  Future<void> _armReminders() async {
+    try {
+      await widget.services.reminders.schedule(widget.state.reminderConfig);
+    } catch (_) {
+      // The platform may not be ready, or the exact-alarm permission may not
+      // be granted. The reminder screen states the permission situation, and a
+      // failed arm must not take the app down with it.
+    }
+  }
+
+  /// Delivers a reminder whose alarm fired.
+  Future<void> _onReminderFired(String? payload) async {
+    _delivery
+      ..config = widget.state.reminderConfig
+      ..accounts = widget.state.accounts;
+    await _delivery.handleFire(payload);
   }
 
   /// Reads the menu's dishes and halls for the hunt screen.

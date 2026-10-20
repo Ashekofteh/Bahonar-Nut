@@ -20,6 +20,7 @@ import '../core/models.dart';
 import '../core/portal.dart';
 import '../core/persian.dart';
 import '../core/session_manager.dart';
+import '../core/time.dart';
 
 /// The outcome of a sync for one account.
 class AccountSyncResult {
@@ -97,6 +98,18 @@ class PortalSync {
         // they in fact bought one.
         final transactions = await _readTransactions(session);
 
+        // "Today" is the **portal's** day, not the device's.
+        //
+        // The portal's clock is the authority for everything it decides, and
+        // the device's can be hours off. A mirror built on the device's date
+        // would drop today's meals on a device running in another timezone —
+        // and the drop is silent, so the reminder would simply have nothing
+        // to say.
+        final clock = sessions.clock;
+        final now = clock.isSynced
+            ? clock.portalTodayUtc
+            : DateTime.now().toUtc();
+
         // Replace this account's meals in the local mirror, so a meal the
         // portal no longer lists does not linger in the reminders.
         final others = mealStore.all
@@ -116,7 +129,7 @@ class PortalSync {
               hallName: reservation.hall.name,
               priceRial: reservation.option.priceRial,
             ),
-          ..._basketMeals(accountId, transactions, reservations),
+          ..._basketMeals(accountId, transactions, reservations, now),
         ];
         mealStore.replaceAll(refreshed);
         await persist?.call();
@@ -170,10 +183,22 @@ class PortalSync {
   /// reservation that appears in *both* sources is the same meal and must not
   /// be counted twice. The grid wins for those: it carries the hall, which the
   /// ledger does not.
+  ///
+  /// ## Only the meals that are still ahead
+  ///
+  /// The ledger is the account's **whole history** — every meal it ever had,
+  /// including the ones it ate last month. A mirror of all of them would
+  /// report, in one digest, every lunch the student has had since the
+  /// semester began.
+  ///
+  /// So only the meals that are still ahead (today or later) are mirrored. The
+  /// past is the portal's business, and the mirror exists to answer "what am
+  /// I collecting", which is a question about the future.
   List<StoredMeal> _basketMeals(
     AccountId accountId,
     List<Transaction> transactions,
     List<Reservation> reservations,
+    DateTime now,
   ) {
     final newest = <String, Transaction>{};
     for (final transaction in transactions) {
@@ -201,6 +226,8 @@ class PortalSync {
           '${reservation.slot.name}');
     }
 
+    final today = DateTime.utc(now.year, now.month, now.day);
+
     final out = <StoredMeal>[];
     for (final transaction in newest.values) {
       // A release means the meal was given up, so it is not held.
@@ -208,6 +235,10 @@ class PortalSync {
 
       final date = parseJalaliDate(transaction.date);
       if (date == null) continue;
+
+      // A meal that is already behind was eaten, missed or expired. It is not
+      // something the student is collecting.
+      if (date.isBefore(today)) continue;
 
       if (fromGrid.contains('${HeldMeal.dateKey(date)}|'
           '${transaction.slot!.name}')) {

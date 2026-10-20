@@ -270,8 +270,20 @@ class AppState extends ChangeNotifier {
   Future<void> saveReminderConfig(ReminderConfig config) async {
     _reminderConfig = config;
     await reminderConfigStore.save(config);
+    // The alarms are derived from the configuration, so a change has to
+    // re-arm them. A slot the user switched off must stop firing, and a slot
+    // they switched on must start: the alarm and the setting the user sees
+    // are the same thing, and they must not drift apart.
+    onReminderConfigChanged?.call(config);
     notifyListeners();
   }
+
+  /// Called after the reminder configuration changes, so the alarms can be
+  /// re-armed.
+  ///
+  /// The state owns the configuration; the platform owns the alarms. The
+  /// platform layer sets this.
+  void Function(ReminderConfig config)? onReminderConfigChanged;
 
   /// Toggles an account's participation in the reminders.
   Future<void> toggleReminderAccount(AccountId accountId) async {

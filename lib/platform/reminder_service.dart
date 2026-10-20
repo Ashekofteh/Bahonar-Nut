@@ -64,29 +64,9 @@ class ReminderService {
   /// Cancels first, so a removed or retimed slot does not leave a stale alarm
   /// behind to fire at the wrong time.
   Future<void> schedule(ReminderConfig config) async {
-    await bridge.cancelAlarm(_lunchAlarm);
-    await bridge.cancelAlarm(_eveningAlarm);
     await bridge.cancelAlarm(_nudgeAlarm);
-
-    if (!config.masterEnabled) return;
-
-    final now = DateTime.now();
-
-    if (config.lunch.enabled) {
-      await bridge.scheduleAlarm(
-        requestCode: _lunchAlarm,
-        triggerAt: _nextOccurrence(config.lunch.time, now),
-        payload: 'lunch',
-      );
-    }
-
-    if (config.evening.enabled) {
-      await bridge.scheduleAlarm(
-        requestCode: _eveningAlarm,
-        triggerAt: _nextOccurrence(config.evening.time, now),
-        payload: 'evening',
-      );
-    }
+    await armSlot(ReminderSlot.lunch, config);
+    await armSlot(ReminderSlot.evening, config);
   }
 
   /// The next time [time] occurs, today if it is still ahead, else tomorrow.
@@ -97,6 +77,56 @@ class ReminderService {
   static DateTime _nextOccurrence(ClockTime time, DateTime now) {
     final today = DateTime(now.year, now.month, now.day, time.hour, time.minute);
     return today.isAfter(now) ? today : today.add(const Duration(days: 1));
+  }
+
+  /// The payload the alarm carries, and the slot it names.
+  ///
+  /// The payload is how a fired alarm says *which* reminder to deliver: the
+  /// native receiver cannot read the configuration, and the Dart side has
+  /// exactly two slots. So the alarm says "lunch" or "evening", and the
+  /// delivery reads the configuration for itself.
+  static String? payloadFor(ReminderSlot slot) {
+    switch (slot) {
+      case ReminderSlot.lunch:
+        return 'lunch';
+      case ReminderSlot.evening:
+        return 'evening';
+    }
+  }
+
+  /// The slot a payload names, or null when the payload is not one of ours.
+  ///
+  /// A payload the app does not recognise is ignored rather than guessed at:
+  /// the platform also uses this channel for the hunt's own wake-up.
+  static ReminderSlot? slotFor(String? payload) {
+    switch (payload) {
+      case 'lunch':
+        return ReminderSlot.lunch;
+      case 'evening':
+        return ReminderSlot.evening;
+      default:
+        return null;
+    }
+  }
+
+  /// Arms the alarms for a slot.
+  ///
+  /// Separate from [schedule] so a fired alarm can re-arm **its own** slot for
+  /// tomorrow without touching the other one.
+  Future<void> armSlot(ReminderSlot slot, ReminderConfig config) async {
+    final slotConfig =
+        slot == ReminderSlot.lunch ? config.lunch : config.evening;
+    final requestCode =
+        slot == ReminderSlot.lunch ? _lunchAlarm : _eveningAlarm;
+
+    await bridge.cancelAlarm(requestCode);
+    if (!config.isSlotActive(slot) || !slotConfig.enabled) return;
+
+    await bridge.scheduleAlarm(
+      requestCode: requestCode,
+      triggerAt: _nextOccurrence(slotConfig.time, DateTime.now()),
+      payload: payloadFor(slot),
+    );
   }
 
   /// Builds and posts the digest for [slot].
@@ -110,19 +140,39 @@ class ReminderService {
     final accounts = config.accountsFor(slot);
     if (accounts.isEmpty) return null;
 
+    // The digest is about **one day**, not about every meal the account
+    // holds.
+    //
+    // The mirror holds a fortnight: today's meals, tomorrow's, and the rest of
+    // the week. A digest that listed all of them would say "you have 17
+    // lunches" — which is both useless and alarming, and the section heading
+    // would name one date while the body listed another. (Seen on the device:
+    // the heading read "پنج‌شنبه ۳۰ مهر" and the body listed every lunch in
+    // the mirror.)
+    //
+    // So the meals are scoped to the day the reminder fires for. The evening
+    // slot covers dinner tonight and breakfast tomorrow, because they are
+    // collected together — so it spans two days, and the composer groups them
+    // by slot.
+    final now = DateTime.now();
+    final today = DateTime.utc(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+
     final meals = <HeldMealDigest>[];
     for (final accountId in accounts) {
       final held = mealStore.forAccount(accountId);
       if (held.isEmpty) continue;
-      meals.addAll(held.map((m) => HeldMealDigest(
-            accountId: accountId,
-            displayName: accountNames[accountId] ?? accountId,
-            date: m.date,
-            slot: m.slot,
-            dishName: m.dishName,
-            hallName: m.hallName,
-            priceRial: m.priceRial,
-          )));
+      meals.addAll(held
+          .where((m) => _isOnDay(m, slot, today, tomorrow))
+          .map((m) => HeldMealDigest(
+                accountId: accountId,
+                displayName: accountNames[accountId] ?? accountId,
+                date: m.date,
+                slot: m.slot,
+                dishName: m.dishName,
+                hallName: m.hallName,
+                priceRial: m.priceRial,
+              )));
     }
 
     if (meals.isEmpty) return null;
@@ -130,7 +180,7 @@ class ReminderService {
     final text = composeReminderText(
       slot: slot,
       meals: meals,
-      now: DateTime.now(),
+      now: now,
     );
 
     await bridge.postNotification(
@@ -143,6 +193,29 @@ class ReminderService {
     );
 
     return text;
+  }
+
+  /// Whether the meal belongs to the day this reminder fires for.
+  ///
+  /// The lunch slot is about **today**. The evening slot is about **tonight
+  /// and tomorrow morning**, because dinner and the next day's breakfast are
+  /// collected together — losing one means losing both.
+  static bool _isOnDay(
+    StoredMeal meal,
+    ReminderSlot slot,
+    DateTime today,
+    DateTime tomorrow,
+  ) {
+    final date = DateTime.utc(meal.date.year, meal.date.month, meal.date.day);
+
+    switch (slot) {
+      case ReminderSlot.lunch:
+        return meal.slot == MealSlot.lunch && date == today;
+      case ReminderSlot.evening:
+        if (meal.slot == MealSlot.dinner) return date == today;
+        if (meal.slot == MealSlot.breakfast) return date == tomorrow;
+        return false;
+    }
   }
 
   /// Posts the next-week nudge, if the week is not fully booked.
