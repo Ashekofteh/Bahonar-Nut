@@ -37,6 +37,19 @@ PortalTransport transportServingFrom(
   );
 }
 
+/// An RFC 1123 date, as the portal sends it in a `Date` header.
+String _rfc1123(DateTime utc) {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  final d = utc.toUtc();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${days[d.weekday - 1]}, ${two(d.day)} ${months[d.month - 1]} '
+      '${d.year} ${two(d.hour)}:${two(d.minute)}:${two(d.second)} GMT';
+}
+
 void main() {
   group('the transport syncs the clock from the portal', () {
     test('a response with a Date header syncs the clock', () async {
@@ -68,18 +81,23 @@ void main() {
 
     test('the synced time tracks the server, not the device', () async {
       final clock = SyncedServerClock();
-      final transport = transportServing(
-        'Tue, 20 Oct 2026 15:00:00 GMT',
-        clock: clock,
-      );
+
+      // The portal is placed five hours **ahead** of the device, whatever the
+      // wall clock says.
+      //
+      // The disagreement is what the test is about, so it is stated rather
+      // than left to the hour of the day. A fixed server time made this test
+      // pass only while the device clock was behind the portal's — which is
+      // exactly the assumption that broke it.
+      final serverTime = DateTime.now().toUtc().add(const Duration(hours: 5));
+      final transport = transportServing(_rfc1123(serverTime), clock: clock);
 
       final before = DateTime.now().toUtc();
       await transport.get('a1', '/');
       final after = DateTime.now().toUtc();
 
-      // The device and the portal disagree by three and a half hours here, and
-      // the clock must land on the *portal's* time, not the device's.
-      final serverTime = DateTime.utc(2026, 10, 20, 15, 0);
+      // The clock lands on the *portal's* time, to within the request's own
+      // duration.
       expect(
         clock.nowUtc.difference(serverTime).abs(),
         lessThan(after.difference(before) + const Duration(seconds: 1)),
