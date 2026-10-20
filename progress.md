@@ -1031,3 +1031,81 @@ the synced time is more than two hours after the device's, which only holds
 when the device clock is behind the portal's fixed 15:00. The device clock
 is now past it. It is a time-of-day-dependent test and needs its fixture
 fixed, which is a separate piece of work.
+
+## 2026-10-20 — Session 25: three features that were configured but never ran
+
+Started from a request to analyse where the project stood. The analysis
+found that the code was extensive and the portal work was genuinely
+live-proven — and that **three of the app's features had never actually
+executed**, despite having screens, tests and a device verification.
+
+### What the audit found
+
+| Defect | Effect |
+|---|---|
+| The meal store existed in three copies | The reservations screen, the reminders digest and the spend dashboard were **permanently empty** |
+| The reminder alarms were never armed, and a fire had no path to the Dart side | **No reminder was ever sent** |
+| `clock_sync_test` asserted against a fixed server time | A test that passed for a few hours a day and failed for the rest |
+
+### The credential
+
+`tool/transport_debug.dart` carried the account's real password as a `const`
+since `2b1d51a`. It now takes `<studentId> <password>` from argv, like every
+other live tool. **The secret remains in the history before that commit**;
+purging it needs a rewrite, which is a separate decision.
+
+### The store
+
+`AppServices` now owns the mirror as a field, the app state is given that one
+store, and the reminder service reads it. It is restored from disk at startup
+and persisted after every change, so the offline-first promise holds across a
+restart.
+
+The sync also reads the transaction ledger, because a Food Basket purchase
+never appears in the weekly grid. The newest event per (date, slot) wins, a
+meal in both sources is counted once with the grid's version (it carries the
+hall), and a ledger that cannot be read does not fail the sync.
+
+### The reminders
+
+Alarms are armed at startup and on every configuration change. A fired alarm
+reaches the Dart side as `reminderFired` — a reminder is not a hunt wake-up —
+and the delivery posts the digest and re-arms the slot for tomorrow.
+
+### Two bugs only the device could find
+
+The first delivery on the emulator listed **seventeen lunches**. Two causes:
+
+1. the ledger is the account's *whole history*, so mirroring all of it put
+   every meal the student has had since the semester into the reminder;
+2. the digest itself was unscoped — it listed every meal in the mirror while
+   the heading named one date.
+
+Both are fixed: only the meals still ahead are mirrored, and the digest is
+scoped to the day it fires for.
+
+### The device run
+
+- The reservations screen now shows **five days of live portal data** with
+  dishes, halls and Toman prices.
+- The alarm registers as an **exact** alarm at the configured minute
+  (`exactAllowReason=policy_permission`), and the configuration change
+  re-armed both slots.
+- Firing it posted «🍽 یادآور ناهار» naming **one meal for one day** —
+  «🍽 ناهار (پنج‌شنبه ۳۰ مهر): • 401405035 — شوید پلو با تن ماهی,لیمو ترش,
+  دلستر — مرکزی برادران» — and re-armed itself for the next day.
+
+### Testing approach
+
+**705 tests pass, analyzer clean.** Four new test files, 30 tests. The
+shell-level ones were checked to fail without the fix: the meal does not
+appear on the screen, and the digest lists every lunch. The clock test is
+now independent of the hour of the day, verified under three timezones.
+
+### A note on what "verified on device" had meant
+
+The earlier device runs exercised the login, the balance and the hunt screen.
+**Nobody had opened the reservations screen and looked at it.** A feature can
+be verified on a device and still be a screen no one has ever read — which is
+the most useful thing this session found, and it was found by reading the
+wiring rather than by looking for it.

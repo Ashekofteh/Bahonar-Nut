@@ -21,29 +21,41 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | # | Phase | Status | Blocked by |
 |---|-------|--------|-----------|
 | 0 | Recon — inspect portal, map auth + endpoints | `complete` | — |
-| 1 | Core — domain models, ranker, storage, transport | `read done` | — |
-| 2 | Adapter — Cullinan `PortalClient` + `ServerClock` | `read done` | Phase 1 |
+| 1 | Core — domain models, ranker, storage, transport | `done` | — |
+| 2 | Adapter — Cullinan `PortalClient` + `ServerClock` | `done` | Phase 1 |
 | 3 | Sessions — `SessionManager`, per-account jars, silent re-login | `done` | Phase 2 |
-| 4 | Sniper — scheduler, state machine, ledger, dry-run | `core done` | Phase 3 |
-| 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `ui done` | Phase 3 |
+| 4 | Sniper — scheduler, state machine, ledger, dry-run | `done` | Phase 3 |
+| 5 | Android — Persian RTL UI, accounts + aliases, fg service, alarms | `done` | Phase 3 |
 | 6 | Windows — thin shell over shared core | `pending` | Phase 4, 5 |
 | 7 | Reminders domain — alias chain, config, `composeNotification` | `done` | Phase 1 |
-| 8 | Reminders digest — `DigestBuilder` + sessions | `pending` | Phase 3, 7 |
-| 9 | Reminders platform — scheduler, notifications, screens | `mostly` | Phase 5, 8 |
+| 8 | Reminders digest — offline mirror, ledger reconciliation | `done` | Phase 3, 7 |
+| 9 | Reminders platform — scheduler, notifications, screens | `done` | Phase 5, 8 |
 | 10 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 4, 9 |
 
 **Phase 5 progress:** the Persian RTL app shell, the accounts screen (with the
-alias chain), the finance dashboard (multi-select filters, Toman) and the
-reminders screen are built, tested (478 tests) and **verified on a real Android
-14 emulator** — screenshots confirm RTL layout, Vazirmatn rendering, and the
-reminders screen's switches. Still to come in phase 5: the foreground service,
-exact alarms, the Android Keystore-backed stores, and real portal wiring.
+alias chain), the reservations screen, the finance dashboard (multi-select
+filters, Toman) and the reminders screen are built and **verified on a real
+Android 14 emulator** — the reservations screen shows live portal data, and a
+reminder alarm fires, posts its Persian digest and re-arms itself. The
+foreground service, the exact alarms, the Android Keystore-backed stores and
+the real portal wiring are all done and on the device.
 
-**Phase 2 progress:** the full `PortalClient` is implemented and live-proven
-(read-only) — login via the on-device solver, server time, balance, offerings,
-reservations, basket. Remaining in phase 2: the **write** paths (claim / reserve
-/ cancel), which are typed and parsing-verified but have not been exercised
-against the live portal, because doing so would spend money or move a meal.
+**Phase 2 progress:** the full `PortalClient` is implemented and live-proven.
+The **write** paths have been exercised against the live portal: a weekly
+reservation was booked and cancelled, and a Food Basket meal was purchased and
+verified. The portal's own failures — a silently refused locked date, a
+purchase that lands only in the ledger — are handled and covered by tests
+against captured pages.
+
+**Phase 9 progress:** the reminder alarms are armed from the configuration,
+a fired alarm reaches the Dart side as its own method, and the delivery posts
+the digest and re-arms the slot. The digest is scoped to the day it fires
+for, and the mirror holds only the meals that are still ahead.
+
+**Still to come in phase 10:** battery profiling, Doze and OEM-killer
+behaviour under a long hunt, a live read of the request budget against the
+portal, and the semi-automated CAPTCHA fallback (R8). Phase 6, the Windows
+shell, remains the one untouched platform — by design, it is a free-rider.
 
 **Transport** (phase 1 remainder) is done: per-account cookie jars, Date-header
 capture, explicit redirect following, HTML parsing.

@@ -1779,3 +1779,102 @@ The same pass fixed two smaller variants of the same confusion:
 shell-level widget test — the one that pumps the whole `HomeShell` and reads
 the screen as a user would — that found it, and the fix was checked to make
 that test fail. The domain tests were all green while the screen was lying.
+
+## 2026-10-20 — Session 25: the screens that were always empty
+
+### F50 — The meal store existed in three copies, so the screens were empty
+
+The hunt worked, the login worked, the balance appeared. The **reservations
+screen, the reminders digest and the spend dashboard were permanently empty**,
+whatever the portal said — and the refresh button appeared to work.
+
+The cause was not a parsing bug but a **wiring** one. The store was built in
+three places and each got its own:
+
+| Place | What it did |
+|---|---|
+| `AppServices.mealStore` | a **getter** returning a new `LocalMealStoreHolder` per call, and each holder owned a new `LocalMealStore` |
+| `AppState.mealStore` | `mealStore ?? LocalMealStore()` — and `main.dart` never passed one, so the UI built its own |
+| `ReminderService.mealStore` | a fourth `LocalMealStore()` in the services' constructor |
+
+So `PortalSync.sync` filled one store, the reservations screen read another,
+and the reminder service read a third. The `LocalMealStoreHolder.load()` and
+`.save()` methods — the whole persistence layer — were **never called by
+anyone**. And `AppState.setTransactions` was never called either, so the
+dashboard had no ledger to compute from.
+
+**The fix is a single object.** The services own the holder as a field, the
+app state is given that one store, and the reminder service reads it. The
+mirror is restored from disk at startup and persisted after every change.
+
+**Why it survived every earlier device run.** The runs in F31 and F45
+exercised the *login and balance* path, and the hunt screen, which reads the
+menu directly and never touches the store. Nobody opened the reservations
+screen and looked at it. A feature can be "verified on device" and still be
+a screen nobody has ever read.
+
+### F51 — The reminders were configured, and nothing was ever sent
+
+The reminders screen had working switches, the platform had
+`scheduleAlarm`/`cancelAlarm`, and the service had `schedule()` and
+`deliver()`. **Nothing called either of them.** The alarms were never armed,
+and a fired alarm had no path to the Dart side.
+
+Three separate breaks, in order:
+
+1. **Nothing armed the alarms.** `ReminderService.schedule` was never called.
+2. **Nothing listened for a fire.** The alarm receiver started the *hunt's*
+   foreground service with the reminder's payload, so a reminder would have
+   posted the "monitoring the food basket" notification and left a foreground
+   service running with no hunt behind it.
+3. **Nothing re-armed the slot.** An exact alarm is one-shot. Even once
+   delivered, the reminder would have worked exactly once and then stopped,
+   silently.
+
+The fix arms the alarms at startup and on every configuration change, gives
+the reminder its own platform method (`reminderFired`, distinct from
+`huntRequested`), and re-arms the slot after each delivery.
+
+**The reminder now fires on the device.** Verified: the alarm registers as an
+exact alarm at the configured minute
+(`exactAllowReason=policy_permission`), fires, posts the Persian digest on the
+`bahonar_nut.reminders` channel, and re-arms itself for the next day.
+
+### F52 — The ledger is the whole history, and the mirror must not be
+
+The first delivery on the device listed **seventeen lunches**. The mirror had
+37 meals: six real ones, and 31 from the ledger.
+
+The ledger is the account's **entire transaction history** — every meal the
+student has had since the semester began, including the ones already eaten.
+Mirroring all of it puts the whole past into a reminder whose job is to
+describe the future.
+
+So only the meals **still ahead** are mirrored. The horizon is the
+**portal's** day, not the device's: the device clock can be hours off, and a
+mirror built on it would silently drop today's meals on a device running in
+another timezone.
+
+### F53 — A digest is about one day, not about every meal held
+
+The second defect was in the composer path: the digest listed every meal in
+the mirror while the section heading named a single date. The heading read
+«ناهار (پنج‌شنبه ۳۰ مهر)» and the body listed every lunch the account had.
+
+The mirror holds a fortnight — today's meals, tomorrow's, and the rest of the
+week. A reminder says what is being collected **today**.
+
+The scope is per slot:
+
+- the **lunch** reminder is about **today**;
+- the **evening** reminder is about **tonight and tomorrow morning**, because
+  dinner and the next breakfast are collected together (F1).
+
+### A note on the emulator's time
+
+The alarm was fired by setting the device clock forward, with root. The
+alarm then fired and re-armed correctly. It is worth recording that the
+first attempt to watch a fire *failed*: the clock jump cancelled the pending
+alarm, and the delivery did not happen. The second attempt — with the app
+confirmed alive — worked. A missing notification after a clock change is a
+harness artefact, not an app defect, and the two must not be confused.

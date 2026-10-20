@@ -114,6 +114,18 @@ object PlatformChannelMessenger {
         channel?.invokeMethod("huntRequested", payload)
     }
 
+    /**
+     * Tells the Dart side a reminder alarm fired.
+     *
+     * A separate method from [notifyHuntRequested], because the two mean
+     * different things and the Dart side treats them differently: a hunt
+     * starts a foreground service, a reminder delivers a digest and re-arms
+     * itself.
+     */
+    fun notifyReminderFired(payload: String?) {
+        channel?.invokeMethod("reminderFired", payload)
+    }
+
     /** Tells the Dart side that the alarms were cleared and must be re-armed. */
     fun notifyRebootRequired(context: Context) {
         channel?.invokeMethod("rebootCompleted", null)
