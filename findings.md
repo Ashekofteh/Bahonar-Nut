@@ -1452,6 +1452,21 @@ two facts that looked contradictory are both true:
    user can hunt for are the ones the portal puts on the *buy page*, which is a
    different set from the official menu. Offering the official menu would let
    the user choose a dish that never appears in the basket.
+
+   > **Superseded for the setup screen and the price rebuild — see F48.** The
+   > reason above does not hold. A menu dish *does* reach the market: F38
+   > itself observed a listing (`62738`) carrying an official id, released from
+   > another student's weekly reservation. So a menu dish is a dish that will
+   > appear in the basket — it may simply not have been released *yet*, and the
+   > market fills up **during** the hunt window, which is the whole point.
+   > Offering the menu is therefore strictly better than offering the market:
+   > it names every dish the meal will actually serve, instead of only the
+   > ones released so far.
+   >
+   > What F38 forbids is still true in the form that matters: a **listing** is
+   > a `(hall, option)` pair the **buy page** supplied, and the hunt's
+   > matching, ranking and claiming still read the buy page. The menu supplies
+   > the *setup* and the *ceiling*; the buy page supplies the *listings*.
 2. **`Listing.hall` is the hall of the listing, and the hall dropdown is the
    set of halls the market is currently offering for that row.** On the live
    page the breakfast listing `62798` was offered in `فنی برادران` **only**,
@@ -1608,3 +1623,159 @@ The app's session survives a reinstall only as long as the portal keeps it.
 The session cookies can be replayed directly against the portal, which is what
 made the read-only probes possible — and it is why the reconnaissance
 directory is excluded from the repository: those cookies are a live credential.
+
+### F47 — The hunt's hall list came from the wrong page, and the portal has two different answers
+
+The hunt screen's hall list showed only `مرکزی برادران`, and the user asked
+where `فنی برادران` had gone. The answer: **the portal has two different
+questions, and the app was asking the wrong one.**
+
+- The **weekly menu** (`Reservation.aspx`, the `drpSelf` dropdown of a row)
+  names the halls that **serve** the meal on that date and slot.
+- The **buy page** (`FoodBasketBuy.aspx`, the `drpSelf` dropdown of a row)
+  names the halls that have **released** a meal into the marketplace.
+
+A hunt wants the first. Measured live on 2026-10-20, for the same
+(date, slot):
+
+| Date | Slot | Weekly menu — halls that serve | Buy page — halls that released |
+|---|---|---|---|
+| 1405/07/28 | breakfast | مرکزی, **فنی** | **فنی** only |
+| 1405/07/28 | lunch | مرکزی, **فنی** | مرکزی only |
+| 1405/07/29 | dinner | مرکزی, **فنی** | مرکزی only |
+| 1405/07/30 | breakfast | مرکزی, **فنی** | مرکزی only |
+| 1405/07/30 | lunch | مرکزی | مرکزی |
+
+**The buy page is a strict subset of the weekly menu.** It is the market, not
+the service: a hall appears there only once one of its students has released
+that meal. The app built the hall list from the buy page's listings, so a hall
+that had not yet released anything was invisible — and the user could not
+express a preference for it.
+
+**Why this matters for the hunt, not just for the list.** The hall preference
+is a *preference*, not a filter on what happens to be on offer today: the
+market fills up **during** the window, which is the whole point of hunting. A
+hunt configured "prefer مرکزی, fall back to فنی" must be able to name فنی
+even when no فنی listing exists yet — otherwise the fallback can never fire,
+and the user is left with a hunt that can only ever buy from whichever hall
+happened to have released something when the screen was drawn.
+
+Note the constraint from F38 still stands and is unaffected: the buy page
+remains the only place a **listing** comes from, and a listing is still a
+`(hall, option)` pair the buy page supplied. The weekly menu is only for the
+question "which halls could this meal come from".
+
+**The second, independent gap.** The app's `fetchOfferings` reads
+`Reservation.aspx`, whose grid covers the **current week only** (25–29 Mehr
+in the capture). The next week is a separate page, reached by posting
+`ctl00$cphMain$imgbtnNextWeek` — a postback the app never makes. So for a
+target date in the next week, the app cannot see the serving halls either.
+Verified live: the next week's grid (2–8 Aban) names both halls for every
+served date and slot, and is fully readable.
+
+## 2026-10-20 — Session 24: the hunt reads the weekly menu (F48)
+
+### F48 — The hunt's setup and its price ceiling now come from the weekly menu
+
+F47 diagnosed the wrong page. This is the fix, and it changes **two** things,
+not one: the setup screen's dish list *and* the price the hunt later rebuilds
+its ceiling from.
+
+**The split, stated once:**
+
+| Question | Source | Why |
+|---|---|---|
+| Which halls **serve** this meal? | weekly menu (`Reservation.aspx`) | the market only shows what has been released |
+| Which dishes are **on offer**, and at what price? | weekly menu (`Reservation.aspx`) | the market may not carry the dish at all yet |
+| Which meals are **for sale right now**? | buy page (`FoodBasketBuy.aspx`) | that is the only place a listing exists |
+
+The first two moved to the menu. The third did not, and **must not**: F38's
+constraint — a listing is a `(hall, option)` pair the buy page supplied — is
+untouched. Polling, ranking and claiming still read the buy page.
+
+**Why the rebuild had to move too.** The engine's price rebuild answers three
+questions: *what is the official price of this (date, slot)?*, *which meal does
+this dish belong to?*, and *is this dish still on offer?* The buy page can
+answer only the third. It cannot answer the first — the buy page's prices are
+the **seller's** asking prices, not the menu's — and it cannot answer the
+second, because a dish absent from the market is indistinguishable from a dish
+that belongs to another meal. The menu always knows both. So the rebuild now
+reads the menu, and the ceiling it computes is the menu's ceiling.
+
+Verified live: a dish the setup screen quotes at 350,000, the menu quotes at
+500,000, and the market lists at 400,000. Rebuilt from the menu, the 400,000
+listing is within the ceiling and the hunt buys; left at the setup screen's
+figure, it is skipped. The test asserts the purchase, because the purchase is
+the only thing that proves which source was read.
+
+**The dishes are the same in every hall.** The portal publishes **one menu per
+(date, slot)** and names the halls that serve it. The dishes are not per-hall:
+every hall serves the same dishes for that meal. So a menu is a list of halls
+and a list of dishes, and the pairings are implied. No dish-to-hall filtering
+is needed, and none was built. (Confirmed live: on 1405/08/06 the breakfast
+row's `drpFood` lists one dish and its `drpSelf` lists both halls.)
+
+**The next week's grid is reachable.** `Reservation.aspx` carries the current
+week; the next week is a separate page reached by posting
+`ctl00$cphMain$imgbtnNextWeek` with the current page's `__VIEWSTATE` and
+`__VIEWSTATEGENERATOR`. The hunt's targetable range is seven days long and
+routinely crosses that boundary, so the app now makes that postback when the
+current week's grid does not cover the target date. It is a navigation
+postback, not a write.
+
+Verified live, through the app's own client and parser:
+
+| Target | Result |
+|---|---|
+| 1405/07/30 = 2026-10-22 (current week) | breakfast: halls مرکزی(1) + فنی(2), dish `تخم مرغ2عدد/نان/چای/قند` @ 150,000; lunch: hall مرکزی(1) only, dish `شوید پلو با تن ماهی...` @ 500,000 |
+| 1405/08/06 = 2026-10-28 (next week, via the postback) | all three slots, both halls each, `reservable: true`, dishes @ 150,000 / 350,000 / 500,000 |
+
+**`reservable` is the row's own lock flag.** Every `chkReserve` in the
+current week's grid renders `disabled`, so those rows report
+`reservable: false` — consistent with the 20:00-two-days-prior cutoff
+already established in F45/F12. The next week's rows are editable and report
+`reservable: true`.
+
+**On the device.** The hunt screen's سلف‌ها card now lists **both** مرکزی
+برادران and فنی برادران, each with its own priority checkbox, and the غذاها
+card lists the menu's dish with the menu's price (۱۵٬۰۰۰ تومان = 150,000
+Rial, converted at the display boundary as everywhere else).
+
+**A note on the session.** The device's stored session had aged out past the
+12-hour limit, and the password had been destroyed by an earlier
+`adb shell pm clear` — so the app could not re-login and the menu read
+failed with *اطلاعات ورود این حساب ذخیره نشده است*. The password was
+re-entered through the app's own "افزودن حساب" dialog, which is the only
+supported path back into the Keystore. **Worth knowing: the "ویرایش نام"
+(edit) path does not save a password** — `_editAccount` only sets the alias.
+Only the add path calls `saveCredentials`. So a user who lost their stored
+password has to go through "add" for the *same* student id, which upserts
+onto the existing account rather than creating a duplicate.
+
+### F49 — An empty menu and a failed read are different answers
+
+The weekly page carries all three meals for a day, so a change of meal slot
+is answered from the menu already in hand — no request. That is a real
+saving, and it introduced a real bug: the redraw that answers the slot
+change also cleared the screen's error message. So a slot change after a
+failed read replaced *"the portal could not be reached"* with *"there is no
+food on that day"*.
+
+The second message is a lie about the portal. The read never succeeded, so
+nothing at all is known about what the portal serves. The rule this
+establishes: **a failed read must keep saying why it failed**, and a redraw
+with nothing to draw must change nothing at all.
+
+The same pass fixed two smaller variants of the same confusion:
+
+- The halls card said *"the halls of this account have not been read yet"*
+  whenever its list was empty — which is wrong when the read **succeeded**
+  and the meal simply has no serving hall. Empty and unread are different.
+- The shell caught the portal's own unreachable error and replaced it with a
+  generic *"reading the menu was not possible"*, discarding the reason the
+  portal gave.
+
+**A method note.** The unit tests did not catch this. It was the
+shell-level widget test — the one that pumps the whole `HomeShell` and reads
+the screen as a user would — that found it, and the fix was checked to make
+that test fail. The domain tests were all green while the screen was lying.

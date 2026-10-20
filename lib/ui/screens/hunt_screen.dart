@@ -139,6 +139,7 @@ class _HuntScreenState extends State<HuntScreen> {
           _HallsCard(
             config: config,
             halls: widget.halls,
+            error: widget.marketError,
             onChanged: widget.onConfigChanged,
           ),
           const SizedBox(height: 12),
@@ -598,11 +599,18 @@ class _HallsCard extends StatelessWidget {
     required this.config,
     required this.halls,
     required this.onChanged,
+    this.error,
   });
 
   final HuntConfig config;
   final List<Hall> halls;
   final void Function(HuntConfig) onChanged;
+
+  /// Why the list is empty, when it is empty because the read failed.
+  ///
+  /// Without it the card would claim the halls were "not read yet" on a
+  /// screen where they *were* read and the meal simply has no serving hall.
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
@@ -613,9 +621,11 @@ class _HallsCard extends StatelessWidget {
       subtitle: 'خالی گذاشتن یعنی «هر سلفی که سامانه پیشنهاد دهد».',
       child: halls.isEmpty
           ? Text(
-              'سلف‌های این حساب هنوز خوانده نشده است.',
+              error ?? 'برای این تاریخ و وعده غذایی سلفی اعلام نشده است.',
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+                color: error == null
+                    ? theme.colorScheme.onSurfaceVariant
+                    : theme.colorScheme.error,
               ),
             )
           : Column(

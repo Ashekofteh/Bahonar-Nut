@@ -171,6 +171,10 @@ class ScriptedClient implements PortalClient {
       const [];
 
   @override
+  Future<List<MealMenu>> fetchMenu(Session session, DateTime date) async =>
+      const [];
+
+  @override
   Future<Reservation> reserve(Session session, MealOffering offering) async {
     reserveCalls++;
     throw UnimplementedError();

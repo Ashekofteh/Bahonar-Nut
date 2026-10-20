@@ -4,7 +4,8 @@ import '../core/hunt_config.dart';
 import '../core/models.dart';
 import '../core/persian.dart';
 import '../core/preflight.dart';
-import '../core/session_manager.dart' show SessionUnavailableException;
+import '../core/session_manager.dart'
+    show PortalUnreachableException, SessionUnavailableException;
 import '../core/time.dart';
 import '../platform/hunt_service.dart';
 import '../platform/platform_services.dart';
@@ -62,92 +63,91 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
-  /// Reads the market's dishes and halls for the hunt screen.
+  /// Reads the menu's dishes and halls for the hunt screen.
   ///
-  /// The dishes come from the **buy page**, not from the official menu: the
-  /// buy page is the marketplace, and its option ids do not even match the
-  /// menu's. A hunt built from the official menu would let the user choose a
-  /// dish that never appears in the market.
+  /// The dishes and the halls come from the **official weekly menu**
+  /// (`Reservation.aspx`), not from the marketplace (`FoodBasketBuy.aspx`).
   ///
-  /// The read is for the hunt's **target date and slot**, because the market
-  /// is a per-date view: the buy page is date-filtered, and a listing for
-  /// another day is not what the hunt is waiting for. A hunt for tomorrow's
-  /// dinner must show tomorrow's market, not today's.
+  /// ## Why the menu and not the marketplace
+  ///
+  /// The portal answers two different questions with two different pages:
+  ///
+  ///  * the **weekly menu** names the halls that *serve* a meal, and the
+  ///    dishes the university offers for it;
+  ///  * the **buy page** names the halls that have *released* a meal into the
+  ///    marketplace.
+  ///
+  /// The marketplace's hall list is a strict **subset** of the menu's: a
+  /// hall appears there only once one of its students has released that
+  /// meal. A list built from the marketplace therefore hides every hall that
+  /// has not yet released anything — and a hall that has not released
+  /// anything *yet* is exactly the one a hunt needs to be able to name,
+  /// because the market fills up **during** the hunt window. A "prefer
+  /// Central, fall back to Engineering" hunt that could not name Engineering
+  /// would never use the fallback.
+  ///
+  /// The marketplace remains the source of **listings** — that is where a
+  /// hunt's matching and claiming happen — and only there.
+  ///
+  /// The read is for the hunt's **target date**, because the menu is a
+  /// per-date view: the portal publishes a different set of dishes every day.
+  /// A hunt for tomorrow's dinner must show tomorrow's menu, not today's.
   ///
   /// The read **establishes a session** rather than reusing one that happens
   /// to be lying around. A hunt screen opened on a cold start would otherwise
-  /// show an empty market, and an empty market looks exactly like a market with
-  /// nothing on it — a message the user would read as "no food today" rather
-  /// than "the app could not reach the portal".
-  Future<void> loadMarket({DateTime? date, MealSlot? slot}) async {
+  /// show an empty menu, and an empty menu looks exactly like a menu with
+  /// nothing on it — a message the user would read as "no food that day"
+  /// rather than "the app could not reach the portal".
+  Future<void> loadMarket({DateTime? date}) async {
     final accounts = widget.state.accounts;
     if (accounts.isEmpty) return;
 
     final accountId = accounts.first.id;
-    final targetSlot = slot ?? _currentHuntConfig?.targetSlot;
     final targetDate = date ?? _currentHuntConfig?.targetDate;
 
     // Remember what this read is for, so a later change of target knows the
     // list on screen is stale.
     _marketFor = _currentHuntConfig;
 
+    if (targetDate == null) {
+      // Without a target date there is no menu to read: the weekly menu is
+      // published per date, and the app must not guess which one the user
+      // means.
+      _reportMarketError('برای خواندن منوی غذا باید تاریخ انتخاب شود.');
+      return;
+    }
+
     try {
-      final page = await widget.services.sessions.withSession(
+      final menus = await widget.services.sessions.withSession(
         accountId,
-        (session) => widget.services.client.fetchBasket(
-          session,
-          cursor: targetDate == null ? null : _jalaliOf(targetDate),
-        ),
+        (session) => widget.services.client.fetchMenu(session, targetDate),
       );
       if (!mounted) return;
 
-      final byName = <String, HuntDishOption>{};
-      final halls = <String, Hall>{};
-
-      for (final listing in page.listings) {
-        // The market serves three meals a day. Only the chosen one is
-        // offered, because a hunt for dinner must not be shown a breakfast
-        // dish it would never buy.
-        if (targetSlot != null && listing.slot != targetSlot) continue;
-
-        halls[listing.hall.id] = listing.hall;
-        final key = normalizeDishName(listing.option.name);
-        byName.putIfAbsent(
-          key,
-          () => HuntDishOption(
-            optionId: listing.option.id,
-            name: listing.option.name,
-            priceRial: listing.option.priceRial,
-            halls: [listing.hall],
-          ),
-        );
-      }
-
-      setState(() {
-        _marketDishes = byName.values.toList();
-        _marketHalls = halls.values.toList();
-        _marketError = null;
-      });
+      // The menu is read once per **date**, not per (date, slot): the page
+      // carries all three meals for the day. So switching the meal slot
+      // re-reads nothing — the other slots' halls and dishes are already
+      // here.
+      _applyMenu(menus);
     } on SessionUnavailableException catch (e) {
       _reportMarketError(e.reason);
+    } on PortalUnreachableException catch (e) {
+      // The portal could not be reached, and it says why. Swallowing that
+      // would tell the user the menu is empty, when the truth is that the app
+      // never reached the portal.
+      _reportMarketError('ارتباط با سامانه برقرار نشد: ${e.message}');
     } catch (e) {
-      _reportMarketError('خواندن سبد غذا از سامانه ممکن نشد.');
+      _reportMarketError('خواندن منوی غذا از سامانه ممکن نشد.');
     }
   }
 
-  /// A civil date as the portal's `yyyy/MM/dd` Jalali string.
-  static String _jalaliOf(DateTime date) {
-    final jalali = toJalali(date);
-    return '${jalali.year}/${jalali.month.toString().padLeft(2, '0')}/'
-        '${jalali.day.toString().padLeft(2, '0')}';
-  }
-
-  /// Records a failed market read, so the screen says why it is empty.
+  /// Records a failed menu read, so the screen says why it is empty.
   void _reportMarketError(String message) {
     if (!mounted) return;
     setState(() {
       _marketDishes = const [];
       _marketHalls = const [];
+      _menus = null;
       _marketError = message;
     });
   }
@@ -279,25 +279,32 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  /// The dishes the market is offering, read from the buy page.
+  /// The dishes the menu is offering, read from the weekly menu.
   ///
-  /// Read once, when the hunt screen is opened: the market changes slowly
-  /// compared with a hunt's window, and every read is a request pattern.
+  /// Read once per date, when the hunt screen is opened: the menu changes
+  /// slowly compared with a hunt's window, and every read is a request
+  /// pattern.
   List<HuntDishOption> _marketDishes = const [];
   List<Hall> _marketHalls = const [];
 
-  /// Why the market could not be read, when it could not.
+  /// The whole menu that was read, for every meal slot of the target date.
+  ///
+  /// Held because the weekly page carries all three meals for the day, so
+  /// changing the meal slot is answered from here — with no request.
+  List<MealMenu>? _menus;
+
+  /// Why the menu could not be read, when it could not.
   ///
   /// Null means the read succeeded. An empty dish list is ambiguous on its
-  /// own — it reads as "the market has nothing" — so the failure is stated
+  /// own — it reads as "there is no food that day" — so the failure is stated
   /// rather than left for the user to infer.
   String? _marketError;
 
-  /// The hunt configuration the market was last read for.
+  /// The hunt configuration the menu was last read for.
   ///
-  /// Held so a stale read is not mistaken for a current one: the market is
-  /// read for a specific (date, slot), and a read for yesterday's dinner must
-  /// not be shown for today's.
+  /// Held so a stale read is not mistaken for a current one: the menu is
+  /// read for a specific date, and a read for yesterday's must not be shown
+  /// for today's.
   HuntConfig? _marketFor;
 
   /// The hunt configuration currently being edited.
@@ -318,25 +325,79 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  /// Saves a changed hunt configuration, and re-reads the market if the
-  /// target moved.
+  /// Saves a changed hunt configuration, and re-reads the menu if the target
+  /// date moved.
   ///
-  /// The market is a per-(date, slot) view, so a change of target means the
-  /// dish list on screen is stale. The read is skipped when only the rate
-  /// changed — the dishes do not depend on the rate, and every read is a
-  /// request the portal sees.
+  /// The menu is a per-**date** view: the page carries all three meals for
+  /// the day, so changing the meal slot needs no request — only a change of
+  /// date does. The read is also skipped when only the rate changed, for the
+  /// same reason: every read is a request the portal sees.
   Future<void> _onConfigChanged(HuntConfig updated) async {
     await widget.state.saveHuntConfig(updated);
 
-    final previous = _marketFor;
-    final targetMoved = previous == null ||
-        previous.targetDate != updated.targetDate ||
-        previous.targetSlot != updated.targetSlot;
+    final dateMoved = !_sameDate(_marketFor?.targetDate, updated.targetDate);
 
-    if (!targetMoved) return;
+    if (!dateMoved) {
+      // The date is the same, so the menu we already hold still answers the
+      // question — but the *slot* may have changed, and the list on screen
+      // belongs to the slot. Redraw it from the menu we have.
+      _applyMenu();
+      return;
+    }
 
-    _marketFor = updated;
-    await loadMarket(date: updated.targetDate, slot: updated.targetSlot);
+    await loadMarket(date: updated.targetDate);
+  }
+
+  /// Redraws the dish and hall lists from a menu.
+  ///
+  /// The menu holds every meal slot for the day, so a change of slot is
+  /// answered from the menu already in hand — no request.
+  ///
+  /// With no menu in hand there is nothing to redraw, and a failed read must
+  /// keep saying *why* it failed: replacing the error with "no food on that
+  /// day" would tell the user the portal has nothing, when the truth is that
+  /// the app could not reach it.
+  void _applyMenu([List<MealMenu>? menus]) {
+    if (!mounted) return;
+
+    final list = menus ?? _menus;
+    if (list == null) return;
+
+    _menus = list;
+
+    final config = _currentHuntConfig;
+    final targetSlot = config?.targetSlot;
+
+    final choice = targetSlot == null
+        ? null
+        : MenuChoice.from(list, targetSlot);
+
+    final halls = <Hall>[
+      for (final hall in choice?.halls ?? const <HuntHall>[])
+        Hall(id: hall.id, name: hall.name),
+    ];
+    final dishes = <HuntDishOption>[
+      for (final dish in choice?.dishes ?? const <HuntDish>[])
+        HuntDishOption(
+          optionId: dish.optionId,
+          name: dish.name,
+          priceRial: dish.priceRial,
+          halls: halls,
+        ),
+    ];
+
+    setState(() {
+      _marketDishes = dishes;
+      _marketHalls = halls;
+      _marketFor = config;
+      _marketError = null;
+    });
+  }
+
+  /// Whether two civil dates are the same day.
+  static bool _sameDate(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return a == b;
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   /// Starts a hunt, after the pre-flight passes.

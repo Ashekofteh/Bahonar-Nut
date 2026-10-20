@@ -922,3 +922,112 @@ regression test that was checked to fail without the fix:
 Every one of the three bugs was found by comparing the screen against the
 portal, not by reading the code. The unit tests confirmed the fixes; only the
 device showed that the price on the screen was fourteen times too high.
+
+### A follow-up: the missing hall
+
+The user noticed `فنی برادران` missing from the hunt screen's hall list. The
+cause is not a parsing bug — the portal genuinely gives two different answers,
+and the app was asking the wrong one.
+
+The **weekly menu** names the halls that **serve** a meal; the **buy page**
+names the halls that have **released** one into the marketplace. The buy page
+is a strict subset. The app built the hall list from the buy page's listings,
+so a hall that had not yet released anything was invisible.
+
+That matters beyond the list: the hall preference is a preference, not a
+filter on today's stock. A hunt set to "prefer مرکزی, fall back to فنی" must be
+able to name فنی before any فنی listing exists, or the fallback can never
+fire — and the market fills up *during* the window, which is the whole point of
+hunting.
+
+A second, independent gap: `fetchOfferings` reads `Reservation.aspx`, whose
+grid covers the current week only. The next week is a separate page, reached
+by posting `imgbtnNextWeek`, which the app never makes — so for a next-week
+target it cannot see the serving halls either.
+
+## 2026-10-20 — Session 24: the hunt reads the weekly menu
+
+### What was built
+
+The hunt's setup now reads the **weekly reservation menu** (`Reservation.aspx`)
+for both of its lists, and the engine's price rebuild reads the same page.
+
+| | before | after |
+|---|---|---|
+| the setup's dishes | the buy page's listings | the **menu**'s dishes, at the menu's prices |
+| the setup's halls | the buy page's listings | the **menu**'s serving halls |
+| the price rebuild | the buy page | the **menu** |
+| the listings (polling, ranking, claiming) | the buy page | the buy page — **unchanged** |
+
+The buy page is untouched where it matters: a **listing** is still a
+`(hall, option)` pair the buy page supplied, and the hunt still polls, ranks
+and claims against that page. What moved is the *setup* — which halls and
+dishes the hunt is allowed to name — and the *ceiling*, which has to be the
+menu's price because the market's price is a seller's asking price, not the
+menu's.
+
+The menu is one page per week, so the client now posts
+`ctl00$cphMain$imgbtnNextWeek` when the current week's grid does not cover
+the target date. The targetable range is seven days and routinely crosses
+that boundary.
+
+The domain note holds and is confirmed live: the portal publishes **one menu
+per (date, slot)** and names the halls that serve it, so the dishes are
+identical in every hall. A menu is a list of halls and a list of dishes; the
+pairings are implied and no dish-to-hall filtering was built.
+
+### The device run
+
+The hunt screen's سلف‌ها card now lists **both** مرکزی برادران and فنی
+برادران, each with its own priority checkbox, and the غذاها card lists the
+menu's dish at the menu's price (۱۵٬۰۰۰ تومان for 150,000 Rial).
+
+Reaching that took one repair to the environment, not to the code: the
+emulator's stored session had aged out past the 12-hour limit, and an earlier
+`adb shell pm clear` had destroyed the password in the Keystore, so the app
+could not re-login and the read failed with *اطلاعات ورود این حساب ذخیره
+نشده است*. The password was put back through the app's own **افزودن حساب**
+dialog — the only supported path into the Keystore. Worth recording: the
+**ویرایش نام** (edit) path does *not* save a password; only the add path
+calls `saveCredentials`. It upserts onto the existing account, so re-adding
+the same student id is the way back for a user who lost their stored
+password.
+
+### Testing approach
+
+**673 tests pass**, analyzer clean, plus 21 new tests: 11 in
+`test/adapter/menu_test.dart` (the parser and the client's next-week
+postback, against inline markup so they run on a fresh clone), 6 in
+`test/core/menu_choice_test.dart` (the menu → choices mapping), and 4 in
+`test/ui/home_shell_menu_test.dart` (the shell's read, at the level the user
+sees it).
+
+The engine test that proves the rebuild reads the menu is the one worth
+reading: the setup screen quotes 350,000, the menu quotes 500,000, the market
+lists 400,000. Rebuilt from the menu the 400,000 listing is inside the
+ceiling and the hunt buys; left at the setup screen's figure it is skipped.
+The assertion is that the purchase happened, because the purchase is the only
+thing that distinguishes the two sources.
+
+**A bug the shell-level test found.** The weekly page carries all three
+meals for a day, so a change of meal slot is answered from the menu already
+in hand — no request. But the redraw that answers it *also* cleared the
+error message, so a slot change after a failed read replaced "the portal
+could not be reached" with "there is no food that day". Those are different
+answers, and the second one is a lie about the portal. The redraw now does
+nothing when there is no menu to draw, and the failure keeps saying why it
+failed. The test for it was checked to fail without the fix.
+
+Two smaller corrections came out of the same pass: the halls card said
+"the halls of this account have not been read yet" whenever its list was
+empty — which is wrong when the read succeeded and the meal simply has no
+serving hall — and the shell swallowed the portal's own reason for being
+unreachable, replacing it with a generic message.
+
+**One pre-existing failure, not mine.** `test/core/clock_sync_test.dart` —
+*"the synced time tracks the server, not the device"* — fails. It was checked
+against a stashed clean tree and fails there identically: the test asserts
+the synced time is more than two hours after the device's, which only holds
+when the device clock is behind the portal's fixed 15:00. The device clock
+is now past it. It is a time-of-day-dependent test and needs its fixture
+fixed, which is a separate piece of work.

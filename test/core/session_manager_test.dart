@@ -131,6 +131,10 @@ class FakePortalClient implements PortalClient {
       const [];
 
   @override
+  Future<List<MealMenu>> fetchMenu(Session session, DateTime date) async =>
+      const [];
+
+  @override
   Future<List<Reservation>> fetchReservations(Session session) async => const [];
 
   @override

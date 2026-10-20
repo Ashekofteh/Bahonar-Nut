@@ -229,6 +229,55 @@ class HuntHall {
   String toString() => 'HuntHall($id, $name)';
 }
 
+/// The menu for one meal slot, in the terms the hunt screen offers them.
+///
+/// ## Why this is a domain type
+///
+/// The hunt screen shows two lists — the dishes and the halls — and both come
+/// from the same official menu. Turning a menu into those two lists is a
+/// decision with a rule behind it, so it belongs in the domain where it can
+/// be tested without a widget: a hall that is not served is not offered, and
+/// a dish is offered with the price the menu quoted for *that* (date, slot).
+class MenuChoice {
+  const MenuChoice({
+    required this.dishes,
+    required this.halls,
+  });
+
+  /// The dishes on offer, in the portal's own order, with their prices.
+  final List<HuntDish> dishes;
+
+  /// The halls that serve this meal, in the portal's own order.
+  final List<HuntHall> halls;
+
+  /// The choice for [slot] within [menus], or null when the portal does not
+  /// serve that meal on that date.
+  ///
+  /// Null is a real answer, and not the same as an empty one: an empty
+  /// choice means "the portal serves this meal and offers nothing on it",
+  /// while null means "there is no such meal". A hunt for a meal the portal
+  /// does not serve can buy nothing, and the screen must say so.
+  static MenuChoice? from(List<MealMenu> menus, MealSlot slot) {
+    for (final menu in menus) {
+      if (menu.slot != slot) continue;
+      return MenuChoice(
+        dishes: [
+          for (final dish in menu.dishes)
+            HuntDish(
+              optionId: dish.id,
+              name: dish.name,
+              priceRial: dish.priceRial,
+            ),
+        ],
+        halls: [
+          for (final hall in menu.halls) HuntHall(id: hall.id, name: hall.name),
+        ],
+      );
+    }
+    return null;
+  }
+}
+
 /// The hunt's configuration for one rule.
 class HuntConfig {
   HuntConfig({

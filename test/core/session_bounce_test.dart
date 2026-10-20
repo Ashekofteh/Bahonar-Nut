@@ -106,6 +106,10 @@ class ExpiringClient implements PortalClient {
       const [];
 
   @override
+  Future<List<MealMenu>> fetchMenu(Session session, DateTime date) async =>
+      const [];
+
+  @override
   Future<List<Transaction>> fetchTransactions(Session session) async =>
       const [];
 

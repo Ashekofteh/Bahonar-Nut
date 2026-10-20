@@ -314,8 +314,8 @@ class DefaultSnipeEngine implements SnipeEngine {
       final inputs = await _readPreflightInputs(rule);
       final session = _sessions.sessionFor(rule.account);
 
-      // A hunt's priority list is rebuilt from the **live** offering for the
-      // target date and slot, not reused from the setup screen.
+      // A hunt's priority list is rebuilt from the **live official menu** for
+      // the target date and slot, not reused from the setup screen.
       //
       // A price belongs to a (date, slot): the same option costs 2,150,000
       // as a breakfast and 500,000 as a lunch. So a hunt that starts hours
@@ -323,7 +323,7 @@ class DefaultSnipeEngine implements SnipeEngine {
       // the screen was filled for — must use the current figure, both for the
       // price it will pay and for the credit the pre-flight demands.
       if (run.hunt != null) {
-        final rebuilt = await _rebuildFromLiveOffering(run, session);
+        final rebuilt = await _rebuildFromLiveMenu(run, session);
         if (rebuilt == null) return; // The read failed; the run has ended.
         run.hunt = rebuilt;
       }
@@ -564,36 +564,54 @@ class DefaultSnipeEngine implements SnipeEngine {
     );
   }
 
-  /// Rebuilds the hunt's priority list from the live offering.
+  /// Rebuilds the hunt's priority list from the live official menu.
   ///
-  /// Returns null when the offering could not be read, in which case the run
+  /// Returns null when the menu could not be read, in which case the run
   /// has already been ended — a hunt that proceeds with a stale price list
   /// would demand the wrong credit and could buy at the wrong price.
   ///
-  /// The **prices** are refreshed; the **dishes** are kept. A dish the market
-  /// is not offering right now is what a hunt waits for.
-  Future<HuntConfig?> _rebuildFromLiveOffering(_Run run, Session? session) async {
+  /// ## Why the menu and not the marketplace
+  ///
+  /// The menu is the **official offering**: it says which dishes the
+  /// university serves for a (date, slot), at what price, in which halls.
+  /// The marketplace says which meals have been *released* for sale — a
+  /// subset of the menu, and one that empties as the day goes on.
+  ///
+  /// The rebuild needs the official offering, for two reasons:
+  ///
+  ///  * **The price.** A price belongs to a (date, slot), and the menu is
+  ///    where the portal publishes it. The marketplace may not have the dish
+  ///    at all yet, and then it has no price to give.
+  ///  * **Which meal a dish belongs to.** The marketplace only shows
+  ///    released meals, so a dish that has not been released carries no slot
+  ///    information — and the rebuild could not tell "not on offer yet" from
+  ///    "belongs to another meal". The menu always knows.
+  ///
+  /// The marketplace remains where the hunt's *listings* come from: the
+  /// polling, the ranking and the claim all happen there.
+  Future<HuntConfig?> _rebuildFromLiveMenu(_Run run, Session? session) async {
     final hunt = run.hunt!;
     final effectiveSession = session ?? run.session;
     if (effectiveSession == null) return hunt;
 
-    final cursor = hunt.targetDate == null ? null : _jalaliOf(hunt.targetDate!);
+    final targetDate = hunt.targetDate;
+    if (targetDate == null) return hunt;
 
-    BasketPage page;
+    List<MealMenu> menus;
     try {
-      page = await _client.fetchBasket(effectiveSession, cursor: cursor);
+      menus = await _client.fetchMenu(effectiveSession, targetDate);
     } on LoginRejectedException {
       try {
-        page = await _sessions.withSession(
+        menus = await _sessions.withSession(
           run.rule.account,
-          (fresh) => _client.fetchBasket(fresh, cursor: cursor),
+          (fresh) => _client.fetchMenu(fresh, targetDate),
         );
         run.session = _sessions.sessionFor(run.rule.account);
       } catch (error) {
         run.ledger.record(
           at: _now(),
           kind: LedgerEventKind.runEnded,
-          message: 'خواندن غذاهای روز از سامانه ممکن نشد: $error',
+          message: 'خواندن منوی غذاهای روز از سامانه ممکن نشد: $error',
         );
         _finish(run, SnipeState.aborted, 'offering unreadable');
         await _listener.onEnded(
@@ -607,7 +625,7 @@ class DefaultSnipeEngine implements SnipeEngine {
       run.ledger.record(
         at: _now(),
         kind: LedgerEventKind.runEnded,
-        message: 'خواندن غذاهای روز از سامانه ممکن نشد: $error',
+        message: 'خواندن منوی غذاهای روز از سامانه ممکن نشد: $error',
       );
       _finish(run, SnipeState.aborted, 'offering unreadable');
       await _listener.onEnded(
@@ -618,34 +636,36 @@ class DefaultSnipeEngine implements SnipeEngine {
       return null;
     }
 
-    // The live price for each dish, taken from the offering for the target
-    // date and slot.
+    // The live price for each dish, taken from the official menu for the
+    // target date and slot.
     final livePrice = <String, int>{};
     final liveOptionId = <String, String>{};
-    // Which slots offer each dish on this date, so a dish that belongs to a
+    // Which slots serve each dish on this date, so a dish that belongs to a
     // *different* meal can be told apart from one that is simply not on
     // offer yet.
     final offeredIn = <String, Set<MealSlot>>{};
 
-    for (final listing in page.listings) {
-      final key = listing.option.dishKey;
-      offeredIn.putIfAbsent(key, () => <MealSlot>{}).add(listing.slot);
-      if (listing.slot != hunt.targetSlot) continue;
-      livePrice.putIfAbsent(key, () => listing.priceRial);
-      liveOptionId.putIfAbsent(key, () => listing.option.id);
+    for (final menu in menus) {
+      for (final dish in menu.dishes) {
+        final key = dish.dishKey;
+        offeredIn.putIfAbsent(key, () => <MealSlot>{}).add(menu.slot);
+        if (menu.slot != hunt.targetSlot) continue;
+        livePrice.putIfAbsent(key, () => dish.priceRial);
+        liveOptionId.putIfAbsent(key, () => dish.id);
+      }
     }
 
-    // The prices are refreshed; a dish the market is not offering *right now*
+    // The prices are refreshed; a dish the menu does not offer *right now*
     // is **not** dropped.
     //
-    // A dish the market is not offering right now is exactly what a hunt
+    // A dish the portal is not offering right now is exactly what a hunt
     // waits for — the market fills up during the window, which is the whole
     // point of hunting. Dropping it would end the hunt before the listing it
     // is waiting for appears.
     //
     // The price is the part that must be refreshed: it belongs to a
     // (date, slot), and the hunt may start for a different one than the
-    // setup screen quoted. A dish the market is not offering keeps the price
+    // setup screen quoted. A dish the menu does not list keeps the price
     // the setup screen quoted, because there is no live figure to use and a
     // hunt with no price could not be credit-checked.
     //

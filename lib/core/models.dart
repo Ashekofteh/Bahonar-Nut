@@ -79,6 +79,55 @@ class MenuOption {
   String toString() => 'MenuOption($id, $name, $priceRial Rial)';
 }
 
+/// The official offering for one (date, meal slot): the halls that serve it
+/// and the dishes on offer.
+///
+/// ## The dishes are the same in every hall
+///
+/// The portal publishes **one menu per (date, slot)** and names the halls
+/// that serve it. The dishes are not per-hall: every hall serves the same
+/// dishes for that meal. So a menu is a list of halls and a list of dishes,
+/// and the pairings are implied — not a per-hall list of dishes.
+///
+/// This is the *weekly menu* (`Reservation.aspx`), which says what the
+/// university serves. It is not the *marketplace* (`FoodBasketBuy.aspx`),
+/// which says what has been released for sale. The two answer different
+/// questions, and the hunt's setup needs this one.
+class MealMenu {
+  const MealMenu({
+    required this.date,
+    required this.slot,
+    required this.halls,
+    required this.dishes,
+    required this.reservable,
+  });
+
+  /// Date-only, in the portal's (Tehran) local frame.
+  final DateTime date;
+  final MealSlot slot;
+
+  /// The halls that serve this meal, in the portal's own order.
+  ///
+  /// The identity is the **id**; the name is display only. The portal names
+  /// halls differently for different accounts.
+  final List<Hall> halls;
+
+  /// The dishes on offer, in the portal's own order, with their prices.
+  ///
+  /// A price belongs to a (date, slot): the same dish costs 150,000 Rial as a
+  /// breakfast and 500,000 as a lunch. So these prices are only meaningful
+  /// together with this menu's [date] and [slot].
+  final List<MenuOption> dishes;
+
+  /// False once the server-side cutoff has passed.
+  final bool reservable;
+
+  @override
+  String toString() =>
+      'MealMenu(${date.toIso8601String()} $slot, ${dishes.length} dishes, '
+      '${halls.length} halls)';
+}
+
 /// A (date, meal, hall, option) tuple the student could reserve.
 class MealOffering {
   const MealOffering({

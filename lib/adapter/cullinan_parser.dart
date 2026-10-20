@@ -62,6 +62,10 @@ abstract final class CullinanParser {
   /// contributes nothing. A locked date still lists its options — the lock is
   /// expressed by the row's checkbox being `disabled` — so [MealOffering
   /// .reservable] reports it rather than hiding the option.
+  ///
+  /// Only the **selected** hall is reported per offering: a held meal names
+  /// the hall it is in. The *set* of halls that serve a meal is a different
+  /// question, and [parseMenu] answers it.
   static List<MealOffering> parseOfferings(String html, DateTime date) {
     final offerings = <MealOffering>[];
 
@@ -102,6 +106,89 @@ abstract final class CullinanParser {
     }
 
     return offerings;
+  }
+
+  /// Parses the reservation grids into the **official menu** for [date].
+  ///
+  /// ## Why this exists, and why the menu and not the marketplace
+  ///
+  /// The portal answers two different questions with two different pages:
+  ///
+  ///  * The **weekly menu** (`Reservation.aspx`) names the halls that *serve*
+  ///    a meal and the dishes the university offers for it.
+  ///  * The **buy page** (`FoodBasketBuy.aspx`) names the halls that have
+  ///    *released* a meal into the marketplace.
+  ///
+  /// The buy page's set is a strict **subset** of the menu's: a hall appears
+  /// there only once one of its students has released that meal. So a list
+  /// built from the buy page hides every hall that has not yet released
+  /// anything — and a hall that has not released anything *yet* is exactly
+  /// the one a hunt needs to be able to name, because the market fills up
+  /// **during** the hunt window. A "prefer Central, fall back to Engineering"
+  /// hunt that could not name Engineering would never use the fallback.
+  ///
+  /// The hunt's setup therefore reads this page, and the marketplace remains
+  /// the source of *listings* only.
+  ///
+  /// ## The dishes are the same in every hall
+  ///
+  /// The menu publishes one dish list per (date, slot) and a set of halls that
+  /// serve it. The dishes are not per-hall, so this does not build a
+  /// hall-to-dish map: the hall list and the dish list are independent, and
+  /// the pairing is implied.
+  ///
+  /// A row with no service renders `-` in both dropdowns and contributes
+  /// nothing. Returns an empty list when the page carries no row for [date].
+  static List<MealMenu> parseMenu(String html, DateTime date) {
+    final menus = <MealMenu>[];
+
+    for (final slot in reservationSlots) {
+      for (final row in tableRows(html, gridIdFor(slot))) {
+        if (row.cells.length < 4) continue;
+
+        final rowDate = parseJalaliDate(row.cell(1));
+        if (rowDate == null || !_sameDate(rowDate, date)) continue;
+
+        final food = selectBySuffix(row.raw, 'drpFood');
+        final self = selectBySuffix(row.raw, 'drpSelf');
+        if (food == null || self == null) continue;
+
+        // Every hall in the dropdown, not just the selected one.
+        //
+        // The selected hall is the one a *held* meal is in. The list is the
+        // set of halls that serve the meal, and that is the set the hunt
+        // needs: the user is choosing where to eat, not where a meal already
+        // sits.
+        final halls = <Hall>[
+          for (final option in self.options)
+            if (option.value != '-1') Hall(id: option.value, name: option.text),
+        ];
+        if (halls.isEmpty) continue;
+
+        final dishes = <MenuOption>[];
+        for (final option in food.options) {
+          if (option.value == '-1') continue;
+          final price = parseRial(option.text);
+          if (price == null) continue;
+          dishes.add(MenuOption(
+            id: option.value,
+            name: dishName(option.text),
+            priceRial: price,
+          ));
+        }
+        if (dishes.isEmpty) continue;
+
+        menus.add(MealMenu(
+          date: rowDate,
+          slot: slot,
+          halls: halls,
+          dishes: dishes,
+          reservable: !_isDisabled(row.raw, 'chkReserve'),
+        ));
+      }
+    }
+
+    return menus;
   }
 
   /// Parses the reservation grids into the meals the student holds.

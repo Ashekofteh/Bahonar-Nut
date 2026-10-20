@@ -232,6 +232,20 @@ abstract class PortalClient {
 
   Future<List<MealOffering>> fetchOfferings(Session session, DateTime date);
 
+  /// The **official menu** for [date]: the halls that serve each meal and the
+  /// dishes on offer for it.
+  ///
+  /// This is the weekly reservation page, and it is the page the hunt's setup
+  /// reads. The marketplace ([fetchBasket]) answers a different question —
+  /// which meals have been *released* for sale — and its hall list is a
+  /// strict subset of this one's. A hunt must be able to name a hall that has
+  /// not yet released anything, because the market fills up during the hunt
+  /// window.
+  ///
+  /// The result is one [MealMenu] per meal slot served on [date]. Slots the
+  /// university does not serve that day are absent, not empty.
+  Future<List<MealMenu>> fetchMenu(Session session, DateTime date);
+
   Future<List<Reservation>> fetchReservations(Session session);
 
   /// The account's transaction history.

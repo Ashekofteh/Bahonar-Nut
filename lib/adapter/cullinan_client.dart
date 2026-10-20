@@ -49,6 +49,12 @@ class _Paths {
   static const topUp = '/ePay/ePay_Payment.aspx';
 }
 
+/// The weekly menu's "next week" postback target.
+///
+/// The weekly menu is one page per week, and this is how the portal moves to
+/// the next one. It is a navigation, not a write.
+const _eventTargetNextWeek = r'ctl00$cphMain$imgbtnNextWeek';
+
 /// The Cullinan implementation of [PortalClient].
 class CullinanPortalClient implements PortalClient {
   CullinanPortalClient({
@@ -222,9 +228,73 @@ class CullinanPortalClient implements PortalClient {
     Session session,
     DateTime date,
   ) async {
+    _applySession(session);
     final page = await transport.get(session.account, _Paths.reservation);
     _rejectIfBounced(page);
     return _parseOfferings(page.body, date);
+  }
+
+  @override
+  Future<List<MealMenu>> fetchMenu(
+    Session session,
+    DateTime date,
+  ) async {
+    _applySession(session);
+    final html = await _readMenuFor(session, date);
+    return CullinanParser.parseMenu(html, date);
+  }
+
+  /// The weekly menu page that carries [date].
+  ///
+  /// ## Why the second page
+  ///
+  /// The weekly menu is **one page per week**. `Reservation.aspx` carries the
+  /// current week; the next week is a separate page, reached by posting
+  /// `ctl00$cphMain$imgbtnNextWeek`. The hunt's targetable range is seven
+  /// days long, so it routinely crosses that boundary — and a read that only
+  /// ever fetched the current week's page would find no menu for a target
+  /// date in next week, and report it as "no food is served that day".
+  ///
+  /// So the page is fetched, and the target date is looked for in it. If it
+  /// is not there, next week's page is fetched and looked in.
+  ///
+  /// The postback is a **navigation**, not a write: it carries no save button
+  /// and changes nothing on the account.
+  Future<String> _readMenuFor(Session session, DateTime date) async {
+    final current = await transport.get(session.account, _Paths.reservation);
+    _rejectIfBounced(current);
+
+    if (_menuCovers(current.body, date)) return current.body;
+
+    final next = await transport.post(
+      session.account,
+      _Paths.reservation,
+      body: {
+        '__VIEWSTATE': hiddenFieldValue(current.body, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR':
+            hiddenFieldValue(current.body, '__VIEWSTATEGENERATOR'),
+        '__EVENTTARGET': _eventTargetNextWeek,
+        '__EVENTARGUMENT': '',
+      },
+    );
+    _rejectIfBounced(next);
+
+    return next.body;
+  }
+
+  /// Whether the menu page carries a row for [date].
+  ///
+  /// The date is compared by its **civil** form, because the grids label
+  /// their rows in Jalali and a Jalali label is a date, not an instant.
+  static bool _menuCovers(String html, DateTime date) {
+    for (final menu in CullinanParser.parseMenu(html, date)) {
+      if (menu.date.year == date.year &&
+          menu.date.month == date.month &&
+          menu.date.day == date.day) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @override

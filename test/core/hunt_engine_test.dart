@@ -95,22 +95,22 @@ class TimelineClient implements PortalClient {
   /// Called at the start of each poll, so a test can observe the clock.
   void Function()? onPoll;
 
-  /// How many times the market was read for the run's setup.
+  /// How many times the menu was read for the run's setup.
   int setupReads = 0;
 
-  /// The date filter the setup read was given.
-  String? setupCursor;
+  /// The date the setup read was for.
+  DateTime? setupDate;
 
   /// The length of each simulated response.
   Duration responseDuration = Duration.zero;
 
-  /// The market as the *setup* read sees it.
+  /// The official menu the *setup* read sees.
   ///
-  /// The engine reads the offering once at the start of a run, to rebuild the
-  /// priority list with live prices, and then polls. The two are different
-  /// requests and a test that scripted only the polls would find the setup
-  /// read consuming the first page.
-  List<Listing> offering = const [];
+  /// The engine reads the official menu once at the start of a run, to rebuild
+  /// the priority list with live prices, and then polls the marketplace. The
+  /// two are different requests, on different pages, and a test that scripted
+  /// only the polls would find the setup read consuming the first page.
+  List<MealMenu> menu = const [];
 
   int claimCalls = 0;
   int clock = 0;
@@ -118,14 +118,14 @@ class TimelineClient implements PortalClient {
   void advance(Duration d) => clock += d.inMilliseconds;
 
   @override
-  Future<BasketPage> fetchBasket(Session session, {String? cursor}) async {
-    // The first read of a run is the setup read; the rest are polls.
-    if (pollStarts.isEmpty && setupReads == 0) {
-      setupReads++;
-      setupCursor = cursor;
-      return BasketPage(listings: offering);
-    }
+  Future<List<MealMenu>> fetchMenu(Session session, DateTime date) async {
+    setupReads++;
+    setupDate = date;
+    return menu;
+  }
 
+  @override
+  Future<BasketPage> fetchBasket(Session session, {String? cursor}) async {
     pollStarts.add(clock);
     cursors.add(cursor);
     onPoll?.call();
@@ -289,22 +289,45 @@ class Harness {
     required this.config,
     required this.listener,
     DateTime? now,
+    List<MealMenu>? menu,
   }) : clock = MovableServerClock(now ?? DateTime.utc(2026, 10, 28, 12, 0)) {
-    // The setup read sees the same market the polls will.
+    // The setup read sees the same food the polls will.
     //
-    // A hunt's priority list is rebuilt from the live offering, so the market
-    // a test scripts must be available to both reads. The offering is every
-    // listing the test scripted, deduplicated by name — a test that scripts
-    // "the market has this dish" means the same thing whether the listing
-    // appears on the first poll or the second.
-    final seen = <String>{};
-    final offering = <Listing>[];
-    for (final page in client.pages) {
-      for (final listing in page) {
-        if (seen.add(listing.option.dishKey)) offering.add(listing);
+    // A hunt's priority list is rebuilt from the live official menu, so the
+    // food a test scripts must be available to both reads. The menu is every
+    // listing the test scripted, grouped into one menu per meal slot and
+    // deduplicated by name — a test that scripts "the portal serves this
+    // dish" means the same thing whether the listing appears on the first
+    // poll or the second.
+    //
+    // A test that needs the menu to say something the marketplace cannot
+    // passes [menu] explicitly, and it is used as it is.
+    if (menu != null) {
+      client.menu = menu;
+    } else {
+      final bySlot = <MealSlot, Map<String, MenuOption>>{};
+      for (final page in client.pages) {
+        for (final listing in page) {
+          bySlot
+              .putIfAbsent(listing.slot, () => <String, MenuOption>{})
+              .putIfAbsent(
+                listing.option.dishKey,
+                () => listing.option,
+              );
+        }
       }
+
+      client.menu = [
+        for (final entry in bySlot.entries)
+          MealMenu(
+            date: config.targetDate ?? DateTime.utc(2026, 10, 28),
+            slot: entry.key,
+            halls: const [central],
+            dishes: entry.value.values.toList(),
+            reservable: true,
+          ),
+      ];
     }
-    client.offering = offering;
 
     engine = DefaultSnipeEngine(
       client: client,
@@ -731,8 +754,64 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 120));
       await harness.engine.stop('r1');
 
-      expect(client.setupCursor, '1405/08/06',
-          reason: 'the offering is per (date, slot), so the read is filtered');
+      expect(client.setupDate, DateTime.utc(2026, 10, 28),
+          reason: 'the menu is per date, so the read is for that date');
+    });
+
+    test('the rebuild reads the official menu, not the marketplace',
+        () async {
+      // The setup screen quoted 350,000; the **menu** says 500,000; the
+      // marketplace has the dish for 400,000.
+      //
+      // The ceiling the hunt enforces is the price on the rebuilt list, so
+      // the two outcomes differ and only one of them buys:
+      //
+      //  * rebuilt from the menu → ceiling 500,000 → the 400,000 listing is
+      //    within it, and the hunt buys;
+      //  * left at the setup screen's figure → ceiling 350,000 → the
+      //    400,000 listing is above it, and the hunt skips it.
+      //
+      // So "the hunt bought it" is the assertion that the rebuild read the
+      // menu. The marketplace could not have produced this answer: it never
+      // carries the official price for a (date, slot).
+      final client = TimelineClient(pages: [
+        [
+          marketListing(
+            optionId: '99999',
+            name: 'لوبیا پلو',
+            priceRial: 400000,
+          ),
+        ],
+      ]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          dishes: [
+            HuntDish(optionId: '62742', name: 'لوبیا پلو', priceRial: 350000),
+          ],
+        ),
+        listener: RecordingListener(),
+        now: DateTime.utc(2026, 10, 28, 14, 30),
+        // The menu names the dish, at the price the setup screen did not know.
+        menu: [
+          MealMenu(
+            date: DateTime.utc(2026, 10, 28),
+            slot: MealSlot.dinner,
+            halls: const [central],
+            dishes: const [
+              MenuOption(id: '62742', name: 'لوبیا پلو', priceRial: 500000),
+            ],
+            reservable: true,
+          ),
+        ],
+      );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await harness.engine.stop('r1');
+
+      expect(client.claimCalls, 1,
+          reason: 'the hunt must buy at the price the official menu quotes');
     });
   });
 
