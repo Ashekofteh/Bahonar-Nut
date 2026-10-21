@@ -51,7 +51,10 @@ object ReminderPayloads {
     /** The evening digest (dinner and tomorrow's breakfast). */
     const val EVENING = "evening"
 
+    /** The next-week reservation nudge. */
+    const val NUDGE = "nudge"
+
     /** Whether the payload names a reminder rather than a hunt. */
     fun isReminder(payload: String?): Boolean =
-        payload == LUNCH || payload == EVENING
+        payload == LUNCH || payload == EVENING || payload == NUDGE
 }
