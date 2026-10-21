@@ -19,6 +19,7 @@ import '../core/meal_invariant.dart';
 import '../core/models.dart';
 import '../core/portal.dart';
 import '../core/persian.dart';
+import '../core/session.dart' show SessionNeedsCaptcha;
 import '../core/session_manager.dart';
 import '../core/time.dart';
 
@@ -32,6 +33,7 @@ class AccountSyncResult {
     this.transactions = const [],
     this.profileName,
     this.error,
+    this.needsCaptcha,
   });
 
   final AccountId accountId;
@@ -50,6 +52,14 @@ class AccountSyncResult {
   final String? profileName;
 
   final String? error;
+
+  /// The CAPTCHA the student must answer, when the solver declined.
+  ///
+  /// The sync could not read the account, but the failure has a way forward:
+  /// the student can read the code. The image travels with the result so the
+  /// UI can show it — and it is the image that is *live*, bound to the
+  /// session at fetch time, so the answer is judged against it.
+  final SessionNeedsCaptcha? needsCaptcha;
 
   @override
   String toString() => 'AccountSyncResult($accountId, ok=$ok'
@@ -148,6 +158,7 @@ class PortalSync {
         accountId: accountId,
         ok: false,
         error: e.reason,
+        needsCaptcha: e.needsCaptcha,
       );
     } catch (e) {
       return AccountSyncResult(

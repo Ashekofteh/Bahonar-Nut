@@ -6,6 +6,8 @@ import '../core/models.dart';
 import '../core/persian.dart';
 import '../core/portal.dart';
 import '../core/preflight.dart';
+import '../core/session.dart'
+    show SessionNeedsCaptcha, SessionReady;
 import '../core/session_manager.dart'
     show PortalUnreachableException, SessionUnavailableException;
 import '../core/time.dart';
@@ -18,6 +20,7 @@ import '../platform/reminder_service.dart';
 import 'app_state.dart';
 import 'screens/accounts_screen.dart';
 import 'screens/booking_sheet.dart';
+import 'screens/captcha_dialog.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/hunt_screen.dart';
 import 'screens/reminders_screen.dart';
@@ -306,8 +309,28 @@ class _HomeShellState extends State<HomeShell> {
     try {
       final transactions = <Transaction>[];
       for (final account in accounts) {
-        final result = await _sync.sync(account.id);
+        var result = await _sync.sync(account.id);
         if (!mounted) return;
+
+        // The solver declined and the portal wants the student to read the
+        // CAPTCHA. That is not a dead end — it is a question — so the
+        // student is asked, and the account is read again with their answer.
+        final challenge = result.needsCaptcha;
+        if (challenge != null) {
+          final answered = await _askForCaptcha(challenge);
+          if (!mounted) return;
+          if (!answered) {
+            widget.state.setSyncError(
+              account.id,
+              result.error ?? 'کد امنیتی وارد نشد.',
+            );
+            continue;
+          }
+          // The session is now live, so the read goes through.
+          result = await _sync.sync(account.id);
+          if (!mounted) return;
+        }
+
         if (result.ok) {
           widget.state.setBalance(account.id, result.balanceRial ?? 0);
           transactions.addAll(result.transactions);
@@ -322,6 +345,42 @@ class _HomeShellState extends State<HomeShell> {
     } finally {
       if (mounted) widget.state.setSyncing(false);
     }
+  }
+
+  /// Asks the student to read the CAPTCHA, and logs in with their answer.
+  ///
+  /// Returns null when the student gave up — which is a legitimate answer:
+  /// the app must not trap them in a dialog they cannot leave.
+  ///
+  /// The answer is refused in one way only: the portal rotates the challenge,
+  /// so a fresh image comes back and the student is asked again. The loop is
+  /// bounded by the student's patience and by the portal's tolerance.
+  Future<bool> _askForCaptcha(SessionNeedsCaptcha challenge) async {
+    final answer = await CaptchaDialog.show(
+      context,
+      imageBytes: challenge.imageBytes,
+      previousAttempts: challenge.previousAttempts,
+    );
+    if (answer == null) return false;
+
+    final result = await widget.services.sessions.loginWithCaptcha(
+      challenge.accountId,
+      answer,
+    );
+
+    if (result is SessionReady) return true;
+
+    // A refused answer brings a **fresh** challenge, because the portal has
+    // rotated the one the student answered. Showing the old image again
+    // would invite the same wrong answer.
+    if (result is SessionNeedsCaptcha) {
+      if (!mounted) return false;
+      return _askForCaptcha(result);
+    }
+
+    // A plain refusal — a wrong password, or the portal unreachable. The
+    // student has to fix that, and the sync reports it.
+    return false;
   }
 
   /// Opens the booking screen, with the menu for the targetable dates.

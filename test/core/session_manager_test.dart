@@ -68,8 +68,17 @@ class FakePortalClient extends stubs.FakePortalClient {
   int completeLoginCount = 0;
   int logoutCount = 0;
 
-  /// When true, [completeLogin] throws [LoginRejectedException].
+  /// When true, [completeLogin] throws [LoginRejectedException] saying the
+  /// **password** was wrong.
   bool rejectCredentials = false;
+
+  /// When true, [completeLogin] throws [LoginRejectedException] saying the
+  /// **CAPTCHA** was wrong.
+  ///
+  /// Distinct from [rejectCredentials] because the two call for different
+  /// things from the student: one wants a new password, the other wants the
+  /// code typed again. The portal says which, and the app has to believe it.
+  bool rejectCaptcha = false;
 
   /// When true, [beginLogin] throws [PortalUnreachableException].
   bool unreachable = false;
@@ -100,8 +109,11 @@ class FakePortalClient extends stubs.FakePortalClient {
   }) async {
     completeLoginCount++;
     if (loginDelay > Duration.zero) await Future<void>.delayed(loginDelay);
+    if (rejectCaptcha) {
+      throw const LoginRejectedException('کد امنیتی صحیح نمی باشد');
+    }
     if (rejectCredentials) {
-      throw const LoginRejectedException('کد امنیتی صحیح نمی‌باشد');
+      throw const LoginRejectedException('نام کاربری یا گذرواژه اشتباه است');
     }
     return Session(
       account: username,
@@ -332,8 +344,12 @@ void main() {
           SessionFailureCause.badCredentials);
     });
 
-    test('solver declining -> challengeUnsolvable', () async {
-      solver.declines = true;
+    test('a rejected CAPTCHA is not reported as a wrong password', () async {
+      // The portal says which, and the two call for different things from
+      // the student: one wants a new password, the other wants the code
+      // typed again. Reporting a wrong code as a wrong password sends the
+      // student to change a password that was never the problem.
+      client.rejectCaptcha = true;
       await store.writeCredentials(
           'a1', const Credentials(studentId: 'x', password: 'pw'));
 
@@ -341,7 +357,24 @@ void main() {
       final result = await manager.ensureSession('a1');
 
       expect((result as SessionUnavailable).cause,
-          SessionFailureCause.challengeUnsolvable);
+          SessionFailureCause.wrongCaptcha);
+    });
+
+    test('solver declining -> the challenge comes back for the student', () async {
+      // The solver cannot read the code. That is not a dead end — the
+      // student can — so the **image** travels with the failure.
+      solver.declines = true;
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+      final result = await manager.ensureSession('a1');
+
+      expect(result, isA<SessionNeedsCaptcha>());
+      final challenge = result as SessionNeedsCaptcha;
+      expect(challenge.imageBytes, isNotEmpty,
+          reason: 'the image is what the student has to read');
+      expect(challenge.accountId, 'a1');
       expect(client.completeLoginCount, 0,
           reason: 'must not submit without an answer');
     });
@@ -356,6 +389,47 @@ void main() {
 
       expect((result as SessionUnavailable).cause,
           SessionFailureCause.networkError);
+    });
+
+    test('a typed answer logs in, without consulting the solver', () async {
+      // The student read the code; the solver's opinion is what got us here,
+      // so it is not asked.
+      solver.declines = true;
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+      final result = await manager.loginWithCaptcha('a1', '9876');
+
+      expect(result, isA<SessionReady>());
+      expect(solver.solveCount, 0,
+          reason: 'the solver is not consulted for a typed answer');
+    });
+
+    test('a refused typed answer brings a fresh challenge', () async {
+      // The portal rotates the challenge when it refuses, so the image the
+      // student answered is dead. Showing it again would invite the same
+      // wrong answer.
+      client.rejectCaptcha = true;
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+      final result = await manager.loginWithCaptcha('a1', '0000');
+
+      expect(result, isA<SessionNeedsCaptcha>());
+      final challenge = result as SessionNeedsCaptcha;
+      expect(challenge.previousAttempts, 1,
+          reason: 'the UI says the code was refused, and shows a new image');
+      expect(challenge.imageBytes, isNotEmpty);
+    });
+
+    test('a typed answer with no credentials -> noCredentials', () async {
+      final manager = buildManager(client: client, store: store, solver: solver);
+      final result = await manager.loginWithCaptcha('a1', '1234');
+
+      expect((result as SessionUnavailable).cause,
+          SessionFailureCause.noCredentials);
     });
 
     test('a failure never leaves a stale session cached', () async {

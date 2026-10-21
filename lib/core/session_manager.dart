@@ -130,18 +130,26 @@ class SessionManager {
 
   Future<SessionResult> _login(
     AccountId accountId,
-    Credentials credentials,
-  ) async {
+    Credentials credentials, {
+    String? typedAnswer,
+  }) async {
     try {
       final challenge = await client.beginLogin(credentials.studentId);
 
       LoginChallengeResponse? response;
       if (challenge != null) {
-        final answer = await solver.solve(challenge);
+        // A typed answer comes from the student, and it is used **as is**:
+        // the solver is not consulted, because the student has already
+        // looked at the image and the solver may well read it differently.
+        final answer = typedAnswer ?? await solver.solve(challenge);
         if (answer == null) {
-          return const SessionUnavailable(
-            reason: 'کد امنیتی به‌صورت خودکار خوانده نشد.',
-            cause: SessionFailureCause.challengeUnsolvable,
+          // The solver declined. The image travels with the failure so the
+          // student can read the challenge that is actually live — the
+          // bytes that were fetched are the ones the answer is judged
+          // against.
+          return SessionNeedsCaptcha(
+            imageBytes: challenge.imageBytes,
+            accountId: accountId,
           );
         }
         response = LoginChallengeResponse(answer);
@@ -157,6 +165,17 @@ class SessionManager {
       await store.writeSession(StoredSession.fromSession(accountId, session));
       return SessionReady(session: session, wasReused: false);
     } on LoginRejectedException catch (e) {
+      // The portal refused the login. Whether that was the **password** or
+      // the **CAPTCHA** matters, and the portal says which: it answers a
+      // wrong code with a distinct label. Reporting a wrong code as a
+      // wrong password sends the student to change a password that was
+      // never the problem.
+      if (_isCaptchaRejection(e.message)) {
+        return SessionUnavailable(
+          reason: 'کد امنیتی درست تشخیص داده نشد.',
+          cause: SessionFailureCause.wrongCaptcha,
+        );
+      }
       return SessionUnavailable(
         reason: 'نام کاربری یا گذرواژه پذیرفته نشد: ${e.message}',
         cause: SessionFailureCause.badCredentials,
@@ -181,6 +200,22 @@ class SessionManager {
   /// fire one too early.
   bool get isClockTrustworthy =>
       clock.isSynced && clock.staleness <= policy.stalenessLimit;
+
+  /// Whether the portal's refusal was about the **CAPTCHA** rather than the
+  /// password.
+  ///
+  /// The portal says which, in the label it renders on a failed login: a
+  /// wrong code reads «کد امنیتی صحیح نمی باشد» and a wrong password reads
+  /// «نام کاربری یا گذرواژه اشتباه است». They are different problems with
+  /// different fixes, and telling a student to change their password because
+  /// the app misread four digits is worse than no message at all.
+  ///
+  /// The check is on the **code**, and the code is the thing the phrase
+  /// «کد امنیتی» names. The message has been seen verbatim from the portal,
+  /// so the match is on that phrase rather than on the whole sentence — a
+  /// portal that rewords it should still be understood.
+  static bool _isCaptchaRejection(String message) =>
+      message.contains('کد امنیتی');
 
   bool _isAgedOut(Session session) =>
       DateTime.now().toUtc().difference(session.establishedAt.toUtc()) >
@@ -207,6 +242,103 @@ class SessionManager {
     await store.purge(accountId);
   }
 
+  /// Logs in with a CAPTCHA the student typed.
+  ///
+  /// ## Why this is a separate call
+  ///
+  /// The normal login is invisible: the solver reads the code and the student
+  /// never sees a challenge. This call is the **fallback** — the solver
+  /// declined, the image was shown, and the student read four digits off it.
+  ///
+  /// So the answer is used as given. The solver is not consulted, because the
+  /// student has looked at the image and the solver may well read it
+  /// differently — and the solver's opinion is what got us here.
+  ///
+  /// ## The queue
+  ///
+  /// The call joins the account's **login queue**, like every other login.
+  /// The portal binds the CAPTCHA answer to the session at image-fetch time,
+  /// so a login that interleaved with another would be answering a challenge
+  /// the other had already rotated.
+  ///
+  /// The student may take a while to read the code, and the queue holds for
+  /// that long. That is the correct trade: a second login would fetch a new
+  /// challenge and make the answer the student is about to type wrong.
+  Future<SessionResult> loginWithCaptcha(
+    AccountId accountId,
+    String answer,
+  ) {
+    final previous = _queues[accountId];
+    final completer = Completer<SessionResult>();
+
+    Future<void> run() async {
+      try {
+        completer.complete(await _loginWithTypedAnswer(accountId, answer));
+      } catch (error, stack) {
+        completer.completeError(error, stack);
+      }
+    }
+
+    final chained = (previous ?? Future<void>.value()).then((_) => run());
+    final tail = chained.then((_) {}, onError: (_) {});
+    _queues[accountId] = tail;
+    tail.whenComplete(() {
+      if (identical(_queues[accountId], tail)) _queues.remove(accountId);
+    });
+
+    return completer.future;
+  }
+
+  /// The login body for a typed answer.
+  ///
+  /// It reads the credentials and posts the answer the student gave. A
+  /// refusal comes back as a **fresh challenge** rather than a plain error,
+  /// because the portal has rotated the challenge: the old image is dead and
+  /// the student needs a new one to answer.
+  Future<SessionResult> _loginWithTypedAnswer(
+    AccountId accountId,
+    String answer,
+  ) async {
+    final credentials = await store.readCredentials(accountId);
+    if (credentials == null) {
+      return const SessionUnavailable(
+        reason: 'اطلاعات ورود این حساب ذخیره نشده است.',
+        cause: SessionFailureCause.noCredentials,
+      );
+    }
+
+    final result = await _login(accountId, credentials, typedAnswer: answer);
+
+    // A refused code needs a new challenge. The portal has rotated it, so
+    // the image the student answered is no longer the live one, and
+    // re-showing it would invite the same wrong answer.
+    if (result is SessionUnavailable &&
+        result.cause == SessionFailureCause.wrongCaptcha) {
+      final challenge = await _fetchChallenge(credentials.studentId);
+      if (challenge != null) {
+        return SessionNeedsCaptcha(
+          imageBytes: challenge.imageBytes,
+          accountId: accountId,
+          previousAttempts: 1,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  /// Fetches a fresh CAPTCHA, for a challenge the student must answer.
+  ///
+  /// A failure here is not fatal: the caller falls back to reporting the
+  /// refusal, which is still true.
+  Future<LoginChallenge?> _fetchChallenge(String username) async {
+    try {
+      return await client.beginLogin(username);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The cached session for an account, or null when none is live.
   Session? sessionFor(AccountId accountId) => _live[accountId];
 
@@ -222,12 +354,25 @@ class SessionManager {
   /// retried once with a fresh login, and only the second failure is reported.
   ///
   /// Throws [SessionUnavailable] when no session can be established at all.
+  ///
+  /// When the solver declined and the student must answer the CAPTCHA, the
+  /// challenge travels with the exception, so the UI can show the image
+  /// rather than reporting a dead end.
   Future<T> withSession<T>(
     AccountId accountId,
     Future<T> Function(Session session) read,
   ) async {
     var result = await ensureSession(accountId);
     if (result is! SessionReady) {
+      if (result is SessionNeedsCaptcha) {
+        throw SessionUnavailableException(
+          const SessionUnavailable(
+            reason: 'کد امنیتی به‌صورت خودکار خوانده نشد.',
+            cause: SessionFailureCause.challengeUnsolvable,
+          ),
+          needsCaptcha: result,
+        );
+      }
       throw SessionUnavailableException(result as SessionUnavailable);
     }
 
@@ -287,9 +432,17 @@ class LoginRejectedException implements Exception {
 /// Thrown by [SessionManager.withSession], so a caller that only wants to make
 /// a read does not have to branch on [SessionResult] itself.
 class SessionUnavailableException implements Exception {
-  const SessionUnavailableException(this.unavailable);
+  const SessionUnavailableException(this.unavailable, {this.needsCaptcha});
 
   final SessionUnavailable unavailable;
+
+  /// The CAPTCHA the student must answer, when the solver declined.
+  ///
+  /// Carried alongside the failure rather than as a separate exception type,
+  /// because it is the **same** failure with something the student can do
+  /// about it. A caller that gets this has a path forward; a caller that
+  /// gets a plain refusal does not.
+  final SessionNeedsCaptcha? needsCaptcha;
 
   /// The reason, in the user's language.
   String get reason => unavailable.reason;

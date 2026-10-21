@@ -244,6 +244,32 @@ String toEnglishDigits(String input) {
   return buffer.toString();
 }
 
+/// Keeps only the digits in [input], in either script, as Western digits.
+///
+/// ## Why the Persian digits are kept
+///
+/// A student types on a Persian keyboard, so the digits arrive as Persian
+/// ones — and a field that accepts only Western digits **silently refuses
+/// the input**. The student types four digits and nothing appears, which
+/// looks exactly like a frozen app.
+///
+/// So the field accepts both, and the conversion happens here — at the edge,
+/// where the portal's answer is posted.
+String digitsOnly(String input) {
+  const persian = '۰۱۲۳۴۵۶۷۸۹';
+  final buffer = StringBuffer();
+  for (final rune in input.runes) {
+    final char = String.fromCharCode(rune);
+    final index = persian.indexOf(char);
+    if (index >= 0) {
+      buffer.write('$index');
+    } else if (char.codeUnitAt(0) >= 0x30 && char.codeUnitAt(0) <= 0x39) {
+      buffer.write(char);
+    }
+  }
+  return buffer.toString();
+}
+
 /// Formats a Rial amount for display, e.g. `۳۵۰٬۰۰۰ ریال`.
 ///
 /// **This is for the rare case that Rial must be shown.** Iran has not used

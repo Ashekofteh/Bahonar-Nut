@@ -12,6 +12,8 @@
 /// milliseconds without involving anyone.
 library;
 
+import 'dart:typed_data';
+
 import 'models.dart';
 import 'portal.dart';
 
@@ -105,6 +107,50 @@ class SessionUnavailable extends SessionResult {
   final SessionFailureCause cause;
 }
 
+/// The login needs the student to read the CAPTCHA themselves.
+///
+/// ## Why this exists
+///
+/// The on-device solver reads the CAPTCHA. When it cannot — the portal
+/// changed the image, or the digits are ambiguous — the only honest outcome
+/// is to **ask the student**, not to fail.
+///
+/// A failure here is not a cosmetic one. The login is what every read and
+/// every write depends on, and the app's whole purpose is to replace the web
+/// portal. A student who cannot log in cannot use the app at all.
+///
+/// ## Why the image travels with the result
+///
+/// The solver is not the only reader of the CAPTCHA. When it declines, the
+/// **image** is what the student needs — and the image is bound to the
+/// session at fetch time, so the exact bytes that were fetched are the ones
+/// the answer will be judged against. Throwing them away and re-fetching
+/// would fetch a *different* challenge, and the typed answer would be
+/// rejected for no reason.
+///
+/// So the image comes with the failure, and the student answers the
+/// challenge that is actually live.
+class SessionNeedsCaptcha extends SessionResult {
+  const SessionNeedsCaptcha({
+    required this.imageBytes,
+    required this.accountId,
+    this.previousAttempts = 0,
+  });
+
+  /// The CAPTCHA image, as fetched.
+  final Uint8List imageBytes;
+
+  /// The account the challenge belongs to.
+  final AccountId accountId;
+
+  /// How many times the automatic answer has been tried and refused.
+  ///
+  /// Carried so the UI can say "the code was wrong" rather than showing the
+  /// image as if nothing had happened, and so a challenge that keeps being
+  /// refused can be re-fetched rather than retried forever.
+  final int previousAttempts;
+}
+
 enum SessionFailureCause {
   /// No credentials stored for this account.
   noCredentials,
@@ -114,6 +160,14 @@ enum SessionFailureCause {
 
   /// The CAPTCHA solver declined and no human was available to help.
   challengeUnsolvable,
+
+  /// The portal rejected the CAPTCHA the app typed.
+  ///
+  /// Distinct from [badCredentials] because the fix is different: the
+  /// student types the code again, and the password may be perfectly fine.
+  /// Reporting a wrong CAPTCHA as a wrong password sends the student to
+  /// change a password that was never the problem.
+  wrongCaptcha,
 
   /// The portal was unreachable or returned an unexpected response.
   networkError,
