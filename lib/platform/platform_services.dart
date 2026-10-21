@@ -18,6 +18,7 @@ import '../core/hunt_store.dart';
 import '../core/local_meal_store.dart';
 import '../core/platform_stores.dart';
 import '../core/portal.dart';
+import '../core/request_ledger.dart';
 import '../core/session.dart';
 import '../core/session_manager.dart';
 import '../core/serialised_portal_client.dart';
@@ -42,6 +43,7 @@ class AppServices {
     required this.credentialStore,
     required this.plainStore,
     required this.clock,
+    this.requests,
   });
 
   /// Builds the real services, backed by the Android platform.
@@ -51,12 +53,19 @@ class AppServices {
   }) {
     final theBridge = bridge ?? PlatformBridge();
     final clock = SyncedServerClock();
+    // The ledger is the record of what the app asked the portal for. It is
+    // created here and given to the transport, so it counts every request —
+    // and the engine reads the same one, so the hunt's budget is measured in
+    // the requests the portal actually saw rather than in the polls the app
+    // believes it made.
+    final requests = RequestLedger();
     // The transport carries the clock so every response can sync it: the
     // portal's `Date` header rides along on the reads the app was making
     // anyway, and a hunt cannot start without a trustworthy server time.
     final transport = PortalTransport(
       baseUri: Uri.parse(portalBaseUrl),
       clock: clock,
+      ledger: requests,
     );
     final client = CullinanPortalClient(transport: transport);
     // The serialising wrapper is what every consumer sees, so a read and a
@@ -83,6 +92,7 @@ class AppServices {
       credentialStore: credentialStore,
       plainStore: plainStore,
       clock: clock,
+      requests: requests,
     );
   }
 
@@ -92,6 +102,14 @@ class AppServices {
   final SecureCredentialStore credentialStore;
   final PlainStore plainStore;
   final ServerClock clock;
+
+  /// The record of the requests the app has made.
+  ///
+  /// Exposed so the traffic can be **read back** — the number the portal
+  /// sees, per account, per hour. A budget nobody can read is a budget
+  /// nobody can check, and this project treats the account as the thing at
+  /// risk. Null only in a test that has no transport.
+  final RequestLedger? requests;
 
   /// The account list, persisted in the plain store.
   AccountStore get accountStore => PreferencesAccountStore(plainStore);
@@ -126,6 +144,9 @@ class AppServices {
     client: client,
     sessions: sessions,
     clock: clock,
+    // The same ledger the transport writes to, so the hunt's budget is
+    // measured in the requests the portal actually saw.
+    requests: requests,
   );
 
   /// The hunt's platform service: runs the hunt and reports its outcome.

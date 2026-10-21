@@ -4,9 +4,13 @@
 ///   * carry the account's cookies, and only that account's;
 ///   * capture the server's `Date` header so the clock can be synced;
 ///   * follow the portal's redirect behaviour explicitly, because a silent
-///     redirect turned a successful login into an apparent failure once.
+///     redirect turned a successful login into an apparent failure once;
+///   * count every request it makes, because the account's request budget is
+///     the last line of defence against a ban, and only this layer knows how
+///     many requests were actually sent.
 ///
-/// This layer knows nothing about meals. It moves bytes and keeps jars.
+/// This layer knows nothing about meals. It moves bytes, keeps jars, and
+/// reports what it sent.
 library;
 
 import 'dart:async';
@@ -16,6 +20,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../core/models.dart';
+import '../core/request_ledger.dart';
 import '../core/time.dart';
 import 'cookie_jar.dart';
 
@@ -80,7 +85,9 @@ class PortalTransport {
     this.userAgent =
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     this.clock,
-  }) : _http = httpClient ?? http.Client();
+    RequestLedger? ledger,
+  }) : _http = httpClient ?? http.Client(),
+       ledger = ledger ?? RequestLedger();
 
   /// The portal's root. Every request path is resolved against it.
   final Uri baseUri;
@@ -99,6 +106,23 @@ class PortalTransport {
   /// response carries a `Date` header, so the clock never needs a request of
   /// its own.
   final SyncedServerClock? clock;
+
+  /// The record of what this transport sent.
+  ///
+  /// ## Why the transport owns the count
+  ///
+  /// The request budget is the project's last line of defence against a ban,
+  /// and a budget that counts the wrong thing is worse than no budget. The
+  /// hunt used to count *polls*, but a poll is one or two requests, so the
+  /// count was low by half — and the reads that are not part of a hunt (the
+  /// manual refresh, the sync, the top-up) were not counted at all.
+  ///
+  /// This is the one place every request goes through, so it is the one place
+  /// the count can be right. The ledger is exposed rather than hidden so the
+  /// count can be **read back** — the thing the project still needs is a live
+  /// read of the budget against the portal, and a number nobody can read is
+  /// a number nobody can trust.
+  final RequestLedger ledger;
 
   /// One jar per account. Never mixed.
   final CookieJarStore jars = CookieJarStore();
@@ -190,6 +214,16 @@ class PortalTransport {
     final uri = resolve(path);
     final startedAt = DateTime.now().toUtc();
 
+    // The request is counted **before** it is sent, because a request that
+    // fails still reached the portal — a timeout is a request the portal saw
+    // and answered late, and it is exactly the sort of request that makes a
+    // pattern look odd.
+    ledger.record(
+      accountId: accountId,
+      method: method,
+      path: _pathOnly(path),
+    );
+
     late http.Response response;
     try {
       final request = http.Request(method, uri)
@@ -229,6 +263,13 @@ class PortalTransport {
         if (follow.method != 'POST') {
           follow.headers.remove('content-type');
         }
+
+        // A redirect hop is a request the portal sees, so it is counted.
+        ledger.record(
+          accountId: accountId,
+          method: follow.method,
+          path: _pathOnly(target.path),
+        );
 
         final followed = await _http.send(follow).timeout(timeout);
         response = await http.Response.fromStream(followed);
@@ -283,6 +324,16 @@ class PortalTransport {
   static bool _isRedirect(int status) =>
       status == 301 || status == 302 || status == 303 || status == 307 ||
       status == 308;
+
+  /// The path of a request, without the query string.
+  ///
+  /// The query can carry a token or a session id, and the ledger is a record
+  /// that may be read back and shown — so the identifying parts of the URL
+  /// are not written down.
+  static String _pathOnly(String path) {
+    final cut = path.indexOf('?');
+    return cut < 0 ? path : path.substring(0, cut);
+  }
 
   /// The individual `Set-Cookie` header values of a response.
   ///

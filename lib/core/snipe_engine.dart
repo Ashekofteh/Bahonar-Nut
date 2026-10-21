@@ -28,6 +28,7 @@ import 'polling.dart';
 import 'portal.dart';
 import 'preflight.dart';
 import 'priority.dart';
+import 'request_ledger.dart';
 import 'session.dart';
 import 'session_manager.dart';
 import 'snipe.dart';
@@ -124,6 +125,7 @@ class DefaultSnipeEngine implements SnipeEngine {
     this._reconciler = const ClaimReconciler(),
     this._defaultPolicy = const PollingPolicy(),
     this._listener = const NoopHuntListener(),
+    this._requests,
     Random? random,
     Future<void> Function(Duration)? sleep,
     Duration? waitSlice,
@@ -140,6 +142,14 @@ class DefaultSnipeEngine implements SnipeEngine {
   final ClaimReconciler _reconciler;
   final PollingPolicy _defaultPolicy;
   final Random _random;
+
+  /// The record of the requests the app has actually made.
+  ///
+  /// Optional, and null in the tests that use a fake client — a fake never
+  /// touches the transport, so there is nothing to count. When it is present
+  /// the run's budget is measured in **requests**, which is what the portal
+  /// sees, rather than in polls, which is what it used to be measured in.
+  final RequestLedger? _requests;
 
   /// How long the engine sleeps between checks while waiting for a window.
   ///
@@ -405,6 +415,21 @@ class DefaultSnipeEngine implements SnipeEngine {
     final breaker = CircuitBreaker(policy.failureThreshold);
     final budget = RequestBudget(hunt?.requestBudget ?? policy.requestBudget);
 
+    // The run's own request count, taken from the ledger when there is one.
+    //
+    // The ledger counts **requests**; the budget used to count **polls**, and
+    // a poll is one or two requests — so the backstop against a ban was
+    // allowing twice the traffic it was written to allow. When the ledger is
+    // absent (a test with a fake client) the poll count stands, because
+    // there is no transport and so no request to count.
+    final requests = _requests;
+    final requestsAtStart = requests?.totalFor(session.account) ?? 0;
+
+    /// The requests this run has spent.
+    int requestsSpent() => requests == null
+        ? budget.spent
+        : (requests.totalFor(session.account) - requestsAtStart);
+
     while (!run.isCancelled) {
       // The window is re-evaluated every cycle, because crossing into the
       // window mid-hunt is exactly when the rate should change — and because
@@ -448,7 +473,13 @@ class DefaultSnipeEngine implements SnipeEngine {
         continue;
       }
 
-      if (budget.isExhausted) {
+      // The budget is checked in **requests** when the ledger is available.
+      //
+      // The poll counter is still spent, because it is what the run's own
+      // accounting reports and what the tests exercise. But the thing that
+      // ends the run is the request count, because that is what the portal
+      // sees and therefore what the budget exists to bound.
+      if (requestsSpent() >= budget.limit) {
         run.ledger.record(
           at: now,
           kind: LedgerEventKind.runEnded,
