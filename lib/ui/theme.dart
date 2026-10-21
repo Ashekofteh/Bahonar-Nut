@@ -184,12 +184,23 @@ ThemeData _base(ColorScheme scheme) {
         ),
       ),
     ),
+    // The label style is **not** set here.
+    //
+    // Setting it — even to a font alone — replaces Material's own chip label
+    // style wholesale, and Material's is what carries the *colour*: the
+    // unselected label is `onSurfaceVariant` and the selected one is
+    // `onSecondaryContainer`. A label style with no colour leaves the chip
+    // label to inherit whatever ambient colour it finds, which on a device
+    // means white on a near-white chip: the label is invisible.
+    //
+    // The font still comes from the app, because the text theme sets it for
+    // every role including `labelLarge`, which is what Material's chip label
+    // style is built from.
     chipTheme: ChipThemeData(
       side: BorderSide(color: scheme.outlineVariant),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
       ),
-      labelStyle: const TextStyle(fontFamily: 'Vazirmatn', fontSize: 13),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,

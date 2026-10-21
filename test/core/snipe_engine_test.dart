@@ -11,6 +11,7 @@ import 'package:bahonar_nut/core/session_manager.dart';
 import 'package:bahonar_nut/core/snipe.dart';
 import 'package:bahonar_nut/core/snipe_engine.dart';
 import 'package:bahonar_nut/core/time.dart';
+import '../helpers/portal_stubs.dart' show FakePortalClient;
 import 'package:test/test.dart';
 
 const central = Hall(id: '1', name: 'مرکزی برادران');
@@ -51,7 +52,7 @@ SnipeRule buildRule({
     );
 
 /// A client whose basket and claim behaviour the test scripts.
-class ScriptedClient implements PortalClient {
+class ScriptedClient extends FakePortalClient {
   ScriptedClient({
     List<List<Listing>>? basketPages,
     this.claimBehavior = ClaimBehavior.succeed,
@@ -175,6 +176,10 @@ class ScriptedClient implements PortalClient {
       const [];
 
   @override
+  Future<BookableMenus> fetchBookableMenus(Session session, {int days = 7}) async =>
+      const BookableMenus(dates: [], menus: []);
+
+  @override
   Future<Reservation> reserve(Session session, MealOffering offering) async {
     reserveCalls++;
     throw UnimplementedError();
@@ -185,8 +190,9 @@ class ScriptedClient implements PortalClient {
       const <Transaction>[];
 
   @override
-  Future<void> cancel(Session session, MealId mealId) async {
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async {
     cancelCalls++;
+    return const CancelSucceeded();
   }
 
   @override

@@ -27,6 +27,7 @@
 /// from the live dropdowns rather than from constants.
 library;
 
+import '../core/meal_invariant.dart';
 import '../core/models.dart';
 import '../core/portal.dart';
 import '../core/persian.dart';
@@ -35,6 +36,7 @@ import '../core/session_manager.dart'
         LoginRejectedException,
         PortalUnreachableException,
         ReservationLockedException;
+import '../core/time.dart';
 import '../transport/html_parsing.dart';
 import '../transport/http_transport.dart';
 import 'cullinan_parser.dart';
@@ -54,6 +56,18 @@ class _Paths {
 /// The weekly menu is one page per week, and this is how the portal moves to
 /// the next one. It is a navigation, not a write.
 const _eventTargetNextWeek = r'ctl00$cphMain$imgbtnNextWeek';
+
+/// What a read-back page says about a meal.
+enum _ReadbackState {
+  /// The page carries the meal, and it is still held.
+  stillHeld,
+
+  /// The page carries the meal, and it is no longer held.
+  gone,
+
+  /// The page does not carry the meal's date, so it says nothing about it.
+  notOnPage,
+}
 
 /// The Cullinan implementation of [PortalClient].
 class CullinanPortalClient implements PortalClient {
@@ -244,6 +258,116 @@ class CullinanPortalClient implements PortalClient {
     return CullinanParser.parseMenu(html, date);
   }
 
+  @override
+  Future<BookableMenus> fetchBookableMenus(
+    Session session, {
+    int days = 7,
+  }) async {
+    _applySession(session);
+
+    // The first read is what makes the time trustworthy: every portal
+    // response carries a `Date` header, and the transport syncs the clock
+    // from it. The days that can still be booked are counted from the
+    // **portal's** today, so they cannot be named until that has happened.
+    final current = await transport.get(session.account, _Paths.reservation);
+    _rejectIfBounced(current);
+
+    final wanted = _bookableDates(days);
+    if (wanted.isEmpty) {
+      return const BookableMenus(dates: [], menus: []);
+    }
+
+    // The weekly page carries a whole week of grids, so a range that lies
+    // inside one week costs a single read. A range that crosses the week
+    // boundary costs two: the current page, and the next week's page.
+    //
+    // The pages are read **in order and separately**, not merged blindly:
+    // each page is parsed on its own, so a date that appears on neither
+    // simply has no menu, rather than being misread from the wrong week.
+    final menus = <MealMenu>[];
+    final seen = <String>{};
+
+    for (final menu in CullinanParser.parseMenus(current.body)) {
+      if (_wanted(menu, wanted) && seen.add(_menuKey(menu))) {
+        menus.add(menu);
+      }
+    }
+
+    final missing = wanted.where((d) => !_covers(menus, d)).toList();
+    if (missing.isEmpty) {
+      return BookableMenus(dates: wanted, menus: menus);
+    }
+
+    final next = await transport.post(
+      session.account,
+      _Paths.reservation,
+      body: {
+        '__VIEWSTATE': hiddenFieldValue(current.body, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR':
+            hiddenFieldValue(current.body, '__VIEWSTATEGENERATOR'),
+        '__EVENTTARGET': _eventTargetNextWeek,
+        '__EVENTARGUMENT': '',
+      },
+    );
+    _rejectIfBounced(next);
+    for (final menu in CullinanParser.parseMenus(next.body)) {
+      if (_wanted(menu, missing) && seen.add(_menuKey(menu))) {
+        menus.add(menu);
+      }
+    }
+
+    return BookableMenus(dates: wanted, menus: menus);
+  }
+
+  /// The identity of a menu entry: a (date, slot) pair.
+  ///
+  /// A day serves **three** meals, so the date alone is not an identity — a
+  /// set keyed by date keeps only the first of them, and the other two meals
+  /// of that day vanish.
+  static String _menuKey(MealMenu menu) =>
+      '${menu.date.toIso8601String().substring(0, 10)}|${menu.slot.name}';
+
+  /// The next [days] dates that can still be booked, counted from the
+  /// portal's today.
+  ///
+  /// The first reservable date is the day after the cutoff wall, which is
+  /// two days after the portal's today — or three, once today's own cutoff
+  /// has passed.
+  List<DateTime> _bookableDates(int days) {
+    final clock = transport.clock;
+    if (clock == null || !clock.isSynced) return const [];
+
+    final first = clock.firstReservableDate();
+    return List.generate(
+      days,
+      (i) => DateTime.utc(first.year, first.month, first.day + i),
+    );
+  }
+
+  /// Whether [menu] is for one of the dates that were asked for.
+  static bool _wanted(MealMenu menu, List<DateTime> dates) {
+    for (final date in dates) {
+      if (menu.date.year == date.year &&
+          menu.date.month == date.month &&
+          menu.date.day == date.day) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Whether any of the menus is for [date].
+  static bool _covers(List<MealMenu> menus, DateTime date) {
+    for (final menu in menus) {
+      if (menu.date.year == date.year &&
+          menu.date.month == date.month &&
+          menu.date.day == date.day) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// The weekly menu page that carries [date].
   ///
   /// ## Why the second page
@@ -282,6 +406,55 @@ class CullinanPortalClient implements PortalClient {
     return next.body;
   }
 
+  /// The reservation page for the week that carries [date].
+  ///
+  /// ## Why the write path must go through this
+  ///
+  /// The grid control names are **identical in every week** — `$ctl02$chkReserve`
+  /// is the second *row*, not the second *date*. Which week a post affects is
+  /// decided by the `__VIEWSTATE` it carries (F12). So a booking posted against
+  /// the current week's viewstate lands in the current week, or is silently
+  /// ignored — and the target's row was never in the posted state at all.
+  ///
+  /// The live book-and-cancel cycle learned this the hard way: the target was
+  /// in next week, and the post had to carry **next week's** viewstate.
+  Future<TransportResponse> _readWeekFor(Session session, DateTime date) async {
+    final current = await transport.get(session.account, _Paths.reservation);
+    _rejectIfBounced(current);
+
+    if (_weekCovers(current.body, date)) return current;
+
+    final next = await transport.post(
+      session.account,
+      _Paths.reservation,
+      body: {
+        '__VIEWSTATE': hiddenFieldValue(current.body, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR':
+            hiddenFieldValue(current.body, '__VIEWSTATEGENERATOR'),
+        '__EVENTTARGET': _eventTargetNextWeek,
+        '__EVENTARGUMENT': '',
+      },
+    );
+    _rejectIfBounced(next);
+
+    return next;
+  }
+
+  /// Whether the page carries a grid row for [date].
+  ///
+  /// The date is compared by its **civil** form, because the grids label
+  /// their rows in Jalali and a Jalali label is a date, not an instant.
+  static bool _weekCovers(String html, DateTime date) {
+    for (final slot in CullinanParser.reservationSlots) {
+      for (final row in tableRows(html, _gridForSlot(slot))) {
+        final rowDate = parseJalaliDate(row.cell(1));
+        if (rowDate == null) continue;
+        if (_sameDate(rowDate, date)) return true;
+      }
+    }
+    return false;
+  }
+
   /// Whether the menu page carries a row for [date].
   ///
   /// The date is compared by its **civil** form, because the grids label
@@ -300,10 +473,67 @@ class CullinanPortalClient implements PortalClient {
   @override
   Future<List<Reservation>> fetchReservations(Session session) async {
     _applySession(session);
-    final page = await transport.get(session.account, _Paths.reservation);
-    _rejectIfBounced(page);
-    return _parseReservations(page.body);
+
+    // ## Why two weeks, and not one
+    //
+    // The weekly page carries **one** week of grids. The portal lets a
+    // student reserve up to **the following week** — verified live on
+    // 2026-10-21: the rows two weeks out are every one of them `disabled`,
+    // while the rows of the week ahead are editable. So the horizon is
+    // exactly two weeks wide, and a read that stops at the first week
+    // **misses every reservation the student holds next week**.
+    //
+    // What that miss cost, measured on the live account: a breakfast on
+    // 1405/08/03 (2026-10-25) was held in week two. A one-week read did not
+    // see it, so the mirror fell back to the ledger, and the ledger cannot
+    // tell a weekly reservation from a Food Basket purchase — it records
+    // both the same way. So the meal was filed as an **irreversible basket
+    // purchase**: the table showed «خریداری شده» with no cancel button, on
+    // a meal the portal would have let the student give back. And the
+    // one-meal pre-flight check, which reads the same list, could not see
+    // that the slot was already taken.
+    //
+    // So the read covers every week a student can hold a reservation in.
+    final current = await transport.get(session.account, _Paths.reservation);
+    _rejectIfBounced(current);
+
+    final reservations = _parseReservations(current.body);
+
+    final next = await transport.post(
+      session.account,
+      _Paths.reservation,
+      body: {
+        '__VIEWSTATE': hiddenFieldValue(current.body, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR':
+            hiddenFieldValue(current.body, '__VIEWSTATEGENERATOR'),
+        '__EVENTTARGET': _eventTargetNextWeek,
+        '__EVENTARGUMENT': '',
+      },
+    );
+    _rejectIfBounced(next);
+
+    // The two weeks are parsed **separately**, not merged blindly: a date
+    // that appears on neither simply is not held. And a meal is keyed by
+    // (date, slot), so a meal that somehow appeared on both pages is
+    // counted once.
+    final seen = <String>{
+      for (final reservation in reservations) _reservationKey(reservation),
+    };
+    for (final reservation in _parseReservations(next.body)) {
+      if (seen.add(_reservationKey(reservation))) {
+        reservations.add(reservation);
+      }
+    }
+
+    return reservations;
   }
+
+  /// The identity of a reservation: a (date, slot) pair.
+  ///
+  /// The date is compared by its **civil** form, because the grids label
+  /// their rows in Jalali and a Jalali label is a date, not an instant.
+  static String _reservationKey(Reservation reservation) =>
+      '${HeldMeal.dateKey(reservation.date)}|${reservation.slot.name}';
 
   @override
   Future<List<Transaction>> fetchTransactions(Session session) async {
@@ -386,9 +616,15 @@ class CullinanPortalClient implements PortalClient {
   @override
   Future<Reservation> reserve(Session session, MealOffering offering) async {
     _applySession(session);
-    final page = await transport.get(session.account, _Paths.reservation);
-    final grid = _gridForSlot(offering.slot);
-    final body = _reservationFormBody(page.body, offering, grid);
+
+    // The post must go against the week that **carries the target**. The grid
+    // control names are identical in every week, and the viewstate decides
+    // which week's rows a post affects (F12) — so a booking for a next-week
+    // date, posted against the current week's viewstate, names rows that do
+    // not exist in the current week and books nothing.
+    final page = await _readWeekFor(session, offering.date);
+
+    final body = _reservationFormBody(page.body, offering);
     final response = await transport.post(
       session.account,
       _Paths.reservation,
@@ -401,7 +637,12 @@ class CullinanPortalClient implements PortalClient {
 
     // The server either re-renders the grid with the reservation held, or
     // reports a problem. Reading it back is the only honest confirmation.
-    final reservations = _parseReservations(response.body);
+    //
+    // But the response re-renders the server's **default** week, not the week
+    // the post was made against — so a next-week booking is not visible in it
+    // at all. The confirmation therefore re-reads the target's week.
+    final confirmation = await _readWeekFor(session, offering.date);
+    final reservations = _parseReservations(confirmation.body);
     for (final reservation in reservations) {
       if (reservation.slot == offering.slot &&
           _sameDate(reservation.date, offering.date) &&
@@ -422,7 +663,7 @@ class CullinanPortalClient implements PortalClient {
     //
     // Distinguish the two by re-reading the row: a locked row still renders
     // `disabled`, which is the server's own statement that the date is closed.
-    if (_isLockedForSlot(response.body, offering)) {
+    if (_isLockedForSlot(confirmation.body, offering)) {
       throw ReservationLockedException(
         'مهلت رزرو این تاریخ به پایان رسیده است.',
         date: offering.date,
@@ -467,16 +708,159 @@ class CullinanPortalClient implements PortalClient {
   }
 
   @override
-  Future<void> cancel(Session session, MealId mealId) async {
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async {
     _applySession(session);
-    final page = await transport.get(session.account, _Paths.reservation);
-    await transport.post(session.account, _Paths.reservation, body: {
-      '__VIEWSTATE': hiddenFieldValue(page.body, '__VIEWSTATE'),
-      '__VIEWSTATEGENERATOR': hiddenFieldValue(page.body, '__VIEWSTATEGENERATOR'),
+
+    // The cancel must post against the week that **carries the target**. The
+    // grid control names are identical in every week, and the viewstate
+    // decides which week's rows a post affects (F12), so posting the current
+    // week's viewstate for a next-week meal cancels nothing.
+    final page = await _readWeekFor(session, ref.date);
+
+    // The weekly cancel is **uncheck the row and save again**. There is no
+    // cancel button on the reservation hub (F14).
+    //
+    // And the post must carry the **complete form state**, with the target
+    // row's checkbox *absent*: an ASP.NET checkbox that is absent from a POST
+    // reads as **unchecked**, so posting only the target row would present
+    // every other checked row as unchecked and cancel the account's other
+    // meals. Every other row is therefore posted exactly as the page renders
+    // it, and only the target is left out.
+    final body = _cancelFormBody(page.body, ref);
+    final postResponse =
+        await transport.post(session.account, _Paths.reservation, body: body);
+    // A bounced session is the one case where the post itself says the
+    // write did not happen. The silent refusal of a locked date (F14) is not
+    // like this — that one answers a plain `200` and is caught by the
+    // read-back below.
+    _rejectIfBounced(postResponse);
+
+    // The post is **not** the outcome.
+    //
+    // A locked date is refused **silently** (F14): the server discards the
+    // post, the response is a plain `200`, and nothing on the page changes. So
+    // a cancel that trusted the status code would report success for a
+    // cancellation that never happened, and the app would hide a meal the
+    // student still holds (F63).
+    //
+    // The portal is read back instead, exactly as the booking path does.
+    final confirmation = await _readWeekFor(session, ref.date);
+    final readback = _readbackOf(confirmation.body, ref);
+
+    switch (readback) {
+      case _ReadbackState.stillHeld:
+        // The meal is still there. The only reason the portal keeps it is
+        // that the date has locked — the row is rendered `disabled` and the
+        // post was ignored.
+        return const CancelRefused(
+          'مهلت رزرو این تاریخ به پایان رسیده است.',
+        );
+      case _ReadbackState.gone:
+        return const CancelSucceeded();
+      case _ReadbackState.notOnPage:
+        // The read-back page does not carry the target date at all, so it
+        // says **nothing** about the meal. Reporting success here would empty
+        // the mirror for a cancel that may never have happened (F65).
+        return const CancelAmbiguous(
+          'وضعیت رزرو در سایت تایید نشد.',
+        );
+    }
+  }
+
+  /// What [html] says about the meal [ref].
+  ///
+  /// ## Why the three states, and not a bool
+  ///
+  /// A bool cannot tell "the meal is gone" from "the page does not show that
+  /// day". The second is what made the cancel report a success it never
+  /// earned (F65): the read-back looked in the wrong grid, found no row, and
+  /// concluded the meal had been released.
+  ///
+  /// So the row's presence is checked first, and only a page that genuinely
+  /// carries the day can say the meal is gone.
+  static _ReadbackState _readbackOf(String html, MealRef ref) {
+    for (final row in tableRows(html, _gridForSlot(ref.slot))) {
+      if (row.cells.length < 7) continue;
+
+      final date = parseJalaliDate(row.cell(1));
+      if (date == null || !_sameDate(date, ref.date)) continue;
+
+      // The row is on the page, so the page can speak about it.
+      final checkbox = inputBySuffix(row.raw, 'chkReserve');
+      if (checkbox == null || !checkbox.checked) return _ReadbackState.gone;
+
+      // The same two markers a held meal has everywhere else: the row is
+      // `checked`, and it carries a non-zero amount (F13). A row the portal
+      // merely echoes as `checked` is not a reservation, so the amount is
+      // what tells the two apart.
+      return _isGenuinelyHeld(row)
+          ? _ReadbackState.stillHeld
+          : _ReadbackState.gone;
+    }
+
+    // No row for that day in that grid. The day might not be on this page
+    // at all — which is a different thing from the meal being released.
+    return _ReadbackState.notOnPage;
+  }
+
+  /// The form state for a cancel: every row as the page renders it, except
+  /// the target, whose checkbox is omitted.
+  ///
+  /// ## Why only genuinely held rows are re-posted
+  ///
+  /// A row the portal merely echoes as `checked` is not a reservation (F13),
+  /// and re-posting its checkbox would **book** it — a meal the student never
+  /// asked for, charged to their account. So the checkbox is re-posted only
+  /// for rows that carry the green «رزرو شده» icon and a non-zero amount.
+  Map<String, String> _cancelFormBody(String html, MealRef ref) {
+    final body = <String, String>{
+      '__VIEWSTATE': hiddenFieldValue(html, '__VIEWSTATE'),
+      '__VIEWSTATEGENERATOR': hiddenFieldValue(html, '__VIEWSTATEGENERATOR'),
       '__EVENTTARGET': '',
       '__EVENTARGUMENT': '',
-      'ctl00\$cphMain\$btnCancelHidden': mealId,
-    });
+    };
+
+    for (final slot in CullinanParser.reservationSlots) {
+      for (final row in tableRows(html, _gridForSlot(slot))) {
+        final date = parseJalaliDate(row.cell(1));
+        if (date == null) continue;
+
+        final checkbox = inputBySuffix(row.raw, 'chkReserve');
+        final self = selectBySuffix(row.raw, 'drpSelf');
+        final food = selectBySuffix(row.raw, 'drpFood');
+        final count = selectBySuffix(row.raw, 'drpFoodCount');
+        if (checkbox == null || self == null || food == null || count == null) {
+          continue;
+        }
+
+        // The row's own state, unchanged.
+        body[self.name] = self.selected?.value ?? '-1';
+        body[food.name] = food.selected?.value ?? '-1';
+        body[count.name] = count.selected?.value ?? '0';
+
+        final isTarget = slot == ref.slot && _sameDate(date, ref.date);
+
+        // The target's checkbox is **omitted**, which is how it is unchecked.
+        // Every other row is posted as the page renders it, so the account's
+        // other meals survive.
+        if (!isTarget && checkbox.checked && _isGenuinelyHeld(row)) {
+          body[checkbox.name] = 'on';
+        }
+      }
+    }
+
+    body[_gridSaveButton(ref.slot)] = 'ذخیره';
+    return body;
+  }
+
+  /// Whether the row is a genuine, charged reservation.
+  ///
+  /// Both markers are required: the green «رزرو شده» icon, and a non-zero
+  /// **مبلغ خرید**. An echoed row has neither (F13).
+  static bool _isGenuinelyHeld(ParsedRow row) {
+    final status = rowStatus(row.raw);
+    if (!status.held) return false;
+    return (parseRial(row.cell(6)) ?? 0) > 0;
   }
 
   @override
@@ -627,10 +1011,29 @@ class CullinanPortalClient implements PortalClient {
   }
 
   /// The reservation form body for reserving one offering.
+  ///
+  /// ## Why the whole form is posted
+  ///
+  /// The reservation page holds **three grids of seven rows**, and a browser
+  /// submits every control in the form. An ASP.NET checkbox that is *absent*
+  /// from a POST reads as **unchecked** — so posting only the target row
+  /// presents every other checked row as unchecked, and **cancels the
+  /// account's other reservations** (F12).
+  ///
+  /// So the post carries the COMPLETE current form state — every row's
+  /// dropdown values, and the checkbox of every genuinely held row — with
+  /// exactly one field changed: the target row's checkbox is turned on and its
+  /// dropdowns are pointed at the requested hall and dish.
+  ///
+  /// ## Why only genuinely held rows are re-posted
+  ///
+  /// A row the portal merely echoes as `checked` is not a reservation (F13),
+  /// and re-posting its checkbox would **book** it — a meal the student never
+  /// asked for, charged to their account. Only rows carrying the green
+  /// «رزرو شده» icon and a non-zero amount are re-posted.
   Map<String, String> _reservationFormBody(
     String html,
     MealOffering offering,
-    String gridId,
   ) {
     final body = <String, String>{
       '__VIEWSTATE': hiddenFieldValue(html, '__VIEWSTATE'),
@@ -639,26 +1042,43 @@ class CullinanPortalClient implements PortalClient {
       '__EVENTARGUMENT': '',
     };
 
-    for (final row in tableRows(html, gridId)) {
-      final date = parseJalaliDate(row.cell(1));
-      if (date == null || !_sameDate(date, offering.date)) continue;
+    // Every row of every grid, so the account's other meals survive the post.
+    for (final slot in CullinanParser.reservationSlots) {
+      for (final row in tableRows(html, _gridForSlot(slot))) {
+        final checkbox = inputBySuffix(row.raw, 'chkReserve');
+        final self = selectBySuffix(row.raw, 'drpSelf');
+        final food = selectBySuffix(row.raw, 'drpFood');
+        final count = selectBySuffix(row.raw, 'drpFoodCount');
+        if (checkbox == null ||
+            self == null ||
+            food == null ||
+            count == null) {
+          continue;
+        }
 
-      final checkbox = inputBySuffix(row.raw, 'chkReserve');
-      final self = selectBySuffix(row.raw, 'drpSelf');
-      final food = selectBySuffix(row.raw, 'drpFood');
-      final count = selectBySuffix(row.raw, 'drpFoodCount');
-      if (checkbox == null ||
-          self == null ||
-          food == null ||
-          count == null) {
-        continue;
+        final rowDate = parseJalaliDate(row.cell(1));
+        final isTarget = slot == offering.slot &&
+            rowDate != null &&
+            _sameDate(rowDate, offering.date);
+
+        if (isTarget) {
+          // The requested meal.
+          body[checkbox.name] = 'on';
+          body[self.name] = offering.hall.id;
+          body[food.name] = offering.option.id;
+          body[count.name] = count.options.firstOrNull?.value ?? '1';
+          continue;
+        }
+
+        // Every other row, exactly as the page renders it.
+        body[self.name] = self.selected?.value ?? '-1';
+        body[food.name] = food.selected?.value ?? '-1';
+        body[count.name] = count.selected?.value ?? '0';
+
+        if (checkbox.checked && _isGenuinelyHeld(row)) {
+          body[checkbox.name] = 'on';
+        }
       }
-
-      body[checkbox.name] = 'on';
-      body[self.name] = offering.hall.id;
-      body[food.name] = offering.option.id;
-      body[count.name] = count.options.firstOrNull?.value ?? '1';
-      break;
     }
 
     body[_gridSaveButton(offering.slot)] = 'ذخیره';

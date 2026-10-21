@@ -1878,3 +1878,101 @@ first attempt to watch a fire *failed*: the clock jump cancelled the pending
 alarm, and the delivery did not happen. The second attempt — with the app
 confirmed alive — worked. A missing notification after a clock change is a
 harness artefact, not an app defect, and the two must not be confused.
+## 2026-10-21 — Session 27: the cycle, closed
+
+### F66 — The portal's week pointer lives in the viewstate CHAIN, not in the session
+
+The portal is ASP.NET WebForms, and the state a POST acts on rides in the
+page's `__VIEWSTATE`. The weekly reservation page **chains** its weeks
+through that state: a next-week post advances the chain, and the page it
+returns is the one the next post will be answered against.
+
+So one portal operation is **not** one request. Measured on the adapter:
+
+| Operation | Requests |
+|---|---|
+| `fetchReservations` | GET + next-week POST |
+| `fetchBookableMenus` | GET + maybe next-week POST |
+| `reserve` | GET (+ next-week POST) → write POST → GET (+ next-week POST) |
+| `cancel` | GET (+ next-week POST) → write POST → GET (+ next-week POST) |
+
+Two operations for the **same account** that overlap interleave those
+requests, and the second one then works against a chain the first has
+already moved along. The failure is silent, and it costs money:
+
+- A read on the wrong week **misses a held meal**. The mirror — which the
+  table, the reminders and the one-meal check are all built on — then says
+  the slot is free, and the app offers a meal the student already has.
+- A booking on the wrong week is worse: the request is **accepted**, the
+  confirmation reads a different week, and the app reports a **failure for
+  a booking that really happened**. The student's money moved and the app
+  says it did not.
+
+**The fix: one operation at a time, per account.** `SerialisedPortalClient`
+is a decorator over `PortalClient` that chains each account's operations
+onto a per-account queue. It is installed at the composition root
+(`lib/platform/platform_services.dart`), so **every** consumer gets it — the
+sync, the reservation service, the top-up service and the hunt engine all
+go through the same door. Before this, `SessionManager.withSession` ran the
+*read* outside the login queue, which is exactly where the gap was.
+
+**Why per account, not a global lock.** Accounts have separate cookies,
+separate viewstates, separate chains. Two accounts never interfere, and
+making the second wait for the first is latency the student pays for
+nothing. The test pins this: two operations for one account never overlap,
+two accounts may.
+
+**What the wrapper does not cover.** The login is two calls
+(`beginLogin` + `completeLogin`) and a read may run between them. That is
+safe: the CAPTCHA is bound when the challenge *image* is fetched, and
+neither call refetches it. The session manager already serialises logins
+per account, so the pair cannot interleave with another login.
+
+### F67 — The week pointer is per-chain, so a "drifting pointer" bug cannot exist
+
+Two earlier theories for the F65 cancel failure were refuted by
+measurement: a *drifting week pointer* (the session's week index moving
+on its own) and a *stale APK*. Both parallel and independent-sequential
+week navigation land on week 1, and the same session reused for a second
+read lands on the same week. There is no pointer to drift — there is a
+**chain**, and the chain is per-operation. The task that was written to
+reproduce the drift was deleted rather than left in the tree as a test for
+a failure that does not exist.
+
+### F68 — The cycle, measured end to end
+
+The full book → cancel → re-book cycle, driven from the app's own
+booking sheet against the live portal on 2026-10-21:
+
+| | before cancel | after cancel | after re-book |
+|---|---|---|---|
+| portal reservations | 7 | 6 | **7** |
+| portal credit (Rial) | 75,000 | 225,000 | **75,000** |
+| portal transactions | 50 | 51 | **52** |
+
+The re-book is a real ledger row:
+`رزرو غذا | پنیر/خیار/نان/چای/قند | breakfast | 1405/08/03 | 1 | 150000`,
+and the reservation list carries `2026-10-25 breakfast پنیر/خیار/نان/چای/قند`.
+
+The app's own screen agreed at every step: **یکشنبه ۳ آبان ۱۴۰۵** with
+«۱ رزرو ۲ باز», the breakfast «پنیر/خیار/نان/چای/قند» at ۱۵٬۰۰۰ تومان
+marked «رزرو شده» with a cancel button, and lunch and dinner «قابل رزرو»
+with «+» buttons. The re-booked meal was found by the **two-week read
+through the serialising wrapper** — so the serialisation did not break the
+read that reaches into next week, and the held meal is still held and still
+cancellable.
+
+### F69 — A refresh that syncs the clock can *look* like a regression
+
+After a refresh, the rows for ۲۶–۳۰ مهر flipped from «رزرو شده» with a red
+X to «رزرو شده - مهلت گذشته» with a lock icon. That looked like the
+locks were being applied wrongly, and it was not: `adb shell date` gave
+`Wed Oct 21 16:09:48 +0330 2026`, so those dates had passed their 20:00
+cutoff (۳۰ مهر locks on ۲۸ مهر at 20:00). The refresh had **synced the
+clock**, so the app only now knew the true portal time. The app did not
+change its answer — it changed the question, and the new answer was right.
+
+**The lesson.** When the state on screen moves and the change looks like a
+regression, measure the server's clock before touching the code. The
+device's clock and the portal's clock differ by hours, and only the
+portal's is authoritative.

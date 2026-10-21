@@ -20,12 +20,14 @@ import '../core/platform_stores.dart';
 import '../core/portal.dart';
 import '../core/session.dart';
 import '../core/session_manager.dart';
+import '../core/serialised_portal_client.dart';
 import '../core/snipe_engine.dart';
 import '../core/time.dart';
 import '../transport/http_transport.dart';
 import 'hunt_service.dart';
 import 'platform_bridge.dart';
 import 'reminder_service.dart';
+import 'reservation_service.dart';
 
 /// The portal's base address.
 const String portalBaseUrl = 'https://nut.uk.ac.ir/';
@@ -56,14 +58,20 @@ class AppServices {
       clock: clock,
     );
     final client = CullinanPortalClient(transport: transport);
+    // The serialising wrapper is what every consumer sees, so a read and a
+    // write for one account can never interleave. The portal's weekly page
+    // chains its weeks through the viewstate, so an operation is several
+    // requests, and two overlapping ones would work against a chain the other
+    // has already moved along.
+    final portal = SerialisedPortalClient(client);
     final credentialStore = theBridge.credentialStore;
     final plainStore = theBridge.plainStore;
 
     return AppServices(
       bridge: theBridge,
-      client: client,
+      client: portal,
       sessions: SessionManager(
-        client: client,
+        client: portal,
         store: PlatformSessionStore(
           secureStore: credentialStore,
           plainStore: plainStore,
@@ -121,6 +129,14 @@ class AppServices {
 
   /// The hunt's platform service: runs the hunt and reports its outcome.
   late final HuntService hunts = HuntService(bridge: bridge, engine: engine);
+
+  /// Books and cancels weekly meals.
+  late final ReservationService reservations = ReservationService(
+    client: client,
+    sessions: sessions,
+    mealStore: mealStore.store,
+    persist: mealStore.persist,
+  );
 
   /// The reminder service: builds digests, posts notifications, arms alarms.
   ///

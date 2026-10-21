@@ -168,12 +168,18 @@ void main() {
     });
 
     test('a lunch fire posts the digest', () async {
+      // The digest is scoped to **today**, so the fixture has to be today.
+      // A hardcoded date made this test pass for one day and fail for the
+      // rest — the same time-of-day trap the clock test had.
+      final now = DateTime.now();
+      final today = DateTime.utc(now.year, now.month, now.day);
+
       store.put(StoredMeal(
         accountId: 'a1',
-        date: DateTime.utc(2026, 10, 20),
+        date: today,
         slot: MealSlot.lunch,
         source: MealSource.weeklyReservation,
-        capturedAt: DateTime.utc(2026, 10, 20),
+        capturedAt: today,
         dishName: 'چلو خورشت قیمه',
       ));
 
@@ -231,12 +237,15 @@ void main() {
     });
 
     test('the evening slot covers dinner and breakfast together', () async {
+      final now = DateTime.now();
+      final today = DateTime.utc(now.year, now.month, now.day);
+
       store.put(StoredMeal(
         accountId: 'a1',
-        date: DateTime.utc(2026, 10, 20),
+        date: today,
         slot: MealSlot.dinner,
         source: MealSource.weeklyReservation,
-        capturedAt: DateTime.utc(2026, 10, 20),
+        capturedAt: today,
         dishName: 'خوراک سالاد الویه',
       ));
 

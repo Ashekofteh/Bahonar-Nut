@@ -1,0 +1,352 @@
+import 'package:bahonar_nut/core/local_meal_store.dart';
+import 'package:bahonar_nut/core/meal_invariant.dart';
+import 'package:bahonar_nut/core/models.dart';
+import 'package:bahonar_nut/core/portal.dart';
+import 'package:bahonar_nut/core/session.dart';
+import 'package:bahonar_nut/core/session_manager.dart';
+import 'package:bahonar_nut/core/time.dart';
+import 'package:bahonar_nut/platform/reservation_service.dart';
+import '../helpers/portal_stubs.dart' show FakePortalClient;
+import 'package:test/test.dart';
+
+/// A session store that always yields a usable session.
+class _AlwaysStore implements SessionStore {
+  @override
+  Future<Credentials?> readCredentials(AccountId accountId) async =>
+      const Credentials(studentId: '401405035', password: 'pw');
+
+  @override
+  Future<void> writeCredentials(AccountId a, Credentials c) async {}
+
+  @override
+  Future<StoredSession?> readSession(AccountId accountId) async =>
+      StoredSession(
+        accountId: accountId,
+        cookies: const {'ASP.NET_SessionId': 'live'},
+        establishedAt: DateTime.now().toUtc(),
+      );
+
+  @override
+  Future<void> writeSession(StoredSession session) async {}
+
+  @override
+  Future<void> deleteSession(AccountId accountId) async {}
+
+  @override
+  Future<void> purge(AccountId accountId) async {}
+}
+
+class _NoopSolver implements ChallengeSolver {
+  @override
+  Future<String?> solve(LoginChallenge challenge) async => '1234';
+}
+
+/// A portal that serves a fixed balance and records what it was asked to do.
+class _FakePortal extends FakePortalClient {
+  _FakePortal() : super(balanceRial: 500000);
+
+  /// The offerings the portal was asked to reserve.
+  final reserved = <MealOffering>[];
+
+  /// Whether the reserve should fail.
+  bool reserveFails = false;
+
+  /// What the portal answers a cancel with.
+  CancelOutcome cancelOutcome = const CancelSucceeded();
+
+  /// The meals the cancel was asked for.
+  final cancelled = <MealRef>[];
+
+  @override
+  Future<LoginChallenge?> beginLogin(String username) async => null;
+
+  @override
+  Future<Session> completeLogin({
+    required String username,
+    required String password,
+    LoginChallengeResponse? challenge,
+  }) async =>
+      Session(
+        account: username,
+        cookies: const {},
+        establishedAt: DateTime.now().toUtc(),
+      );
+
+  @override
+  Future<Session> refresh(Session session) async => session;
+
+  @override
+  Future<void> logout(Session session) async {}
+
+  @override
+  Future<DateTime> fetchServerTime(Session session) async =>
+      DateTime.utc(2026, 10, 20, 12);
+
+  @override
+  Future<Balance> fetchBalance(Session session) async =>
+      Balance(amountRial: balanceRial, fetchedAt: DateTime.utc(2026, 10, 20));
+
+  @override
+  Future<List<MealOffering>> fetchOfferings(Session s, DateTime date) async =>
+      const [];
+
+  @override
+  Future<List<MealMenu>> fetchMenu(Session s, DateTime date) async => const [];
+
+  @override
+  Future<BookableMenus> fetchBookableMenus(Session s, {int days = 7}) async =>
+      const BookableMenus(dates: [], menus: []);
+
+  @override
+  Future<List<Reservation>> fetchReservations(Session session) async =>
+      const [];
+
+  @override
+  Future<List<Transaction>> fetchTransactions(Session session) async =>
+      const [];
+
+  @override
+  Future<BasketPage> fetchBasket(Session session, {String? cursor}) async =>
+      const BasketPage(listings: []);
+
+  @override
+  Future<Reservation> reserve(Session session, MealOffering offering) async {
+    if (reserveFails) throw StateError('the portal refused');
+    reserved.add(offering);
+    return Reservation(
+      id: 'r1',
+      date: offering.date,
+      slot: offering.slot,
+      hall: offering.hall,
+      option: offering.option,
+      state: ReservationState.active,
+    );
+  }
+
+  @override
+  Future<ClaimResult> claim(Session session, ListingId listingId) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<BasketHoldStatus?> holdingsOnBuyPage(
+    Session session, {
+    required DateTime date,
+    required String optionId,
+  }) async =>
+      null;
+
+  @override
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async {
+    cancelled.add(ref);
+    return cancelOutcome;
+  }
+
+  @override
+  Uri? topUpUrl(Session session) => null;
+}
+
+void main() {
+  final day = DateTime.utc(2026, 10, 22);
+
+  late _FakePortal portal;
+  late LocalMealStore store;
+  late ReservationService service;
+
+  setUp(() {
+    portal = _FakePortal();
+    store = LocalMealStore();
+    service = ReservationService(
+      client: portal,
+      sessions: SessionManager(
+        client: portal,
+        store: _AlwaysStore(),
+        solver: _NoopSolver(),
+        clock: FixedServerClock.now(DateTime.utc(2026, 10, 20, 12)),
+      ),
+      mealStore: store,
+    );
+  });
+
+  MealOffering offering({int price = 150000, bool reservable = true}) =>
+      MealOffering(
+        date: day,
+        slot: MealSlot.lunch,
+        hall: const Hall(id: '1', name: 'مرکزی برادران'),
+        option: MenuOption(id: '62738', name: 'چلو اکبرجوجه', priceRial: price),
+        reservable: reservable,
+      );
+
+  group('booking a meal', () {
+    test('a booking reaches the portal and the mirror', () async {
+      final outcome = await service.reserve(
+        accountId: 'a1',
+        offering: offering(),
+      );
+
+      expect(outcome.succeeded, isTrue, reason: outcome.message ?? '');
+      expect(portal.reserved, hasLength(1));
+      expect(store.find('a1', day, MealSlot.lunch), isNotNull,
+          reason: 'the mirror must follow the booking');
+    });
+
+    test('a slot the account already holds is refused, and nothing is sent',
+        () async {
+      // The portal does **not** enforce the one-meal rule (F22): it offers a
+      // meal the account already holds and accepts a second booking without
+      // complaint. So the app must refuse it — before the request, not after.
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: day,
+        slot: MealSlot.lunch,
+        source: MealSource.weeklyReservation,
+        capturedAt: day,
+      ));
+
+      final outcome = await service.reserve(
+        accountId: 'a1',
+        offering: offering(),
+      );
+
+      expect(outcome.succeeded, isFalse);
+      expect(outcome.failure, ReservationFailure.slotAlreadyHeld);
+      expect(portal.reserved, isEmpty,
+          reason: 'the refusal must happen before the money could move');
+    });
+
+    test('a meal bought from the basket also blocks a booking', () async {
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: day,
+        slot: MealSlot.lunch,
+        source: MealSource.basketPurchase,
+        capturedAt: day,
+      ));
+
+      final outcome = await service.reserve(
+        accountId: 'a1',
+        offering: offering(),
+      );
+
+      expect(outcome.succeeded, isFalse,
+          reason: 'one meal per slot per day, from either source');
+    });
+
+    test('a locked date is refused, and nothing is sent', () async {
+      final outcome = await service.reserve(
+        accountId: 'a1',
+        offering: offering(reservable: false),
+      );
+
+      expect(outcome.succeeded, isFalse);
+      expect(outcome.failure, ReservationFailure.locked);
+      expect(portal.reserved, isEmpty,
+          reason: 'a locked row is ignored by the portal, so the refusal is '
+              'cheaper and clearer than a silent no-op');
+    });
+
+    test('a balance that cannot cover the meal is refused', () async {
+      portal.balanceRial = 100000;
+
+      final outcome = await service.reserve(
+        accountId: 'a1',
+        offering: offering(price: 500000),
+      );
+
+      expect(outcome.succeeded, isFalse);
+      expect(outcome.failure, ReservationFailure.insufficientFunds);
+      expect(portal.reserved, isEmpty);
+    });
+
+    test('a booking the portal refuses is reported, not swallowed', () async {
+      portal.reserveFails = true;
+
+      final outcome = await service.reserve(
+        accountId: 'a1',
+        offering: offering(),
+      );
+
+      expect(outcome.succeeded, isFalse);
+      expect(outcome.message, isNotNull);
+      expect(store.find('a1', day, MealSlot.lunch), isNull,
+          reason: 'a failed booking must not appear in the mirror');
+    });
+  });
+
+  group('cancelling', () {
+    /// Puts a held meal in the mirror, so a cancel has something to remove.
+    void holdMeal() {
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: day,
+        slot: MealSlot.lunch,
+        source: MealSource.weeklyReservation,
+        capturedAt: day,
+      ));
+    }
+
+    test('a cancel the portal confirms removes the meal from the mirror',
+        () async {
+      holdMeal();
+
+      final outcome = await service.cancel(
+        accountId: 'a1',
+        date: day,
+        slot: MealSlot.lunch,
+      );
+
+      expect(outcome, isA<CancelSucceeded>());
+      expect(store.find('a1', day, MealSlot.lunch), isNull);
+    });
+
+    test('a refused cancel leaves the meal in the mirror', () async {
+      // A locked date is refused **silently** (F14): the portal discards the
+      // post and answers 200, so the request cannot tell success from
+      // refusal. If the mirror were updated on the strength of the request,
+      // the app would hide a meal the student still holds (F63).
+      holdMeal();
+      portal.cancelOutcome =
+          const CancelRefused('مهلت رزرو این تاریخ به پایان رسیده است.');
+
+      final outcome = await service.cancel(
+        accountId: 'a1',
+        date: day,
+        slot: MealSlot.lunch,
+      );
+
+      expect(outcome, isA<CancelRefused>());
+      expect(store.find('a1', day, MealSlot.lunch), isNotNull,
+          reason: 'the portal still holds the meal, so the mirror must too');
+    });
+
+    test('an ambiguous cancel leaves the meal in the mirror', () async {
+      // The portal could not be read back, so it is not known whether the
+      // meal was released. Removing it would be a guess.
+      holdMeal();
+      portal.cancelOutcome = const CancelAmbiguous('unreadable');
+
+      final outcome = await service.cancel(
+        accountId: 'a1',
+        date: day,
+        slot: MealSlot.lunch,
+      );
+
+      expect(outcome, isA<CancelAmbiguous>());
+      expect(store.find('a1', day, MealSlot.lunch), isNotNull);
+    });
+
+    test('a cancel that could not be sent leaves the meal in the mirror',
+        () async {
+      holdMeal();
+      portal.cancelOutcome = const CancelAmbiguous('offline');
+
+      final outcome = await service.cancel(
+        accountId: 'a1',
+        date: day,
+        slot: MealSlot.lunch,
+      );
+
+      expect(outcome, isA<CancelAmbiguous>());
+      expect(store.find('a1', day, MealSlot.lunch), isNotNull);
+    });
+  });
+}

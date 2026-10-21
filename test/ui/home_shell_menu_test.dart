@@ -1,9 +1,7 @@
 import 'package:bahonar_nut/core/account_store.dart';
 import 'package:bahonar_nut/core/hunt_config.dart';
 import 'package:bahonar_nut/core/models.dart';
-import 'package:bahonar_nut/core/platform_stores.dart';
 import 'package:bahonar_nut/core/portal.dart';
-import 'package:bahonar_nut/core/session.dart';
 import 'package:bahonar_nut/core/session_manager.dart';
 import 'package:bahonar_nut/core/time.dart';
 import 'package:bahonar_nut/platform/platform_bridge.dart';
@@ -11,9 +9,11 @@ import 'package:bahonar_nut/platform/platform_services.dart';
 import 'package:bahonar_nut/ui/app_state.dart';
 import 'package:bahonar_nut/ui/home_shell.dart';
 import 'package:bahonar_nut/ui/screens/hunt_screen.dart';
+import '../helpers/portal_stubs.dart' show FakePortalClient;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import '../helpers/memory_stores.dart';
 
 /// The shell's menu read, at the level a user sees it.
 ///
@@ -56,12 +56,12 @@ void main() {
       client: portal,
       sessions: SessionManager(
         client: portal,
-        store: _MemorySessionStore(),
-        solver: _NoSolver(),
+        store: MemorySessionStore(),
+        solver: NoSolver(),
         clock: clock,
       ),
-      credentialStore: _MemorySecureStore(),
-      plainStore: _MemoryPlainStore(),
+      credentialStore: MemorySecureStore(),
+      plainStore: MemoryPlainStore(),
       clock: clock,
     );
 
@@ -241,7 +241,7 @@ void main() {
 }
 
 /// A portal that serves a fixed menu, or fails.
-class _FakePortalClient implements PortalClient {
+class _FakePortalClient extends FakePortalClient {
   _FakePortalClient({required this.menus, this.failure});
 
   final List<MealMenu> menus;
@@ -255,6 +255,13 @@ class _FakePortalClient implements PortalClient {
     menuReads++;
     if (failure != null) throw failure!;
     return menus;
+  }
+
+  @override
+  Future<BookableMenus> fetchBookableMenus(Session session, {int days = 7}) async {
+    menuReads++;
+    if (failure != null) throw failure!;
+    return BookableMenus(dates: const [], menus: menus);
   }
 
   @override
@@ -319,7 +326,7 @@ class _FakePortalClient implements PortalClient {
       throw UnimplementedError();
 
   @override
-  Future<void> cancel(Session session, MealId mealId) async =>
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async =>
       throw UnimplementedError();
 }
 
@@ -328,87 +335,3 @@ class _FakePortalClient implements PortalClient {
 /// The read has to *establish* a session, and establishing one needs
 /// credentials: the point of the test is what the shell does with a menu, not
 /// what it does without a session.
-class _MemorySessionStore implements SessionStore {
-  StoredSession? _session;
-
-  @override
-  Future<Credentials?> readCredentials(AccountId accountId) async =>
-      Credentials(studentId: accountId, password: 'not-a-real-password');
-
-  @override
-  Future<void> writeCredentials(
-    AccountId accountId,
-    Credentials credentials,
-  ) async {}
-
-  @override
-  Future<StoredSession?> readSession(AccountId accountId) async => _session;
-
-  @override
-  Future<void> writeSession(StoredSession session) async => _session = session;
-
-  @override
-  Future<void> deleteSession(AccountId accountId) async => _session = null;
-
-  @override
-  Future<void> purge(AccountId accountId) async => _session = null;
-}
-
-/// A solver that never answers, so the login path is never taken.
-class _NoSolver implements ChallengeSolver {
-  @override
-  Future<String?> solve(LoginChallenge challenge) async => null;
-}
-
-/// An in-memory plain store.
-class _MemoryPlainStore implements PlainStore {
-  final Map<String, Object> values = {};
-
-  @override
-  Future<String?> readString(String key) async => values[key] as String?;
-
-  @override
-  Future<void> writeString(String key, String? value) async {
-    if (value == null) {
-      values.remove(key);
-    } else {
-      values[key] = value;
-    }
-  }
-
-  @override
-  Future<int?> readInt(String key) async => values[key] as int?;
-
-  @override
-  Future<void> writeInt(String key, int value) async => values[key] = value;
-
-  @override
-  Future<bool?> readBool(String key) async => values[key] as bool?;
-
-  @override
-  Future<void> writeBool(String key, bool value) async => values[key] = value;
-
-  @override
-  Future<void> remove(String key) async => values.remove(key);
-
-  @override
-  Future<Set<String>> keys() async => values.keys.toSet();
-}
-
-/// An in-memory credential store.
-class _MemorySecureStore implements SecureCredentialStore {
-  final Map<String, Credentials> values = {};
-
-  @override
-  Future<Credentials?> read(AccountId accountId) async => values[accountId];
-
-  @override
-  Future<void> write(AccountId accountId, Credentials credentials) async =>
-      values[accountId] = credentials;
-
-  @override
-  Future<void> delete(AccountId accountId) async => values.remove(accountId);
-
-  @override
-  Future<List<AccountId>> listAccountIds() async => values.keys.toList()..sort();
-}

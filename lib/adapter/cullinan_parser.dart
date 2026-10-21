@@ -149,51 +149,104 @@ abstract final class CullinanParser {
         final rowDate = parseJalaliDate(row.cell(1));
         if (rowDate == null || !_sameDate(rowDate, date)) continue;
 
-        final food = selectBySuffix(row.raw, 'drpFood');
-        final self = selectBySuffix(row.raw, 'drpSelf');
-        if (food == null || self == null) continue;
-
-        // Every hall in the dropdown, not just the selected one.
-        //
-        // The selected hall is the one a *held* meal is in. The list is the
-        // set of halls that serve the meal, and that is the set the hunt
-        // needs: the user is choosing where to eat, not where a meal already
-        // sits.
-        final halls = <Hall>[
-          for (final option in self.options)
-            if (option.value != '-1') Hall(id: option.value, name: option.text),
-        ];
-        if (halls.isEmpty) continue;
-
-        final dishes = <MenuOption>[];
-        for (final option in food.options) {
-          if (option.value == '-1') continue;
-          final price = parseRial(option.text);
-          if (price == null) continue;
-          dishes.add(MenuOption(
-            id: option.value,
-            name: dishName(option.text),
-            priceRial: price,
-          ));
-        }
-        if (dishes.isEmpty) continue;
-
-        menus.add(MealMenu(
-          date: rowDate,
-          slot: slot,
-          halls: halls,
-          dishes: dishes,
-          reservable: !_isDisabled(row.raw, 'chkReserve'),
-        ));
+        final menu = _menuFromRow(row.raw, rowDate, slot);
+        if (menu != null) menus.add(menu);
       }
     }
 
     return menus;
   }
 
+  /// Parses **every** date the page carries.
+  ///
+  /// The weekly page is a whole week of grids, so one read answers the menu
+  /// for seven dates at once. The booking screen used to read one page per
+  /// date — seven reads, and fourteen once the week boundary is crossed — to
+  /// answer a question a single read already answers. Every request the
+  /// portal sees is a request pattern, so the reads are collapsed.
+  ///
+  /// The dates come back in the order the page lists them.
+  static List<MealMenu> parseMenus(String html) {
+    final menus = <MealMenu>[];
+
+    for (final slot in reservationSlots) {
+      for (final row in tableRows(html, gridIdFor(slot))) {
+        if (row.cells.length < 4) continue;
+
+        final rowDate = parseJalaliDate(row.cell(1));
+        if (rowDate == null) continue;
+
+        final menu = _menuFromRow(row.raw, rowDate, slot);
+        if (menu != null) menus.add(menu);
+      }
+    }
+
+    return menus;
+  }
+
+  /// The menu one grid row describes, or null when the row serves nothing.
+  static MealMenu? _menuFromRow(
+    String rowHtml,
+    DateTime rowDate,
+    MealSlot slot,
+  ) {
+    final food = selectBySuffix(rowHtml, 'drpFood');
+    final self = selectBySuffix(rowHtml, 'drpSelf');
+    if (food == null || self == null) return null;
+
+    // Every hall in the dropdown, not just the selected one.
+    //
+    // The selected hall is the one a *held* meal is in. The list is the
+    // set of halls that serve the meal, and that is the set the hunt
+    // needs: the user is choosing where to eat, not where a meal already
+    // sits.
+    final halls = <Hall>[
+      for (final option in self.options)
+        if (option.value != '-1') Hall(id: option.value, name: option.text),
+    ];
+    if (halls.isEmpty) return null;
+
+    final dishes = <MenuOption>[];
+    for (final option in food.options) {
+      if (option.value == '-1') continue;
+      final price = parseRial(option.text);
+      if (price == null) continue;
+      dishes.add(MenuOption(
+        id: option.value,
+        name: dishName(option.text),
+        priceRial: price,
+      ));
+    }
+    if (dishes.isEmpty) return null;
+
+    return MealMenu(
+      date: rowDate,
+      slot: slot,
+      halls: halls,
+      dishes: dishes,
+      reservable: !_isDisabled(rowHtml, 'chkReserve'),
+    );
+  }
+
   /// Parses the reservation grids into the meals the student holds.
   ///
-  /// A meal is held when its row's `chkReserve` checkbox is `checked`.
+  /// ## Why "checked" is not enough
+  ///
+  /// A checked checkbox does **not** mean the meal is held. The portal echoes
+  /// back the checkbox state it was posted, so a row the app never reserved can
+  /// come back `checked` while carrying no reservation at all (F13).
+  ///
+  /// Two independent signals say a meal is genuinely held, and **both** are
+  /// required:
+  ///
+  ///   * the row's status icon is the green «رزرو شده» (`AcceptGreen16`), and
+  ///   * the row's **مبلغ خرید** cell — column 6 — is non-zero.
+  ///
+  /// An echoed row has neither: no green icon, and an amount of 0.
+  ///
+  /// Getting this wrong is not a cosmetic error. The cancel posts the account's
+  /// form state back, so a phantom row treated as held would have its checkbox
+  /// re-posted — and that **books a meal the student never asked for**.
   static List<Reservation> parseReservations(String html) {
     final reservations = <Reservation>[];
 
@@ -203,6 +256,11 @@ abstract final class CullinanParser {
 
         final checkbox = inputBySuffix(row.raw, 'chkReserve');
         if (checkbox == null || !checkbox.checked) continue;
+
+        // The two markers of a genuinely held meal.
+        final status = rowStatus(row.raw);
+        if (!status.held) continue;
+        if ((parseRial(row.cell(6)) ?? 0) <= 0) continue;
 
         final date = parseJalaliDate(row.cell(1));
         if (date == null) continue;
@@ -484,7 +542,7 @@ abstract final class CullinanParser {
     return out;
   }
 
-  /// True when the row's reserve checkbox is disabled, meaning the date is
+    /// True when the row's reserve checkbox is disabled, meaning the date is
   /// locked by the server.
   static bool _isDisabled(String rowHtml, String suffix) =>
       inputBySuffix(rowHtml, suffix)?.disabled ?? false;

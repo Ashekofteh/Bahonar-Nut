@@ -6,6 +6,7 @@ import 'package:bahonar_nut/core/portal.dart';
 import 'package:bahonar_nut/core/session.dart';
 import 'package:bahonar_nut/core/session_manager.dart';
 import 'package:bahonar_nut/core/time.dart';
+import '../helpers/portal_stubs.dart' as stubs;
 import 'package:test/test.dart';
 
 /// An in-memory [SessionStore] standing in for the platform keystore.
@@ -62,7 +63,7 @@ class FakeSolver implements ChallengeSolver {
 }
 
 /// A [PortalClient] that records calls and can be scripted to fail.
-class FakePortalClient implements PortalClient {
+class FakePortalClient extends stubs.FakePortalClient {
   int beginLoginCount = 0;
   int completeLoginCount = 0;
   int logoutCount = 0;
@@ -135,6 +136,10 @@ class FakePortalClient implements PortalClient {
       const [];
 
   @override
+  Future<BookableMenus> fetchBookableMenus(Session session, {int days = 7}) async =>
+      const BookableMenus(dates: [], menus: []);
+
+  @override
   Future<List<Reservation>> fetchReservations(Session session) async => const [];
 
   @override
@@ -162,7 +167,8 @@ class FakePortalClient implements PortalClient {
       throw UnimplementedError('not exercised');
 
   @override
-  Future<void> cancel(Session session, MealId mealId) async {}
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async =>
+      const CancelSucceeded();
 
   @override
   Uri? topUpUrl(Session session) => null;

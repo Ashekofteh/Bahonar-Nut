@@ -3,6 +3,7 @@ import 'package:bahonar_nut/core/portal.dart';
 import 'package:bahonar_nut/core/session.dart';
 import 'package:bahonar_nut/core/session_manager.dart';
 import 'package:bahonar_nut/core/time.dart';
+import '../helpers/portal_stubs.dart' show FakePortalClient;
 import 'package:test/test.dart';
 
 /// An in-memory [SessionStore].
@@ -42,7 +43,7 @@ class FakeStore implements SessionStore {
 }
 
 /// A client whose session expires after a scripted number of reads.
-class ExpiringClient implements PortalClient {
+class ExpiringClient extends FakePortalClient {
   /// The number of reads before the session is treated as expired.
   int readsBeforeExpiry;
 
@@ -110,6 +111,10 @@ class ExpiringClient implements PortalClient {
       const [];
 
   @override
+  Future<BookableMenus> fetchBookableMenus(Session session, {int days = 7}) async =>
+      const BookableMenus(dates: [], menus: []);
+
+  @override
   Future<List<Transaction>> fetchTransactions(Session session) async =>
       const [];
 
@@ -134,7 +139,8 @@ class ExpiringClient implements PortalClient {
       throw UnimplementedError();
 
   @override
-  Future<void> cancel(Session session, MealId mealId) async {}
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async =>
+      const CancelSucceeded();
 
   @override
   Uri? topUpUrl(Session session) => null;

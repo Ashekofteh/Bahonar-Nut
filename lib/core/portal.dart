@@ -135,6 +135,43 @@ class ClaimAmbiguous extends ClaimResult {
   final String diagnostic;
 }
 
+/// The outcome of cancelling a weekly meal.
+///
+/// Sealed for the same reason [ClaimResult] is: a cancel that did not land
+/// must never be mistaken for one that did. The three cases are genuinely
+/// different, and the caller must say which one it is dealing with.
+sealed class CancelOutcome {
+  const CancelOutcome();
+}
+
+/// The meal is no longer held. The portal says so.
+class CancelSucceeded extends CancelOutcome {
+  const CancelSucceeded();
+}
+
+/// The cancel was refused: the date is past its cutoff, so the portal
+/// ignored the post and the meal is still held.
+///
+/// This is not a failure of the request — the request was fine. It is the
+/// portal's rule that a date which has locked cannot be given back (F14).
+class CancelRefused extends CancelOutcome {
+  const CancelRefused(this.reason);
+
+  /// Why it was refused, in words for the student.
+  final String reason;
+}
+
+/// We do not know whether the cancel landed.
+///
+/// The portal could not be read back, so the mirror must be left alone. The
+/// meal may have been released, or it may still be held — and the next
+/// authoritative read settles it.
+class CancelAmbiguous extends CancelOutcome {
+  const CancelAmbiguous(this.diagnostic);
+
+  final String diagnostic;
+}
+
 /// What went wrong during login, when it goes wrong.
 class LoginFailure {
   const LoginFailure(this.reason, {this.retryable = false});
@@ -194,6 +231,23 @@ class Transaction {
       '| $count | $amountRial';
 }
 
+/// The menus for the days that can still be booked.
+///
+/// The days and the menus come back together, because they are worked out
+/// together: the days are counted from the portal's today, and the portal's
+/// today is only known once the read that fetched the menu has been made. A
+/// caller that worked the days out for itself would have to repeat that
+/// reasoning — and would get it wrong whenever the two answers disagreed.
+class BookableMenus {
+  const BookableMenus({required this.dates, required this.menus});
+
+  /// The days that can still be booked, in order.
+  final List<DateTime> dates;
+
+  /// One entry per meal slot served on one of [dates].
+  final List<MealMenu> menus;
+}
+
 /// The portal adapter.
 ///
 /// Implementations must:
@@ -246,6 +300,24 @@ abstract class PortalClient {
   /// university does not serve that day are absent, not empty.
   Future<List<MealMenu>> fetchMenu(Session session, DateTime date);
 
+  /// The menus for the days that can still be **booked**.
+  ///
+  /// The days are counted from the **portal's** today, not the device's, and
+  /// the portal's today is only known once the clock has been synced — which
+  /// is what this read does. So the caller cannot name the dates in
+  /// advance; it asks for a number of days, and the adapter works out which
+  /// days those are once the response has been read.
+  ///
+  /// Asking for the days one at a time instead would mean one read per day,
+  /// and every request the portal sees is a request pattern.
+  ///
+  /// The result holds one [MealMenu] per meal slot served on one of the
+  /// dates. A date the portal does not serve simply has no menu.
+  Future<BookableMenus> fetchBookableMenus(
+    Session session, {
+    int days = 7,
+  });
+
   Future<List<Reservation>> fetchReservations(Session session);
 
   /// The account's transaction history.
@@ -283,7 +355,26 @@ abstract class PortalClient {
 
   Future<Reservation> reserve(Session session, MealOffering offering);
 
-  Future<void> cancel(Session session, MealId mealId);
+  /// Cancels the meal held for [ref].
+  ///
+  /// ## Why the outcome is a type and not a `void`
+  ///
+  /// The portal **refuses a locked date silently**: the row renders `disabled`
+  /// and the server discards the post with no error label and no state change
+  /// (F14). The response is a plain `200`, so a client that inferred the
+  /// outcome from the status code would report a success for a cancel that
+  /// changed nothing — and then hide a meal the student still holds (F63).
+  ///
+  /// So the outcome is established by **reading the portal back**, exactly as
+  /// [reserve] does, and reported as one of three cases.
+  ///
+  /// ## Why the meal is named by a [MealRef] and not a string
+  ///
+  /// A meal id is a `(date, slot)` pair, and the pair used to travel as a
+  /// string the adapter parsed back. That parse could land on the **wrong
+  /// slot** without anyone noticing (F65), so the pair is carried as values
+  /// now.
+  Future<CancelOutcome> cancel(Session session, MealRef ref);
 
   // --- Navigation ---
 

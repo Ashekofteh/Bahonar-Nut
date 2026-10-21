@@ -10,6 +10,7 @@ import 'package:bahonar_nut/core/session_manager.dart';
 import 'package:bahonar_nut/core/snipe.dart';
 import 'package:bahonar_nut/core/snipe_engine.dart';
 import 'package:bahonar_nut/core/time.dart';
+import '../helpers/portal_stubs.dart' show FakePortalClient;
 import 'package:test/test.dart';
 
 const central = Hall(id: '1', name: 'مرکزی برادران');
@@ -66,7 +67,7 @@ SnipeRule ruleFor(HuntConfig config) =>
     config.toRule(id: 'r1', account: 'a1');
 
 /// A client that records when each basket read started and finished.
-class TimelineClient implements PortalClient {
+class TimelineClient extends FakePortalClient {
   TimelineClient({this.pages = const [], this.claimBehavior = ClaimBehavior.succeed});
 
   /// Successive basket pages; the last repeats once exhausted.
@@ -122,6 +123,12 @@ class TimelineClient implements PortalClient {
     setupReads++;
     setupDate = date;
     return menu;
+  }
+
+  @override
+  Future<BookableMenus> fetchBookableMenus(Session session, {int days = 7}) async {
+    setupReads++;
+    return BookableMenus(dates: const [], menus: menu);
   }
 
   @override
@@ -219,7 +226,8 @@ class TimelineClient implements PortalClient {
       const [];
 
   @override
-  Future<void> cancel(Session session, MealId mealId) async {}
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async =>
+      const CancelSucceeded();
 
   @override
   Uri? topUpUrl(Session session) => null;

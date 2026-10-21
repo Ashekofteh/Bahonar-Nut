@@ -6,6 +6,7 @@ import 'package:bahonar_nut/core/session.dart';
 import 'package:bahonar_nut/core/session_manager.dart';
 import 'package:bahonar_nut/core/time.dart';
 import 'package:bahonar_nut/platform/portal_sync.dart';
+import '../helpers/portal_stubs.dart' show FakePortalClient;
 import 'package:test/test.dart';
 
 /// A [SessionStore] that always yields a usable session.
@@ -41,7 +42,7 @@ class _NoopSolver implements ChallengeSolver {
 }
 
 /// A portal that serves a fixed set of reservations and transactions.
-class _FakePortal implements PortalClient {
+class _FakePortal extends FakePortalClient {
   List<Reservation> reservations = const [];
   List<Transaction> transactions = const [];
 
@@ -86,6 +87,10 @@ class _FakePortal implements PortalClient {
   Future<List<MealMenu>> fetchMenu(Session s, DateTime date) async => const [];
 
   @override
+  Future<BookableMenus> fetchBookableMenus(Session s, {int days = 7}) async =>
+      const BookableMenus(dates: [], menus: []);
+
+  @override
   Future<List<Reservation>> fetchReservations(Session session) async =>
       reservations;
 
@@ -116,7 +121,8 @@ class _FakePortal implements PortalClient {
       null;
 
   @override
-  Future<void> cancel(Session session, MealId mealId) async {}
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async =>
+      const CancelSucceeded();
 
   @override
   Uri? topUpUrl(Session session) => null;
@@ -265,6 +271,37 @@ void main() {
       expect(meal.source, MealSource.weeklyReservation);
       expect(meal.hallName, 'مرکزی برادران',
           reason: 'the grid knows the hall; the ledger does not');
+    });
+
+    test('a meal the grid reports keeps its source, even from the ledger',
+        () async {
+      // The live defect (2026-10-21): the account holds a breakfast on
+      // 1405/08/03 — a **next-week** date. A read that stopped at the
+      // current week did not see it, so the mirror fell back to the ledger.
+      //
+      // And the ledger cannot tell the two sources apart: it records a
+      // weekly reservation and a Food Basket purchase the same way. So the
+      // meal was filed as an **irreversible basket purchase**, and the table
+      // showed «خریداری شده» with no cancel button on a meal the portal would
+      // have let the student give back.
+      //
+      // The grid is the authority on what a meal **is**, and the ledger is
+      // only the authority on meals the grid does not show (F16).
+      portal.reservations = [
+        _reservation(date: DateTime.utc(2026, 10, 25), slot: MealSlot.breakfast),
+      ];
+      portal.transactions = [
+        _tx(date: '1405/08/03', slot: MealSlot.breakfast, amount: 150000),
+      ];
+
+      await buildSync().sync('a1');
+
+      final meal = store.find('a1', DateTime.utc(2026, 10, 25), MealSlot.breakfast);
+      expect(meal, isNotNull);
+      expect(meal!.source, MealSource.weeklyReservation,
+          reason: 'the grid says this is a weekly reservation, so it is one '
+              '— and it can be cancelled');
+      expect(meal.hallName, 'مرکزی برادران');
     });
 
     test('a ledger that cannot be read does not fail the sync', () async {

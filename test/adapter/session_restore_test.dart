@@ -32,8 +32,11 @@ void main() {
         establishedAt: DateTime.utc(2026, 10, 20),
       ));
 
-      expect(sent.single, contains('ASP.NET_SessionId=stored-session'));
-      expect(sent.single, contains('__AntiXsrfToken=stored-token'));
+      expect(sent, isNotEmpty);
+      for (final cookie in sent) {
+        expect(cookie, contains('ASP.NET_SessionId=stored-session'));
+        expect(cookie, contains('__AntiXsrfToken=stored-token'));
+      }
     });
 
     test('the cookies survive the read', () async {

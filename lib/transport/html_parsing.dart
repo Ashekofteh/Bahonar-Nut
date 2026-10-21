@@ -52,6 +52,66 @@ class ParsedRow {
   String cell(int index) => index < cells.length ? cells[index] : '';
 }
 
+/// The status the portal renders in a grid row's status cell.
+///
+/// The grid's last column carries a small icon whose `src` says what the row
+/// is. Four are in use, and the distinction matters because a checked
+/// checkbox is NOT the same as a held meal: the portal echoes back the
+/// checkbox state it was posted, so a row can render `checked` while
+/// carrying no reservation at all (F13).
+///
+/// | icon | meaning | held? |
+/// |---|---|---|
+/// | `AcceptGreen16` | «رزرو شده» — reserved | yes |
+/// | `lockAcceptGreen24` | «رزرو شده، خورده نشده، غیرفعال» — reserved, and locked | yes |
+/// | `Token_Eating20` | «خورده شده» — the meal was **eaten** | yes |
+/// | `Eating16` | «خورده شده» — the meal was **eaten** | yes |
+/// | `lock24` | «غیرفعال» — locked, and not reserved | no |
+///
+/// An eaten meal **is** held: it was charged, and the money moved. The
+/// portal renders it with a different icon, but it is the same commitment.
+class RowStatus {
+  const RowStatus({this.held = false, this.locked = false});
+
+  /// The row carries no status icon, or one that means nothing to us.
+  static const RowStatus none = RowStatus();
+
+  /// The row is a genuine reservation.
+  final bool held;
+
+  /// The row's date is past its cutoff, so it cannot be changed.
+  final bool locked;
+}
+
+/// The status of a grid row, read from its status icon.
+///
+/// Returns [RowStatus.none] when the row carries no status icon, which is
+/// what an ordinary, unbooked row looks like.
+RowStatus rowStatus(String rowHtml) {
+  final match = RegExp(
+    r'<img[^>]*id="[^"]*imgStaus[^"]*"[^>]*>',
+    dotAll: true,
+  ).firstMatch(rowHtml);
+  if (match == null) return RowStatus.none;
+
+  final tag = match.group(0)!;
+  if (tag.contains('lockAcceptGreen24')) {
+    return const RowStatus(held: true, locked: true);
+  }
+  if (tag.contains('AcceptGreen16')) {
+    return const RowStatus(held: true);
+  }
+  if (tag.contains('Token_Eating20') || tag.contains('Eating16')) {
+    // Eaten — but it was charged, so the account did hold it.
+    return const RowStatus(held: true);
+  }
+  if (tag.contains('lock24')) {
+    return const RowStatus(locked: true);
+  }
+  return RowStatus.none;
+}
+
+
 /// A parsed `<input>`.
 class ParsedInput {
   const ParsedInput({

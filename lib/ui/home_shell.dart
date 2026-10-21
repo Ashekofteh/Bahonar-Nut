@@ -15,6 +15,7 @@ import '../platform/reminder_delivery.dart';
 import '../platform/reminder_service.dart';
 import 'app_state.dart';
 import 'screens/accounts_screen.dart';
+import 'screens/booking_sheet.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/hunt_screen.dart';
 import 'screens/reminders_screen.dart';
@@ -263,11 +264,205 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// Opens the booking screen, with the menu for the targetable dates.
+  ///
+  /// The menu is read for the whole week at once, because the weekly page
+  /// carries a whole week of grids. Reading a page per date would mean
+  /// seven reads — and fourteen once the week boundary is crossed — for a
+  /// question one read answers.
+  ///
+  /// The read is also what fills the **table**: the reservations screen shows
+  /// every meal that can still be acted on, and the menu is what says which
+  /// of those are bookable.
+  Future<void> _refreshTable() async {
+    final accounts = widget.state.accounts;
+    if (accounts.isEmpty) return;
+
+    final accountId = widget.state.activeHuntAccount ?? accounts.first.id;
+
+    widget.state.setSyncing(true);
+    BookableMenus read = const BookableMenus(dates: [], menus: []);
+    Object? failure;
+    try {
+      // The read carries its own clock sync, and the days it returns are
+      // counted from the **portal's** today. The device's clock is not
+      // trusted for anything the portal decides, and the days that can still
+      // be booked cannot even be named until the time is known.
+      read = await widget.services.sessions.withSession(
+        accountId,
+        (session) => widget.services.client.fetchBookableMenus(session),
+      );
+    } catch (error) {
+      failure = error;
+    } finally {
+      if (mounted) widget.state.setSyncing(false);
+    }
+    if (!mounted) return;
+
+    if (failure != null || read.menus.isEmpty) {
+      // The failure is reported **here**, on the screen the student acted on.
+      //
+      // The three reasons are kept apart, because they call for different
+      // things from the student. "No dates left" is a fact about the portal;
+      // "the server clock did not sync" means the app could not reach the
+      // portal; and a failed read is the portal being unreachable. Telling
+      // the student that no dates are left when the truth is that the app
+      // never reached the portal would send them looking for a deadline that
+      // does not exist.
+      if (failure != null) {
+        _showBookingProblem(
+          'ارتباط با سامانه برقرار نشد. اتصال را بررسی کنید و دوباره تلاش '
+          'کنید.',
+        );
+      } else if (!widget.services.clock.isSynced) {
+        _showBookingProblem(
+          'ساعت سرور همگام نشد. اتصال سامانه را بررسی کنید و دوباره تلاش '
+          'کنید.',
+        );
+      } else {
+        _showBookingProblem('هنوز تاریخی برای رزرو در دسترس نیست.');
+      }
+      return;
+    }
+
+    setState(() {
+      _tableMenus = read.menus;
+    });
+  }
+
+  /// The menu the reservations table is drawn from.
+  List<MealMenu> _tableMenus = const [];
+
+  /// The (date, slot) an action is in flight for.
+  String? _busyKey;
+
+  /// Opens the booking sheet for a (date, slot) the student tapped.
+  Future<void> _bookMeal(DateTime date, MealSlot slot) async {
+    MealMenu? menu;
+    for (final candidate in _tableMenus) {
+      if (candidate.date == date && candidate.slot == slot) {
+        menu = candidate;
+        break;
+      }
+    }
+    if (menu == null) return;
+
+    final accountId = widget.state.activeHuntAccount ??
+        (widget.state.accounts.isEmpty
+            ? null
+            : widget.state.accounts.first.id);
+    if (accountId == null) return;
+
+    await BookingSheet.show(
+      context,
+      menu: menu,
+      onBook: (offering) => _book(accountId, offering),
+    );
+  }
+
+  /// Books an offering, and reports the outcome.
+  Future<String?> _book(AccountId accountId, MealOffering offering) async {
+    setState(() {
+      _busyKey = '${offering.date.year}-${offering.date.month}-'
+          '${offering.date.day}|${offering.slot.name}';
+    });
+
+    final outcome = await widget.services.reservations.reserve(
+      accountId: accountId,
+      offering: offering,
+    );
+
+    if (!mounted) return outcome.message;
+
+    setState(() {
+      _busyKey = null;
+    });
+
+    // The portal is the authority for what is held, so the mirror is read
+    // back rather than patched locally. A booking that the portal accepted
+    // but the mirror missed would show the student an empty reservations
+    // screen, and a booking that failed would show a meal they do not have.
+    await widget.services.mealStore.persist();
+    widget.state.mealsChanged();
+
+    if (!outcome.succeeded) {
+      _showBookingProblem(outcome.message ?? 'رزرو انجام نشد.');
+    }
+
+    return outcome.message;
+  }
+
+  /// Cancels a held meal.
+  Future<void> _cancelMeal(DateTime date, MealSlot slot) async {
+    final accounts = widget.state.accounts;
+    if (accounts.isEmpty) return;
+
+    final accountId =
+        widget.state.activeHuntAccount ?? accounts.first.id;
+
+    setState(() {
+      _busyKey = '${date.year}-${date.month}-${date.day}|${slot.name}';
+    });
+
+    final outcome = await widget.services.reservations.cancel(
+      accountId: accountId,
+      date: date,
+      slot: slot,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _busyKey = null;
+    });
+
+    await widget.services.mealStore.persist();
+    widget.state.mealsChanged();
+
+    // The three outcomes are told apart, because they call for different
+    // things from the student (F63).
+    //
+    // A **refusal** is the portal's rule, not a fault: the date has locked,
+    // so the meal cannot be given back. The meal is still held, and the row
+    // says so — nothing was lost, and nothing needs doing.
+    switch (outcome) {
+      case CancelSucceeded():
+        _showBookingProblem('رزرو لغو شد.');
+      case CancelRefused(reason: final reason):
+        _showBookingProblem(reason);
+      case CancelAmbiguous():
+        _showBookingProblem(
+          'لغو انجام شد ولی تایید نشد. به‌روزرسانی بزنید تا وضعیت رزرو '
+          'مشخص شود.',
+        );
+    }
+  }
+
+  /// Says why a booking could not be started, on the screen the student is on.
+  void _showBookingProblem(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final screens = <Widget>[
-      AccountsScreen(state: widget.state, onRefresh: refreshFromPortal),
-      ReservationsScreen(state: widget.state),
+      AccountsScreen(
+        state: widget.state,
+        onRefresh: refreshFromPortal,
+      ),
+      ReservationsScreen(
+        state: widget.state,
+        menus: _tableMenus,
+        clock: widget.services.clock,
+        busy: _busyKey != null,
+        busyKey: _busyKey,
+        onBook: _bookMeal,
+        onCancel: _cancelMeal,
+        onRefresh: _refreshTable,
+      ),
       DashboardScreen(state: widget.state),
       RemindersScreen(state: widget.state),
       _huntScreen(),

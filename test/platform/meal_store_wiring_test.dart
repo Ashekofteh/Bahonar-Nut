@@ -8,6 +8,7 @@ import 'package:bahonar_nut/core/session_manager.dart';
 import 'package:bahonar_nut/core/time.dart';
 import 'package:bahonar_nut/platform/platform_bridge.dart';
 import 'package:bahonar_nut/platform/platform_services.dart';
+import '../helpers/portal_stubs.dart' show FakePortalClient;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -94,7 +95,7 @@ class _NoopSolver implements ChallengeSolver {
 }
 
 /// A portal that serves nothing. The wiring test never reads it.
-class _EmptyClient implements PortalClient {
+class _EmptyClient extends FakePortalClient {
   @override
   Future<LoginChallenge?> beginLogin(String username) async => null;
 
@@ -132,6 +133,10 @@ class _EmptyClient implements PortalClient {
   Future<List<MealMenu>> fetchMenu(Session s, DateTime date) async => const [];
 
   @override
+  Future<BookableMenus> fetchBookableMenus(Session s, {int days = 7}) async =>
+      const BookableMenus(dates: [], menus: []);
+
+  @override
   Future<List<Reservation>> fetchReservations(Session session) async =>
       const [];
 
@@ -160,7 +165,8 @@ class _EmptyClient implements PortalClient {
       null;
 
   @override
-  Future<void> cancel(Session session, MealId mealId) async {}
+  Future<CancelOutcome> cancel(Session session, MealRef ref) async =>
+      const CancelSucceeded();
 
   @override
   Uri? topUpUrl(Session session) => null;

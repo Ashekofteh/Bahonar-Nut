@@ -16,6 +16,46 @@ typedef AccountId = String;
 /// The three meals served per day.
 enum MealSlot { breakfast, lunch, dinner }
 
+/// A meal on a day: the (date, slot) pair a reservation is held for.
+///
+/// ## Why this exists, and why it is not a string
+///
+/// The cancel used to travel as a string, `<date>|<slot>`, and the adapter
+/// parsed it back. That round-trip was **silently lossy**: Dart's enum
+/// `toString()` is `MealSlot.breakfast`, but the parser matched
+/// `slot.name` — `breakfast` — and fell through to a default. So a cancel
+/// for a breakfast was applied to the **lunch** grid, and the read-back
+/// looked for lunch, found none, and reported success. The portal kept the
+/// breakfast; the app removed it from its mirror (F65).
+///
+/// A string that has to be parsed back into a slot is a string that can be
+/// parsed into the **wrong** slot. The pair is carried as values instead, so
+/// there is nothing to misparse.
+class MealRef {
+  const MealRef({required this.date, required this.slot});
+
+  /// The day, in the portal's (Tehran) local frame. Time-of-day is
+  /// meaningless; the cutoff lives in `ServerClock`.
+  final DateTime date;
+
+  final MealSlot slot;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MealRef &&
+      other.date.year == date.year &&
+      other.date.month == date.month &&
+      other.date.day == date.day &&
+      other.slot == slot;
+
+  @override
+  int get hashCode => Object.hash(date.year, date.month, date.day, slot);
+
+  @override
+  String toString() =>
+      '${date.toIso8601String().substring(0, 10)}|${slot.name}';
+}
+
 /// Lifecycle of a reservation the student holds.
 ///
 /// [unknown] exists because the portal can report a state we do not recognise;

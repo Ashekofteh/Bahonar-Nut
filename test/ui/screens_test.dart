@@ -256,7 +256,7 @@ void main() {
       final state = await buildState();
       await tester.pumpWidget(wrap(state, ReservationsScreen(state: state)));
 
-      expect(find.text('هنوز رزروی برای نمایش نیست'), findsOneWidget);
+      expect(find.text('هنوز وعده‌ای برای نمایش نیست'), findsOneWidget);
     });
 
     testWidgets('lists held meals by day with their prices in Toman',
