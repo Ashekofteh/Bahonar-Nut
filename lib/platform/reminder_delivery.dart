@@ -50,6 +50,7 @@ class ReminderDelivery {
     this.config,
     this.clock,
     this.readReservations,
+    this.readTimeout = const Duration(seconds: 20),
   });
 
   /// Posts the digest.
@@ -92,6 +93,19 @@ class ReminderDelivery {
   /// week-old cache cannot tell "not booked" from "not read yet".
   final Future<List<Reservation>> Function(AccountId accountId)?
       readReservations;
+
+  /// How long the nudge's live read may take.
+  ///
+  /// The read is bounded because a network read in Doze does not fail — it
+  /// hangs, waiting for the system to open a maintenance window. An
+  /// unbounded read would hold the whole delivery hostage, and the student
+  /// would see nothing when they opened the app.
+  ///
+  /// Twenty seconds is long enough for a real read on a slow connection and
+  /// short enough that a blocked one is reported as a failure rather than
+  /// waited on. The transport's own timeout is thirty, so this fires first
+  /// and the read is abandoned rather than left dangling.
+  final Duration readTimeout;
 
   /// Delivers the reminder for [slot], and re-arms it for tomorrow.
   ///
@@ -140,15 +154,38 @@ class ReminderDelivery {
   /// Delivers the reminders that were owed while the app was not running.
   ///
   /// The native side records a delivery when the alarm fires and the Dart
-  /// side cannot be reached. This delivers them, in order, and clears the
-  /// record — but only after each one has actually been delivered, so a
-  /// failure leaves the delivery owed rather than losing it.
+  /// side cannot be reached. This delivers them, and clears the record — but
+  /// only after each one has actually been delivered, so a failure leaves
+  /// the delivery owed rather than losing it.
+  ///
+  /// ## The digests go first
+  ///
+  /// The digests are composed from the **local mirror**, so they need no
+  /// network and can be delivered instantly. The nudge is different: it asks
+  /// what the account does *not* hold, and only a live read can answer that.
+  ///
+  /// So the nudge goes last, and it goes last on purpose. A network read in
+  /// Doze is **blocked**, and it does not fail — it hangs until the system
+  /// opens a maintenance window, which can be minutes away. Measured on the
+  /// emulator: the catch-up read the owed nudge, waited ten seconds for a
+  /// read that could not go out, and only then delivered — and the digest
+  /// that was owed alongside it was stuck behind it the whole time.
+  ///
+  /// Delivering the digests first means the student hears about their meals
+  /// immediately, and the nudge — which is the one that can wait — is the
+  /// one that waits.
   ///
   /// Returns the payloads that were delivered.
   Future<List<String>> deliverPending(List<String> payloads) async {
     final delivered = <String>[];
 
-    for (final payload in payloads) {
+    // The digests first, the nudge last.
+    final ordered = [
+      ...payloads.where((p) => p != ReminderService.nudgePayload),
+      ...payloads.where((p) => p == ReminderService.nudgePayload),
+    ];
+
+    for (final payload in ordered) {
       try {
         if (await _deliverOne(payload)) {
           delivered.add(payload);
@@ -218,11 +255,20 @@ class ReminderDelivery {
     // Read every selected account. A failure is not fatal: the nudge names
     // the accounts it could not check, so a partial answer still tells the
     // user something true.
+    //
+    // The read is **bounded**. A network read in Doze is blocked, and it
+    // does not fail — it hangs, because the socket waits for the system to
+    // open a maintenance window. An unbounded read would therefore hold the
+    // delivery hostage: the student would open the app and nothing would
+    // happen until Android decided to let the request through, minutes or
+    // hours later. So the read is given a deadline, and a read that misses
+    // it is reported as a failure — which the digest names, so the student
+    // is told the check could not be made rather than being told nothing.
     final reservations = <AccountId, List<Reservation>>{};
     final failures = <ReminderFailure>[];
     for (final accountId in config.accountIds) {
       try {
-        reservations[accountId] = await read(accountId);
+        reservations[accountId] = await read(accountId).timeout(readTimeout);
       } catch (_) {
         failures.add(ReminderFailure(
           accountId: accountId,

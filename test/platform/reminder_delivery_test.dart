@@ -489,5 +489,127 @@ void main() {
 
       expect(delivered, isEmpty);
     });
+
+    test('the digests are delivered before the nudge', () async {
+      // The digests come from the local mirror and need no network. The
+      // nudge needs a live read, and a read in Doze is *blocked* — it hangs
+      // rather than failing. So the nudge goes last, or it holds the
+      // digests hostage until Android opens a maintenance window.
+      //
+      // Measured on the emulator: the catch-up waited ten seconds for a
+      // blocked read, and the digest owed alongside it was stuck behind it
+      // the whole time.
+      final order = <String>[];
+
+      final now = DateTime.now();
+      final today = DateTime.utc(now.year, now.month, now.day);
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: today,
+        slot: MealSlot.lunch,
+        source: MealSource.weeklyReservation,
+        capturedAt: today,
+        dishName: 'چلو خورشت قیمه',
+      ));
+
+      // The nudge is owed FIRST, so the order of the list cannot be what
+      // puts it last — the delivery has to reorder them.
+      final recording = _RecordingReminderService(
+        bridge: bridge,
+        mealStore: store,
+        order: order,
+      );
+
+      final delivery = ReminderDelivery(
+        service: recording,
+        accounts: [
+          SavedAccount(
+            id: 'a1',
+            studentId: '401405035',
+            alias: 'مقسمی',
+            addedAt: DateTime.utc(2026, 10, 20),
+          ),
+        ],
+        config: const ReminderConfig(accountIds: {'a1'}),
+        clock: FixedServerClock.now(DateTime.utc(2026, 10, 21, 12)),
+        readReservations: (accountId) async {
+          order.add('read');
+          return const <Reservation>[];
+        },
+      );
+
+      await delivery.deliverPending([
+        ReminderService.nudgePayload,
+        'lunch',
+      ]);
+
+      // The digest was posted, and it was posted before the read happened.
+      expect(order.first, 'digest',
+          reason: 'the digest was delivered before the nudge went to the '
+              'network');
+      expect(order, contains('read'));
+    });
+
+    test('the nudge read is bounded', () async {
+      // A network read in Doze does not fail — it hangs, waiting for the
+      // system to open a maintenance window. An unbounded read would hold
+      // the delivery hostage: the student opens the app and nothing happens
+      // until Android decides to let the request through.
+      final delivery = ReminderDelivery(
+        service: ReminderService(bridge: bridge, mealStore: store),
+        accounts: const [],
+        config: const ReminderConfig(accountIds: {'a1'}),
+        clock: FixedServerClock.now(DateTime.utc(2026, 10, 21, 12)),
+        readTimeout: const Duration(milliseconds: 50),
+        readReservations: (accountId) =>
+            Future<List<Reservation>>.delayed(
+          const Duration(seconds: 30),
+          () => const <Reservation>[],
+        ),
+      );
+
+      final stopwatch = Stopwatch()..start();
+      final delivered = await delivery.deliverPending([
+        ReminderService.nudgePayload,
+      ]);
+      stopwatch.stop();
+
+      expect(stopwatch.elapsed, lessThan(const Duration(seconds: 5)),
+          reason: 'the read was bounded, not waited on');
+      expect(delivered, [ReminderService.nudgePayload],
+          reason: 'a read that timed out is a reported failure, not a lost '
+              'delivery');
+    });
   });
+}
+
+/// A reminder service that records when a digest was delivered.
+///
+/// The ordering matters: a digest is composed from the local mirror and
+/// needs no network, while the nudge needs a live read — and a read in Doze
+/// is blocked, and it *hangs* rather than failing. So the digests have to go
+/// first, and this is what proves it.
+class _RecordingReminderService extends ReminderService {
+  _RecordingReminderService({
+    required super.bridge,
+    required super.mealStore,
+    required this.order,
+  });
+
+  /// The order the deliveries happened in.
+  final List<String> order;
+
+  @override
+  Future<NotificationText?> deliver(
+    ReminderSlot slot, {
+    required ReminderConfig config,
+    required Map<AccountId, String> accountNames,
+  }) async {
+    order.add('digest');
+    return super.deliver(
+      slot,
+      config: config,
+      accountNames: accountNames,
+    );
+  }
 }
