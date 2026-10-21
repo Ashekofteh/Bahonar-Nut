@@ -1,10 +1,12 @@
 /// Session management: keeping N accounts authenticated with no user effort.
 ///
-/// The portal binds its CAPTCHA answer to the session at image-fetch time, so a
-/// login is an atomic sequence (fetch page, fetch challenge, answer, post) that
-/// must not be interleaved with other requests. That constraint is why
-/// [SessionManager] serialises authentication per account rather than firing
-/// logins concurrently.
+/// The portal binds its CAPTCHA answer to the **session** the image was fetched
+/// in, and it mints a new session every time it renders the login page. So a
+/// challenge carries the session it belongs to, and an answer is posted back
+/// in that session — which is what makes the student's reading time safe.
+///
+/// That constraint is also why [SessionManager] serialises authentication per
+/// account rather than firing logins concurrently.
 ///
 /// The design intent: the common case is that a stored session still works, and
 /// the user never notices anything. Re-authentication is the exception, and when
@@ -130,10 +132,22 @@ class SessionUnavailable extends SessionResult {
 ///
 /// So the image comes with the failure, and the student answers the
 /// challenge that is actually live.
+///
+/// ## Why the session id travels with it too
+///
+/// The portal mints a new `ASP.NET_SessionId` every time it renders the
+/// login page, and the CAPTCHA endpoint sets no cookie of its own. So the
+/// challenge lives in the session that was current when the image was
+/// fetched, and **any** other request in between replaces that session and
+/// makes a correct answer wrong. Verified live 2026-10-21.
+///
+/// So the session id comes with the failure as well, and the answer is
+/// posted back in the session the student actually read.
 class SessionNeedsCaptcha extends SessionResult {
   const SessionNeedsCaptcha({
     required this.imageBytes,
     required this.accountId,
+    this.sessionId,
     this.previousAttempts = 0,
   });
 
@@ -142,6 +156,13 @@ class SessionNeedsCaptcha extends SessionResult {
 
   /// The account the challenge belongs to.
   final AccountId accountId;
+
+  /// The session the challenge is bound to.
+  ///
+  /// The answer has to be posted in this session, or the portal judges it
+  /// against a session that no longer holds the challenge. Null when the
+  /// portal issued no session id.
+  final String? sessionId;
 
   /// How many times the automatic answer has been tried and refused.
   ///

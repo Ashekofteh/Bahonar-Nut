@@ -13,11 +13,12 @@
 ///
 /// ## Why the image is shown as it was fetched
 ///
-/// The portal binds the expected answer to the session at **image-fetch
-/// time**. The bytes shown here are the bytes that were fetched, and the
-/// answer is judged against that challenge. Fetching a fresh image would
-/// fetch a *different* challenge, and the answer the student is about to type
-/// would be rejected for no reason at all.
+/// The portal binds the expected answer to the **session** the image was
+/// fetched in, and it mints a new session every time it renders the login
+/// page. The bytes shown here are the bytes that were fetched, and the answer
+/// is judged against that challenge, in that session. Fetching a fresh image
+/// would fetch a *different* challenge, and the answer the student is about to
+/// type would be rejected for no reason at all.
 ///
 /// So the image travels with the failure, all the way to here.
 ///

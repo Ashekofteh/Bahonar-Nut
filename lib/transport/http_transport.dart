@@ -195,9 +195,10 @@ class PortalTransport {
   ///
   /// Goes through the same request path as [_send] rather than issuing a
   /// separate call: a second request would double the traffic and, worse, would
-  /// fetch the challenge a second time — and the portal binds the expected
-  /// answer to the session at fetch time, so the bytes returned here would be a
-  /// *different* challenge from the one the login POST will be judged against.
+  /// fetch the challenge a second time — and the session holds **one**
+  /// challenge, so the bytes returned here would be a *different* challenge
+  /// from the one the login POST will be judged against. Verified live
+  /// 2026-10-21 (F77).
   Future<Uint8List> getBytes(AccountId accountId, String path) async {
     final response = await _send(accountId, 'GET', path);
     return response.bytes ?? Uint8List(0);

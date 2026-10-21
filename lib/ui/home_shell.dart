@@ -7,7 +7,7 @@ import '../core/persian.dart';
 import '../core/portal.dart';
 import '../core/preflight.dart';
 import '../core/session.dart'
-    show SessionNeedsCaptcha, SessionReady;
+    show SessionNeedsCaptcha, SessionReady, SessionUnavailable;
 import '../core/session_manager.dart'
     show PortalUnreachableException, SessionUnavailableException;
 import '../core/time.dart';
@@ -309,27 +309,8 @@ class _HomeShellState extends State<HomeShell> {
     try {
       final transactions = <Transaction>[];
       for (final account in accounts) {
-        var result = await _sync.sync(account.id);
+        final result = await _readAccount(account.id);
         if (!mounted) return;
-
-        // The solver declined and the portal wants the student to read the
-        // CAPTCHA. That is not a dead end — it is a question — so the
-        // student is asked, and the account is read again with their answer.
-        final challenge = result.needsCaptcha;
-        if (challenge != null) {
-          final answered = await _askForCaptcha(challenge);
-          if (!mounted) return;
-          if (!answered) {
-            widget.state.setSyncError(
-              account.id,
-              result.error ?? 'کد امنیتی وارد نشد.',
-            );
-            continue;
-          }
-          // The session is now live, so the read goes through.
-          result = await _sync.sync(account.id);
-          if (!mounted) return;
-        }
 
         if (result.ok) {
           widget.state.setBalance(account.id, result.balanceRial ?? 0);
@@ -347,40 +328,117 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// Reads one account, asking the student for the CAPTCHA when it is needed.
+  ///
+  /// ## Why the answer is asked for twice
+  ///
+  /// The solver declined, so the student was asked and gave an answer. The
+  /// login then succeeded — and the read that followed was **bounced** by the
+  /// portal, because the session had been replaced while the student was
+  /// reading. The read is retried with a fresh login, and that fresh login
+  /// needs a CAPTCHA again.
+  ///
+  /// So a second question is legitimate, and the loop here handles it. The
+  /// loop is bounded: the student can cancel, and a refusal ends it.
+  ///
+  /// ## Why the reported error is the last one
+  ///
+  /// The first sync's error says the solver could not read the code. That is
+  /// true, and it is **no longer what happened** once the student answered.
+  /// Reporting it would blame the app's own reader for a failure that came
+  /// after the student did their part. So the error that reaches the screen
+  /// is the one from the last attempt — the one that describes where things
+  /// actually stopped.
+  Future<AccountSyncResult> _readAccount(AccountId accountId) async {
+    var result = await _sync.sync(accountId);
+    if (!mounted) return result;
+
+    // The solver declined and the portal wants the student to read the
+    // CAPTCHA. That is not a dead end — it is a question — so the
+    // student is asked, and the account is read again with their answer.
+    var challenge = result.needsCaptcha;
+    while (challenge != null) {
+      final outcome = await _askForCaptcha(challenge);
+      if (!mounted) return result;
+
+      if (outcome.declined) {
+        // The student gave up. The first error is the truthful one: the code
+        // was never read.
+        return result;
+      }
+
+      if (outcome.refusalReason != null) {
+        // The portal refused the answer, and it said why. That reason is the
+        // one the student can act on — a wrong password, or a portal that
+        // could not be reached — so it is the one that is reported.
+        return AccountSyncResult(
+          accountId: accountId,
+          ok: false,
+          error: outcome.refusalReason,
+        );
+      }
+
+      // The session is now live, so the read goes through.
+      result = await _sync.sync(accountId);
+      if (!mounted) return result;
+      challenge = result.needsCaptcha;
+    }
+
+    return result;
+  }
+
   /// Asks the student to read the CAPTCHA, and logs in with their answer.
   ///
-  /// Returns null when the student gave up — which is a legitimate answer:
-  /// the app must not trap them in a dialog they cannot leave.
+  /// ## Why the outcome is not a bool
   ///
-  /// The answer is refused in one way only: the portal rotates the challenge,
-  /// so a fresh image comes back and the student is asked again. The loop is
-  /// bounded by the student's patience and by the portal's tolerance.
-  Future<bool> _askForCaptcha(SessionNeedsCaptcha challenge) async {
+  /// Three things can happen, and they need different endings:
+  ///
+  ///  * the student **cancelled** — the app must not trap them in a dialog
+  ///    they cannot leave, and the truthful report is the one that says the
+  ///    code was never read;
+  ///  * the portal **refused** the answer — the portal says why, and that
+  ///    reason is the one the student can act on;
+  ///  * the portal **rotated** the challenge — a fresh image comes back and
+  ///    the student is asked again.
+  ///
+  /// A bool collapses the first two into "failed", and then the screen
+  /// reports the *first* error — which blames the app's own reader for
+  /// something that happened after the student did their part. That is what
+  /// the device showed: «کد امنیتی به‌صورت خودکار خوانده نشد.» after a
+  /// correct answer, with the real reason discarded.
+  Future<_CaptchaOutcome> _askForCaptcha(SessionNeedsCaptcha challenge) async {
     final answer = await CaptchaDialog.show(
       context,
       imageBytes: challenge.imageBytes,
       previousAttempts: challenge.previousAttempts,
     );
-    if (answer == null) return false;
+    if (answer == null) return const _CaptchaOutcome.declined();
 
+    // The session the image was fetched in is passed with the answer: the
+    // portal judges the answer against that session, and it mints a new one
+    // whenever it renders the login page. So an answer posted in the wrong
+    // session is refused however correct the digits are.
     final result = await widget.services.sessions.loginWithCaptcha(
       challenge.accountId,
       answer,
+      sessionId: challenge.sessionId,
     );
 
-    if (result is SessionReady) return true;
+    if (result is SessionReady) return const _CaptchaOutcome.accepted();
 
     // A refused answer brings a **fresh** challenge, because the portal has
     // rotated the one the student answered. Showing the old image again
     // would invite the same wrong answer.
     if (result is SessionNeedsCaptcha) {
-      if (!mounted) return false;
+      if (!mounted) return const _CaptchaOutcome.declined();
       return _askForCaptcha(result);
     }
 
     // A plain refusal — a wrong password, or the portal unreachable. The
     // student has to fix that, and the sync reports it.
-    return false;
+    return _CaptchaOutcome.refused(
+      (result as SessionUnavailable).reason,
+    );
   }
 
   /// Opens the booking screen, with the menu for the targetable dates.
@@ -1038,4 +1096,28 @@ class _HomeShellState extends State<HomeShell> {
     return 'آماده: $dishes — $halls — حدود '
         '${toPersianDigits(config.projectedRequests())} درخواست.';
   }
+}
+
+/// How a CAPTCHA question ended.
+///
+/// The three endings need three different reports, so they are three
+/// different values rather than a bool. See [_HomeShellState._askForCaptcha].
+class _CaptchaOutcome {
+  const _CaptchaOutcome.accepted()
+      : declined = false,
+        refusalReason = null;
+
+  const _CaptchaOutcome.declined()
+      : declined = true,
+        refusalReason = null;
+
+  const _CaptchaOutcome.refused(String reason)
+      : declined = false,
+        refusalReason = reason;
+
+  /// The student closed the dialog without answering.
+  final bool declined;
+
+  /// Why the portal refused the answer, when it did.
+  final String? refusalReason;
 }

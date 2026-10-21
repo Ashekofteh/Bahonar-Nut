@@ -29,10 +29,20 @@
 /// ## What this does not cover
 ///
 /// The login is two calls — [PortalClient.beginLogin] and
-/// [PortalClient.completeLogin] — and a read may run between them. That is
-/// safe: the CAPTCHA is bound when the challenge *image* is fetched, and
-/// neither call refetches it. The session manager already serialises logins
-/// per account, so the pair cannot be interleaved with another login.
+/// [PortalClient.completeLogin] — and a read may run between them.
+///
+/// That is **not** safe, and the reason is worth stating because it was
+/// believed to be the opposite for a long time. The CAPTCHA answer is judged
+/// against the **session** the image was fetched in, and the portal mints a
+/// new `ASP.NET_SessionId` every time it renders the login page. So an
+/// intervening read of the login page replaces that session, and a correct
+/// answer is then refused. Verified live 2026-10-21 (F77).
+///
+/// The answer survives it anyway, because the challenge carries its session id
+/// and the client restores it before the POST. What this class must not do is
+/// add a **second** challenge fetch to the sequence — that replaces the
+/// challenge itself, so the digits the student read would be judged against a
+/// challenge that is not theirs.
 library;
 
 import 'dart:async';

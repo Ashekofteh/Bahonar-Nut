@@ -9,6 +9,17 @@
 ///      challenge to the session at fetch time, so overlapping logins for the
 ///      same account would corrupt each other.
 ///
+/// ## The challenge and the session
+///
+/// The portal judges a CAPTCHA answer against the **session** the image was
+/// fetched in, and it mints a new `ASP.NET_SessionId` every time it renders
+/// the login page. So the challenge is remembered, and the answer is posted
+/// back in the session it came from — which is what lets the student take as
+/// long as they like to read four digits, and what keeps an interleaved read
+/// from spoiling their answer.
+///
+/// Verified live 2026-10-21 (F77).
+///
 /// This class holds no I/O of its own: the [PortalClient] and [SessionStore] are
 /// injected, so the whole lifecycle is testable with fakes and a fake clock.
 library;
@@ -64,6 +75,21 @@ class SessionManager {
   /// for one account would fetch and submit in interleaved order and corrupt each
   /// other. Each call chains onto the previous one for that account.
   final Map<AccountId, Future<void>> _queues = {};
+
+  /// The challenge each account is currently being asked to answer.
+  ///
+  /// ## Why it is kept
+  ///
+  /// The portal judges a CAPTCHA answer against the **session** the image was
+  /// fetched in, and it mints a new session every time it renders the login
+  /// page. So the challenge has to be remembered — the session it is bound to
+  /// is the only thing that makes a correct answer land.
+  ///
+  /// It is also what makes the student's wait safe. The challenge was measured
+  /// to stay answerable for at least seven minutes, and the answer is posted
+  /// in the session the image came from, so an interleaved read cannot spoil
+  /// it.
+  final Map<AccountId, LoginChallenge> _pendingChallenges = {};
 
   /// Ensures [accountId] is authenticated, reusing or re-establishing as needed.
   ///
@@ -132,27 +158,62 @@ class SessionManager {
     AccountId accountId,
     Credentials credentials, {
     String? typedAnswer,
+    String? typedSessionId,
   }) async {
     try {
-      final challenge = await client.beginLogin(credentials.studentId);
+      // A typed answer belongs to a challenge that was already fetched — the
+      // one the student read. Fetching a new challenge here would rotate the
+      // portal's session and make the answer wrong, which is exactly the bug
+      // this path had: every correct answer was refused.
+      //
+      // So the challenge is only fetched when there is no answer yet.
+      LoginChallenge? challenge;
+      if (typedAnswer == null) {
+        challenge = await client.beginLogin(credentials.studentId);
+      }
 
       LoginChallengeResponse? response;
       if (challenge != null) {
         // A typed answer comes from the student, and it is used **as is**:
         // the solver is not consulted, because the student has already
         // looked at the image and the solver may well read it differently.
-        final answer = typedAnswer ?? await solver.solve(challenge);
+        final answer = await solver.solve(challenge);
         if (answer == null) {
           // The solver declined. The image travels with the failure so the
           // student can read the challenge that is actually live — the
           // bytes that were fetched are the ones the answer is judged
-          // against.
+          // against, and so is the session they were fetched in.
+          //
+          // The challenge is kept, so the student's answer is posted against
+          // *this* challenge rather than a fresh one.
+          _pendingChallenges[accountId] = challenge;
           return SessionNeedsCaptcha(
             imageBytes: challenge.imageBytes,
             accountId: accountId,
+            sessionId: challenge.sessionId,
           );
         }
-        response = LoginChallengeResponse(answer);
+        response = LoginChallengeResponse(answer, sessionId: challenge.sessionId);
+      } else if (typedAnswer != null) {
+        // The student's answer belongs to a challenge that was fetched
+        // earlier — the one whose image the student read. The session id is
+        // what makes the answer land: the portal mints a new one whenever it
+        // renders the login page, and a read in between would otherwise
+        // leave the answer judged against a session that no longer holds the
+        // challenge.
+        //
+        // The session the UI named wins: it is the session whose image was
+        // on the screen. The outstanding challenge is the fallback for a
+        // caller that does not know it.
+        final sessionId = typedSessionId ?? _pendingChallenges[accountId]?.sessionId;
+        if (sessionId == null) {
+          // The challenge is gone — the app restarted, or another login
+          // consumed it. The answer cannot be judged against a challenge
+          // that no longer exists, so reporting it as a *wrong code* would
+          // blame the student for the app's bookkeeping.
+          return await _refetchChallenge(accountId, credentials);
+        }
+        response = LoginChallengeResponse(typedAnswer, sessionId: sessionId);
       }
 
       final session = await client.completeLogin(
@@ -161,10 +222,12 @@ class SessionManager {
         challenge: response,
       );
 
+      _pendingChallenges.remove(accountId);
       _live[accountId] = session;
       await store.writeSession(StoredSession.fromSession(accountId, session));
       return SessionReady(session: session, wasReused: false);
     } on LoginRejectedException catch (e) {
+      _pendingChallenges.remove(accountId);
       // The portal refused the login. Whether that was the **password** or
       // the **CAPTCHA** matters, and the portal says which: it answers a
       // wrong code with a distinct label. Reporting a wrong code as a
@@ -181,11 +244,13 @@ class SessionManager {
         cause: SessionFailureCause.badCredentials,
       );
     } on PortalUnreachableException catch (e) {
+      _pendingChallenges.remove(accountId);
       return SessionUnavailable(
         reason: 'ارتباط با سامانه برقرار نشد: ${e.message}',
         cause: SessionFailureCause.networkError,
       );
     } catch (e) {
+      _pendingChallenges.remove(accountId);
       return SessionUnavailable(
         reason: 'ورود با خطای غیرمنتظره مواجه شد: $e',
         cause: SessionFailureCause.networkError,
@@ -254,6 +319,16 @@ class SessionManager {
   /// student has looked at the image and the solver may well read it
   /// differently — and the solver's opinion is what got us here.
   ///
+  /// ## The session the answer belongs to
+  ///
+  /// [sessionId] is the session the challenge the student read was fetched
+  /// in, and the answer is posted there. It is what makes a correct answer
+  /// land: the portal judges the answer against that session, and it mints a
+  /// new one whenever it renders the login page.
+  ///
+  /// The caller is the UI, which showed the image and therefore knows the
+  /// session. When it is not supplied, the outstanding challenge is used.
+  ///
   /// ## The queue
   ///
   /// The call joins the account's **login queue**, like every other login.
@@ -266,14 +341,17 @@ class SessionManager {
   /// challenge and make the answer the student is about to type wrong.
   Future<SessionResult> loginWithCaptcha(
     AccountId accountId,
-    String answer,
-  ) {
+    String answer, {
+    String? sessionId,
+  }) {
     final previous = _queues[accountId];
     final completer = Completer<SessionResult>();
 
     Future<void> run() async {
       try {
-        completer.complete(await _loginWithTypedAnswer(accountId, answer));
+        completer.complete(
+          await _loginWithTypedAnswer(accountId, answer, sessionId: sessionId),
+        );
       } catch (error, stack) {
         completer.completeError(error, stack);
       }
@@ -297,8 +375,9 @@ class SessionManager {
   /// the student needs a new one to answer.
   Future<SessionResult> _loginWithTypedAnswer(
     AccountId accountId,
-    String answer,
-  ) async {
+    String answer, {
+    String? sessionId,
+  }) async {
     final credentials = await store.readCredentials(accountId);
     if (credentials == null) {
       return const SessionUnavailable(
@@ -307,7 +386,12 @@ class SessionManager {
       );
     }
 
-    final result = await _login(accountId, credentials, typedAnswer: answer);
+    final result = await _login(
+      accountId,
+      credentials,
+      typedAnswer: answer,
+      typedSessionId: sessionId,
+    );
 
     // A refused code needs a new challenge. The portal has rotated it, so
     // the image the student answered is no longer the live one, and
@@ -316,9 +400,13 @@ class SessionManager {
         result.cause == SessionFailureCause.wrongCaptcha) {
       final challenge = await _fetchChallenge(credentials.studentId);
       if (challenge != null) {
+        // The fresh challenge is kept, so the next answer is posted against
+        // the image the student is now looking at.
+        _pendingChallenges[accountId] = challenge;
         return SessionNeedsCaptcha(
           imageBytes: challenge.imageBytes,
           accountId: accountId,
+          sessionId: challenge.sessionId,
           previousAttempts: 1,
         );
       }
@@ -337,6 +425,31 @@ class SessionManager {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Fetches a fresh challenge and hands it to the student.
+  ///
+  /// Used when the challenge the student answered is no longer available, so
+  /// there is nothing to judge the answer against. The student is asked again
+  /// rather than being told their code was wrong — the code may have been
+  /// perfectly right.
+  Future<SessionResult> _refetchChallenge(
+    AccountId accountId,
+    Credentials credentials,
+  ) async {
+    final challenge = await _fetchChallenge(credentials.studentId);
+    if (challenge == null) {
+      return const SessionUnavailable(
+        reason: 'ارتباط با سامانه برقرار نشد.',
+        cause: SessionFailureCause.networkError,
+      );
+    }
+    _pendingChallenges[accountId] = challenge;
+    return SessionNeedsCaptcha(
+      imageBytes: challenge.imageBytes,
+      accountId: accountId,
+      sessionId: challenge.sessionId,
+    );
   }
 
   /// The cached session for an account, or null when none is live.
@@ -364,16 +477,7 @@ class SessionManager {
   ) async {
     var result = await ensureSession(accountId);
     if (result is! SessionReady) {
-      if (result is SessionNeedsCaptcha) {
-        throw SessionUnavailableException(
-          const SessionUnavailable(
-            reason: 'کد امنیتی به‌صورت خودکار خوانده نشد.',
-            cause: SessionFailureCause.challengeUnsolvable,
-          ),
-          needsCaptcha: result,
-        );
-      }
-      throw SessionUnavailableException(result as SessionUnavailable);
+      throw _unavailable(result);
     }
 
     try {
@@ -386,9 +490,35 @@ class SessionManager {
     await invalidate(accountId);
     result = await ensureSession(accountId, force: true);
     if (result is! SessionReady) {
-      throw SessionUnavailableException(result as SessionUnavailable);
+      throw _unavailable(result);
     }
     return read(result.session);
+  }
+
+  /// The exception for a result that is not a usable session.
+  ///
+  /// ## Why this is one method
+  ///
+  /// A result that is not [SessionReady] is either a plain refusal or a
+  /// challenge the student must answer, and the two need different handling.
+  /// Casting the result to [SessionUnavailable] — which is what this used to
+  /// do — throws a **type error** on the challenge case, and the student sees
+  /// an English Dart error instead of the CAPTCHA dialog.
+  ///
+  /// It was thrown on the device and not by any test, because the tests only
+  /// ever reached the *first* failure, where the challenge was handled
+  /// inline. The retry path and [cookiesFor] cast blindly.
+  SessionUnavailableException _unavailable(SessionResult result) {
+    if (result is SessionNeedsCaptcha) {
+      return SessionUnavailableException(
+        const SessionUnavailable(
+          reason: 'کد امنیتی به‌صورت خودکار خوانده نشد.',
+          cause: SessionFailureCause.challengeUnsolvable,
+        ),
+        needsCaptcha: result,
+      );
+    }
+    return SessionUnavailableException(result as SessionUnavailable);
   }
 
   /// The account's live session cookies.
@@ -407,7 +537,7 @@ class SessionManager {
   Future<Map<String, String>> cookiesFor(AccountId accountId) async {
     final result = await ensureSession(accountId);
     if (result is! SessionReady) {
-      throw SessionUnavailableException(result as SessionUnavailable);
+      throw _unavailable(result);
     }
     return result.session.cookies;
   }

@@ -54,13 +54,27 @@ class Session {
 
 /// A login challenge the portal demands before completing authentication.
 ///
-/// The portal uses a 4-digit image CAPTCHA bound to the session at fetch time:
-/// fetching the image rotates the expected answer, so a challenge must be
-/// obtained and answered within one continuous session.
+/// The portal uses a 4-digit image CAPTCHA, and the answer is judged against
+/// the **session** the image was fetched in — not against the image itself.
+///
+/// ## Why the session id travels with the challenge
+///
+/// The portal mints a new `ASP.NET_SessionId` every time it renders the login
+/// page, and the CAPTCHA endpoint sets no cookie of its own. So the challenge
+/// lives in the session that was current when the image was fetched, and **any
+/// other request in between replaces that session** and makes the answer
+/// wrong. Verified live 2026-10-21: a read between the image and the answer
+/// makes the portal refuse a correct code, and restoring the session id makes
+/// it accepted again.
+///
+/// So the challenge carries the session id it is bound to, and the answer
+/// carries it back. That is what lets the student take as long as they like to
+/// read the code, and what lets the app keep reading the portal meanwhile.
 class LoginChallenge {
   const LoginChallenge({
     required this.imageBytes,
     required this.kind,
+    this.sessionId,
   });
 
   /// Raw image payload as served by the portal.
@@ -69,6 +83,13 @@ class LoginChallenge {
   /// not a list of boxed ints.
   final Uint8List imageBytes;
   final ChallengeKind kind;
+
+  /// The `ASP.NET_SessionId` the challenge is bound to.
+  ///
+  /// Null when the portal issued no session id, or when the client cannot
+  /// tell. The answer is then posted in whatever session is current, which is
+  /// correct as long as nothing was fetched in between.
+  final String? sessionId;
 
   @override
   String toString() => 'LoginChallenge(${kind.name}, ${imageBytes.length} bytes)';
@@ -84,9 +105,16 @@ enum ChallengeKind {
 
 /// The user's answer to a challenge.
 class LoginChallengeResponse {
-  const LoginChallengeResponse(this.answer);
+  const LoginChallengeResponse(this.answer, {this.sessionId});
 
   final String answer;
+
+  /// The session the answer must be posted in.
+  ///
+  /// The session the challenge was fetched in, carried back so the answer is
+  /// judged against the challenge the student actually read. Null when the
+  /// challenge did not name a session.
+  final String? sessionId;
 }
 
 /// One page of basket inventory.
@@ -256,14 +284,34 @@ class BookableMenus {
 ///  - perform login as one atomic sequence (GET page -> GET challenge -> answer
 ///    -> POST) because the challenge binds to the session at fetch time;
 ///  - never emit option or hall identifiers the live page did not offer.
+///
+/// ## The challenge and the session
+///
+/// The CAPTCHA answer is judged against the **session** the image was fetched
+/// in, and the portal mints a new `ASP.NET_SessionId` every time it renders
+/// the login page. So:
+///
+///  - [beginLogin] must fetch the challenge in the session it names, and
+///    return that session id with it;
+///  - [completeLogin] must post the answer in the session the response names,
+///    restoring it if something has moved it.
+///
+/// Verified live 2026-10-21 (F77).
 abstract class PortalClient {
   // --- Authentication ---
 
   /// Begins a login and returns a challenge when the portal demands one.
+  ///
+  /// The returned challenge names the session it is bound to, and that
+  /// session is the one the answer has to be posted in.
   Future<LoginChallenge?> beginLogin(String username);
 
   /// Completes a login. [challenge] is the response to [beginLogin]'s challenge,
   /// if one was issued.
+  ///
+  /// The answer is posted in the session [LoginChallengeResponse.sessionId]
+  /// names, so a challenge the student is answering survives anything that
+  /// happened in between.
   Future<Session> completeLogin({
     required String username,
     required String password,

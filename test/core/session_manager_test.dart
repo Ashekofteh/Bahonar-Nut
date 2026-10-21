@@ -63,6 +63,20 @@ class FakeSolver implements ChallengeSolver {
 }
 
 /// A [PortalClient] that records calls and can be scripted to fail.
+///
+/// ## The challenge is bound to a session
+///
+/// This fake models what the live portal actually does, because the real one
+/// does it and the difference is invisible otherwise:
+///
+///   * each challenge is issued against a **session id**;
+///   * an answer is only accepted when it is posted **in that session**.
+///
+/// A fake that accepts any answer in any session cannot catch the bug where
+/// the student's correct digits are refused, because there is no way for the
+/// fake to be wrong. Verified live 2026-10-21: a request between the image
+/// and the answer rotates the portal's session, and the answer is then
+/// refused — restoring the session id makes it accepted again.
 class FakePortalClient extends stubs.FakePortalClient {
   int beginLoginCount = 0;
   int completeLoginCount = 0;
@@ -89,16 +103,42 @@ class FakePortalClient extends stubs.FakePortalClient {
   /// Delay applied to [completeLogin], for concurrency tests.
   Duration loginDelay = Duration.zero;
 
+  /// The session the outstanding challenge is bound to.
+  ///
+  /// Null when no challenge is outstanding. A new challenge replaces it,
+  /// which is what the portal does — the old one is dead.
+  String? _challengeSession;
+
+  /// The session the current account's requests are in.
+  ///
+  /// Rotated by [rotateSession], the way the portal mints a new
+  /// `ASP.NET_SessionId` every time it renders the login page.
+  String _currentSession = 'session-1';
+
+  /// The session an answer was posted in, for assertions.
+  String? answerPostedInSession;
+
+  /// Simulates the portal rendering the login page: a new session id.
+  void rotateSession() => _currentSession = 'session-${_rotateCount++}';
+  int _rotateCount = 1;
+
   @override
   Future<LoginChallenge?> beginLogin(String username) async {
     beginLoginCount++;
     if (unreachable) {
       throw const PortalUnreachableException('connection refused');
     }
-    return issueChallenge
-        ? LoginChallenge(
-            imageBytes: Uint8List.fromList([1, 2, 3]), kind: ChallengeKind.digits4)
-        : null;
+    if (!issueChallenge) {
+      _challengeSession = null;
+      return null;
+    }
+    // The challenge is bound to the session that is current right now.
+    _challengeSession = _currentSession;
+    return LoginChallenge(
+      imageBytes: Uint8List.fromList([1, 2, 3]),
+      kind: ChallengeKind.digits4,
+      sessionId: _currentSession,
+    );
   }
 
   @override
@@ -115,6 +155,18 @@ class FakePortalClient extends stubs.FakePortalClient {
     if (rejectCredentials) {
       throw const LoginRejectedException('نام کاربری یا گذرواژه اشتباه است');
     }
+
+    if (challenge != null) {
+      answerPostedInSession = challenge.sessionId;
+      // The portal judges the answer against the session the challenge was
+      // issued in. An answer posted in a different session is wrong, however
+      // correct the digits are.
+      if (_challengeSession != null &&
+          challenge.sessionId != _challengeSession) {
+        throw const LoginRejectedException('کد امنیتی صحیح نمی باشد');
+      }
+    }
+
     return Session(
       account: username,
       cookies: {'ASP.NET_SessionId': 'sid-$username'},
@@ -399,22 +451,163 @@ void main() {
           'a1', const Credentials(studentId: 'x', password: 'pw'));
 
       final manager = buildManager(client: client, store: store, solver: solver);
+
+      // The solver declines, so the student is asked.
+      final asked = await manager.ensureSession('a1');
+      expect(asked, isA<SessionNeedsCaptcha>());
+
       final result = await manager.loginWithCaptcha('a1', '9876');
 
       expect(result, isA<SessionReady>());
-      expect(solver.solveCount, 0,
+      expect(solver.solveCount, 1,
           reason: 'the solver is not consulted for a typed answer');
+    });
+
+    test('a typed answer is posted against the challenge the student read',
+        () async {
+      // The portal judges the answer against the session the image was
+      // fetched in, and a **new** challenge would rotate that session and
+      // replace the challenge — so the digits the student read would be
+      // judged against a challenge that is not theirs. This is the bug: every
+      // correct answer was refused.
+      solver.declines = true;
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+      await manager.ensureSession('a1');
+      final beginLoginsBefore = client.beginLoginCount;
+
+      final result = await manager.loginWithCaptcha('a1', '9876');
+
+      expect(result, isA<SessionReady>());
+      expect(client.beginLoginCount, beginLoginsBefore,
+          reason: 'the challenge must not be fetched again — a new fetch '
+              'rotates the session and replaces the challenge');
+      expect(client.answerPostedInSession, 'session-1',
+          reason: 'the answer is posted in the session the image came from');
+    });
+
+    test("a correct answer survives a read that happens meanwhile", () async {
+      // The app reads the portal on its own — a hunt's pre-flight, a
+      // reminder's digest — and the student may be reading the code at that
+      // moment. The portal mints a new session whenever it renders the login
+      // page, so the read would otherwise leave the answer judged against a
+      // session that no longer holds the challenge.
+      solver.declines = true;
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+      await manager.ensureSession('a1');
+
+      // Something else reads the portal, and the session moves.
+      client.rotateSession();
+
+      final result = await manager.loginWithCaptcha('a1', '9876');
+
+      expect(result, isA<SessionReady>());
+      expect(client.answerPostedInSession, 'session-1',
+          reason: 'the answer goes back to the session it was read in');
+    });
+
+    test('a typed answer with no challenge outstanding asks again', () async {
+      // The student typed digits for an image the app no longer holds — the
+      // app restarted, say. The digits cannot be judged against a challenge
+      // that is gone, and blaming them for a wrong code would be the app's
+      // bookkeeping being reported as the student's mistake.
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+      final result = await manager.loginWithCaptcha('a1', '9876');
+
+      expect(result, isA<SessionNeedsCaptcha>());
+      expect(client.completeLoginCount, 0,
+          reason: 'there is no challenge to answer, so nothing is posted');
+    });
+
+    test('a read that needs a session carries the challenge out', () async {
+      // The student must be asked, so the challenge has to travel with the
+      // failure. A blind cast to `SessionUnavailable` throws a **type error**
+      // instead, and the student sees an English Dart error rather than the
+      // CAPTCHA dialog. This was thrown on the device and by no test.
+      solver.declines = true;
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+
+      await expectLater(
+        manager.withSession('a1', (session) async => 'read'),
+        throwsA(
+          isA<SessionUnavailableException>()
+              .having((e) => e.needsCaptcha, 'needsCaptcha', isNotNull),
+        ),
+        reason: 'the challenge must reach the UI, not a type error',
+      );
+    });
+
+    test('a bounced read that needs a session carries the challenge out',
+        () async {
+      // The retry path — a session the portal rejected, then a fresh login
+      // that needs the student — must carry the challenge too. It is a
+      // different code path from the first attempt, and it was the one that
+      // threw a type error on the device.
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+
+      // The session is established, and the read is refused: the portal
+      // expired it. The solver declines from here on, so the retry needs the
+      // student.
+      await expectLater(
+        manager.withSession('a1', (session) async {
+          solver.declines = true;
+          throw const LoginRejectedException('نشست منقضی شده است.');
+        }),
+        throwsA(
+          isA<SessionUnavailableException>()
+              .having((e) => e.needsCaptcha, 'needsCaptcha', isNotNull),
+        ),
+        reason: 'the challenge must reach the UI on the retry path too, not '
+            'a type error',
+      );
+    });
+
+    test('a top-up that needs a session carries the challenge out', () async {
+      // The top-up's cookies come from a session too, so this is a third
+      // site where a blind cast would throw a type error instead of asking
+      // the student.
+      solver.declines = true;
+      await store.writeCredentials(
+          'a1', const Credentials(studentId: 'x', password: 'pw'));
+
+      final manager = buildManager(client: client, store: store, solver: solver);
+
+      await expectLater(
+        manager.cookiesFor('a1'),
+        throwsA(
+          isA<SessionUnavailableException>()
+              .having((e) => e.needsCaptcha, 'needsCaptcha', isNotNull),
+        ),
+        reason: 'the challenge must reach the UI here too, not a type error',
+      );
     });
 
     test('a refused typed answer brings a fresh challenge', () async {
       // The portal rotates the challenge when it refuses, so the image the
       // student answered is dead. Showing it again would invite the same
       // wrong answer.
+      solver.declines = true;
       client.rejectCaptcha = true;
       await store.writeCredentials(
           'a1', const Credentials(studentId: 'x', password: 'pw'));
 
       final manager = buildManager(client: client, store: store, solver: solver);
+      await manager.ensureSession('a1');
+
       final result = await manager.loginWithCaptcha('a1', '0000');
 
       expect(result, isA<SessionNeedsCaptcha>());
@@ -422,6 +615,8 @@ void main() {
       expect(challenge.previousAttempts, 1,
           reason: 'the UI says the code was refused, and shows a new image');
       expect(challenge.imageBytes, isNotEmpty);
+      expect(challenge.sessionId, isNotNull,
+          reason: 'the fresh challenge names the session it is bound to');
     });
 
     test('a typed answer with no credentials -> noCredentials', () async {

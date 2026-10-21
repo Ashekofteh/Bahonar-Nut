@@ -2330,3 +2330,394 @@ change its answer — it changed the question, and the new answer was right.
 regression, measure the server's clock before touching the code. The
 device's clock and the portal's clock differ by hours, and only the
 portal's is authoritative.
+
+## 2026-10-21 — Session 28: phase 10, the hardening pass
+
+### F70 — The request budget counted polls, and a poll is not a request
+
+The project's hard rule is a per-account request budget: the last line of
+defence against a ban, below the interval and the jitter. It counted
+**polls** — and a poll is one *or two* requests.
+
+| Operation | Requests |
+|---|---|
+| `fetchBasket` | GET + a date-filter POST when the page's default date is not the wanted one |
+| `fetchReservations` | GET + a next-week POST |
+| a successful login | the POST + the redirect hop |
+
+So a budget of 400 polls was really a budget of 800 requests: the backstop
+that exists to prevent a ban was letting through **twice** the traffic it
+was written to allow. And the reads that are not part of a hunt — the
+manual refresh, the sync, the top-up — were not counted at all.
+
+The count now happens in the transport, which is the only place that knows
+the truth. It counts the redirect hops too (the portal sees them) and the
+failed requests too (a timeout reached the portal and was answered late).
+
+The count is per account and per **rolling** window: the window opens with
+the account's first request, not on the wall-clock hour, so a burst that
+straddles the boundary cannot get two allowances. The **total** is separate
+and monotonic, because a run's budget must not be handed a fresh allowance
+when the clock moves.
+
+### F71 — A reminder was dropped silently whenever the app was not running
+
+The alarm fires when the app may not be running, and the digest is composed
+in Dart from the local meal mirror. The receiver handed the payload over a
+method channel — and the channel is a static field the **activity**
+populates. So with a dead process the call was a no-op, the alarm was
+consumed, and the reminder was **silently dropped**.
+
+That is not cosmetic: the reminder exists to protect a cutoff that does not
+wait (the lunch is collectable only until 15:30), so a dropped reminder
+means a meal that was paid for and never eaten, and the student never
+learned anything had gone wrong.
+
+The native side now **records the delivery** before handing it over, in the
+same shared preferences the Dart side reads. The Dart side picks it up when
+it next runs, delivers it, and clears it — only what was actually
+delivered, so a failure leaves the reminder owed rather than losing it.
+
+The alternative was a Flutter engine inside the broadcast receiver, which
+would deliver at the exact minute even with the app killed. It is also a
+much larger machine. The record keeps the promise and is honest about what
+it is: the digest arrives when the student next opens the app, rather than
+never.
+
+The receiver's own comment claimed "the Dart side catches the reminder up
+on the next launch". That was the intent, and it is now true.
+
+### F72 — A network read in Doze does not fail. It hangs.
+
+Measured on the emulator, in deep Doze (`mState=IDLE`), with the app killed:
+
+```
+UID=10194 state={procState=TOP} blocked_state={blocked=DOZE, ...}
+```
+
+The app's network is **blocked**. The socket does not error — it waits for
+the system to open a maintenance window, which can be minutes away.
+
+The catch-up worked, but it took **ten seconds**, and the digest owed
+alongside the nudge was stuck behind the nudge's blocked read the whole
+time. The student opened the app and nothing happened for as long as the
+system cared to wait.
+
+Two fixes, both about the same thing: **a delivery must not be held hostage
+by a request that cannot be made.**
+
+  * The **digests go first**. They come from the local mirror, so they need
+    no network. The nudge asks what the account does *not* hold, and only a
+    live read can answer that — so it is the one that waits.
+  * The nudge's read is **bounded** (20s, under the transport's 30s), so a
+    blocked read is reported as a failure rather than waited on. A failure
+    is not a lost delivery: the digest names the accounts it could not
+    check.
+
+### F73 — The exact-alarm permission is declared but never asked for
+
+`SCHEDULE_EXACT_ALARM` and `USE_EXACT_ALARM` are both declared in the
+manifest. `USE_EXACT_ALARM` is the auto-granted variant, reserved for
+alarm-clock apps; Play policy rejects it elsewhere. Declaring it makes
+`canScheduleExactAlarms()` always true — so the `setWindow` fallback in
+`AlarmScheduler` is dead code, and the user-grant flow never runs.
+
+The Dart side never calls `canScheduleExactAlarms()` or
+`requestExactAlarmPermission()` outside the bridge, and the reminders
+screen states no permission situation. So on Android 12+ the exact-alarm
+grant is never solicited, and on Android 13+ `POST_NOTIFICATIONS` may never
+be obtained — so the reminders may never post at all.
+
+### F74 — There is no battery-optimisation exemption anywhere
+
+`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`,
+`isIgnoringBatteryOptimizations` and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`
+appear **zero** times in the repository. The manifest does not declare the
+permission. This is a named mitigation for R4 ("Doze exemption") that does
+not exist.
+
+The emulator shows the consequence precisely: in deep Doze the app's
+network is blocked, and the app is not on the whitelist.
+
+### F75 — The hunt's foreground service has no worker in it
+
+`HuntService` starts, posts its notification, and then calls
+`notifyHuntRequested` — which reaches a **null** channel when the process
+was dead, because the channel is the activity's. The hunt itself only
+exists in-process; the service is a process-keeper with no worker in it.
+
+The same null-channel bug silently drops reminder deliveries and the
+reboot re-arming.
+
+The **reboot** path is broken the same way, and worse: `BootReceiver` fires
+at boot, when the process is *by definition* dead, so the signal could
+never arrive even in principle. The receiver exists and is correctly
+declared, and it cannot re-arm anything.
+
+### F76 — The hunt's configuration has an `enabled` flag with no consumer
+
+`HuntConfig.enabled` is decoded, persisted and never read. The flag does
+nothing — a hunt the student switched off still runs.
+
+### F77 — The CAPTCHA answer is bound to the **session id**, not to the image
+
+**Verified live 2026-10-21, against `nut.uk.ac.ir`, with `tool/_captcha_binding_probe.dart`,
+`tool/_session_rotation_probe.dart` and `tool/_session_restore_probe.dart`.**
+
+The codebase says the answer is "bound to the session at image-fetch time", and reads
+that as *"re-fetching the image rotates the answer"*. The live portal is stricter
+than that, and the difference is the whole bug:
+
+| # | What happens between the image and the answer | Result |
+|---|---|---|
+| 1 | nothing (fetch → solve → POST) | **LOGIN OK** |
+| 2 | a second image is fetched | **REFUSED** — `کد امنیتی صحیح نمی باشد` |
+| 3 | nothing, but 8s pass while the student reads | **LOGIN OK** |
+| 4 | a plain GET of `/Login.aspx` | **REFUSED** |
+| 6 | a plain GET of `/` (the real login page) | **REFUSED** |
+| 7 | a plain GET of `/Reservation/Reservation.aspx` | **REFUSED** |
+| 8 | a plain GET of `/UserControls/Captcha.ashx` | **REFUSED** |
+| 9 | the session id changes across a read | **CHANGED** |
+| 10 | a request for a *different* account in between | **LOGIN OK** (per-account isolation holds) |
+
+**The mechanism.** The raw `Set-Cookie` headers say it:
+
+```
+GET /                      -> ASP.NET_SessionId = p2f4vumw21etpvqidoaqcu5v
+GET /UserControls/Captcha.ashx  -> (no Set-Cookie)
+GET /                      -> ASP.NET_SessionId = tokspaazbfptzxo13sw3cimn
+```
+
+**Every page GET mints a new `ASP.NET_SessionId`.** The CAPTCHA endpoint sets no
+cookie of its own, so the challenge lives in the session that was current when the
+image was fetched. Any other request replaces that session, and the answer is
+judged against a session that no longer holds the challenge.
+
+**The consequence for the app.** The assumption in `session.dart`, `portal.dart`,
+`captcha_dialog.dart` and `serialised_portal_client.dart` — *"neither call
+refetches it, so a read in between is safe"* — is **false**. A read between the
+image and the answer breaks the login. The typed-answer path was already broken by
+its own extra `beginLogin` (which fetches a second image *and* rotates the session
+id), but the deeper problem is that **any** read breaks it.
+
+**The fix is to carry the session id with the challenge.** Restoring the original
+`ASP.NET_SessionId` before the POST makes the answer valid again, even after
+intervening reads:
+
+| # | What happens | Result |
+|---|---|---|
+| B | a read, then the original session id is restored | **LOGIN OK** |
+| C | a read, a restore, and 8s of waiting | **LOGIN OK** |
+| D | **two** reads, then the original session id is restored | **LOGIN OK** |
+| E | a read, then **only** the session id is restored (not the other cookies) | **LOGIN OK** |
+
+So the answer is bound to the session id alone. The `keyId` and `__AntiXsrfToken`
+cookies do not need to be restored with it.
+
+**Why this is the right shape of fix.** The student's reading time is unbounded and
+the app is a background process that reads the portal on its own. Holding the
+session still — forbidding reads while a challenge is outstanding — would mean
+either blocking the app for as long as the student takes, or letting the answer
+expire anyway. Carrying the session id with the challenge is the only approach
+that makes the wait *unbounded*, which is what the feature needs to be usable.
+
+**The challenge does not expire quickly.** Measured with
+`tool/_challenge_lifetime_probe.dart`: the answer was still accepted after
+**60s, 180s and 420s** of waiting. So the student may take as long as they
+like to read four digits, and the fix has to make that wait safe rather than
+short.
+
+**The session id is stable once the account is authenticated.** With
+`tool/_authenticated_rotation_probe.dart`, the `ASP.NET_SessionId` did **not**
+change across an authenticated reservation read, a balance read, a second
+reservation read, or a raw authenticated GET. The rotation is a property of the
+**login page**, not of every request — the portal mints a new session when it
+renders the login form, because that is where it decides "this is a new
+visitor". So the blast radius is the login attempt, and the fix belongs there.
+
+**The viewstate does not have to travel with the answer.** With
+`tool/_challenge_interleave_probe.dart`, a *second* login happened while the
+first challenge was outstanding, and the answer was then posted with **either**
+the original viewstate **or** the new one — both logged in. The session id is
+what matters.
+
+**The fix, therefore:**
+
+1. The **challenge carries the session id** it is bound to.
+2. The **answer carries it back**, so the POST is made in the session that
+   holds the challenge.
+3. The client **restores that session id** before the POST, so an interleaved
+   read (a hunt's preflight, a reminder digest) cannot break the answer.
+4. The typed-answer path **does not fetch a new challenge** — that fetch is
+   what moved the session in the first place, and it cost two extra requests
+   for every attempt.
+
+Steps 1–4 make the student's wait unbounded and their read-time safe.
+
+**A second image fetch replaces the challenge.** With `tool/_double_fetch_probe.dart`,
+two fetches in one session, then posting the answer for the **first** image was
+**REFUSED**, and posting the answer for the **second** image **LOGIN OK**. So the
+session holds one challenge, and it is the one from the most recent fetch — which
+is exactly why the typed-answer path must not fetch a new image before posting.
+
+**The answer is judged against the session, and the challenge lives in it.** A
+challenge fetched in session S1 is still in S1, even after the portal mints S2 and
+S3 — which is why restoring S1 recovers the answer after any number of
+intervening reads.
+
+## 2026-10-22 — Session 29: the typed CAPTCHA, verified on the device
+
+### F78 — The account card reported the **first** sync's error, not the failure that actually happened
+
+**Found on the device 2026-10-21, on the screen the feature owns.**
+
+The student typed a code, the portal refused the login, and the account card said
+«کد امنیتی به‌صورت خودکار خوانده نشد.» — *the code could not be read
+automatically.* That sentence is the **first** sync's error: the app's own reader
+declined the CAPTCHA and the app asked the student to take over. It describes a
+step the student had already passed.
+
+`refreshFromPortal` looped over the accounts, and for each one took the result of
+the *first* `_sync.sync(accountId)`. The typed answer was posted by a second,
+deeper call, and **its** outcome — the refusal — never reached the card. The
+student was told the app could not read a code, when the truth was that the
+portal had refused something the student had typed.
+
+The consequence is worse than a wrong message: the reason was thrown away, so
+there was nothing the student could act on. A wrong password and an unreachable
+portal both produced the same sentence about a code the student could not see.
+
+**The fix** is that the read reports the **last** outcome, and the refusal
+reason is carried through. `refreshFromPortal` now delegates to `_readAccount`,
+which loops (see F79) and returns the outcome of the final attempt, and
+`_askForCaptcha` returns a `_CaptchaOutcome` that distinguishes three cases:
+
+| Case | What the student sees |
+|---|---|
+| the student cancelled | the first error — «the code was never read» is truthful here |
+| the portal refused, and said why | **the portal's own reason**, e.g. «نام کاربری یا گذرواژه اشتباه است» |
+| the answer was accepted | nothing; the read goes through |
+
+The portal's two refusals are different problems with different fixes — see F80.
+
+### F79 — A read that was bounced after the answer left the student at a dead end
+
+Found on the device, same session as F78.
+
+The portal expires a session and answers the next read with the login page. The
+app retries with a fresh login — and a fresh login needs a CAPTCHA the student
+was **never asked for**. The retry therefore ended in a challenge the app had no
+way to present, and the student saw an error instead of a question.
+
+Before the fix, the loop in `refreshFromPortal` asked once and gave up. After the
+student's answer was accepted, a bounced read produced a second challenge that
+silently vanished.
+
+**The fix** is that `_readAccount` loops: while the result says a challenge is
+needed, the student is asked, and the read is retried. The student is asked
+**again** with a **new** code, because the challenge they answered is spent.
+
+### F80 — The portal's wrong-code label is «کد امنیتی صحیح نمی باشد»
+
+**Verified live 2026-10-21, with `tool/_login_refusal_probe.dart`.**
+
+The app classifies a refusal as a CAPTCHA rejection by looking for the phrase
+«کد امنیتی» in the message (`SessionManager._isCaptchaRejection`). The portal
+renders, in `lblLoginError`:
+
+| Cause | The label the portal renders |
+|---|---|
+| a wrong code | «کد امنیتی صحیح نمی باشد» |
+| a wrong password | «نام کاربری یا گذرواژه اشتباه است» |
+
+Both were confirmed by posting the wrong thing deliberately. The first contains
+«کد امنیتی», so the app classifies it as a code the student got wrong and asks
+them again. The second does **not**, so the app classifies it as a credential
+failure and does not re-ask — which is right, because a wrong password is not
+something another CAPTCHA will fix.
+
+The match is on the phrase rather than the whole sentence, so a portal that
+rewords the label is still understood.
+
+### F81 — The CAPTCHA is at `/UserControls/Captcha.ashx`, and `/Captcha.aspx` is not it
+
+`/Captcha.aspx` returns a **3750-byte non-image**. The solver decodes nothing and
+declines with confidence `0.0000` — indistinguishable, from the outside, from a
+solver failure on a real image. Three diagnostic probes were written against the
+wrong path and produced a confident, wrong conclusion: that the solver had a 0%
+read rate.
+
+The real endpoint serves a ~3400-byte GIF, and the solver reads it. The app was
+always using the right path (`_Paths.captcha`); only the probes were wrong. The
+lesson worth keeping: **a decline with zero confidence is a path problem until
+proven otherwise** — check the payload's size and magic bytes before blaming the
+reader.
+
+### F82 — The account was never read on the device, because the password the automation typed was wrong
+
+**Found 2026-10-22, during the device verification of the typed-CAPTCHA path.**
+
+The device refused every typed answer. The cause was not the app: `adb shell
+input text` mangles the password. The real password is ten characters, and the
+automation produced **eleven**, because the `%%s` escape for `@` also typed a
+space.
+
+The reliable way to type an `@` on the emulator is the key event:
+`adb shell input keyevent 77` (`KEYCODE_AT`), followed by
+`adb shell input text` with the rest of the password.
+
+The consequence was a real diagnostic dead end: the app reported a refusal, the
+refusal was a **wrong password**, and the wrong password means no second CAPTCHA
+dialog — so the app behaved correctly and the screen still told the student
+nothing they could act on. That is exactly the defect F78 fixes, and it is why
+the reason now reaches the card.
+
+**The general lesson:** a refusal that carries no reason is a refusal you cannot
+classify, and a symptom you cannot classify is usually the automation, not the
+app. Verify the *input* before the *logic*.
+
+### The device verification, in full
+
+The typed-answer path was verified on the emulator (emulator-5554, API 35)
+against the live portal, with a real account, on the screen the feature owns.
+
+**The student is asked.** With a build whose solver declines, the refresh raised
+the dialog, and it said what it needed to say:
+
+```
+کد امنیتی
+برنامه نتوانست کد را بخواند. لطفاً عدد داخل تصویر را وارد کنید.
+[image]  کد چهار رقمی  [9387]
+ادامه    انصراف
+```
+
+**The answer the student typed was accepted.** The code in the image was `9387`;
+it was typed into the field and `ادامه` was tapped. The dialog closed, and the
+account card rendered:
+
+```
+401405035
+401405035 • نام پروفایل در دست...
+اعتبار: ۷,۵۰۰ تومان
+```
+
+No error, and no second dialog — so the portal accepted the answer, the login
+succeeded, and the read went through.
+
+**The real build still works.** The declining-solver patch was reverted, the APK
+was rebuilt and reinstalled, the stored session was cleared, and the refresh was
+repeated. The solver read the code, the login succeeded without asking, and the
+card rendered the same balance. The fallback is a fallback, not the only path.
+
+**How the session was cleared.** The session is cached on disk
+(`bahonar_nut.store.xml`, key `session.<account id>`), and a cached session
+means the refresh reuses it and never logs in — so the CAPTCHA path is not
+reachable by refreshing. The key was removed from the store, the app restarted,
+and the refresh forced a fresh login. That is the state the app reaches on its
+own after a session expires, so it is a legitimate state to test in.
+
+**The lesson from the automation.** The first attempt at this verification was
+spent on a bug in the *test*, not the app: `adb shell input text` typed eleven
+characters where the password has ten, because the `%%s` escape for `@` also
+typed a space. The app's refusal was correct, and the screen was still wrong
+about it — which is F78, found the hard way.

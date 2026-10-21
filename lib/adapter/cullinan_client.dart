@@ -107,10 +107,10 @@ class CullinanPortalClient implements PortalClient {
 
   /// The pending login state, keyed by account.
   ///
-  /// The portal binds a CAPTCHA answer to the session at image-fetch time, so
-  /// the viewstate captured with the challenge must be the one submitted with
-  /// the answer. Keeping them together per account is what makes the login
-  /// sequence atomic.
+  /// The portal binds a CAPTCHA answer to the **session** the image was
+  /// fetched in, so the viewstate and the session id captured with the
+  /// challenge must be the ones submitted with the answer. Keeping them
+  /// together per account is what makes the login sequence atomic.
   final Map<AccountId, _PendingLogin> _pendingLogins = {};
 
   // ---------------------------------------------------------------- auth
@@ -121,17 +121,30 @@ class CullinanPortalClient implements PortalClient {
     final response = await transport.get(accountId, _Paths.login);
 
     // The challenge must be fetched in the same session, immediately before the
-    // POST: re-fetching the page in between rotates the expected answer.
+    // POST: the session holds one challenge, so a second fetch would replace
+    // the one the student is about to read.
     final captchaBytes = await transport.getBytes(accountId, _Paths.captcha);
+
+    // The session id the challenge is bound to.
+    //
+    // The portal mints a new `ASP.NET_SessionId` every time it renders the
+    // login page, and the CAPTCHA endpoint sets no cookie of its own — so the
+    // challenge lives in the session that was current when the image was
+    // fetched. Any other request in between replaces that session, and the
+    // portal then refuses a correct answer. Verified live 2026-10-21.
+    final sessionId =
+        transport.jars.jarFor(accountId).cookies['ASP.NET_SessionId'];
 
     _pendingLogins[accountId] = _PendingLogin(
       viewState: hiddenFieldValue(response.body, '__VIEWSTATE'),
       viewStateGenerator: hiddenFieldValue(response.body, '__VIEWSTATEGENERATOR'),
+      sessionId: sessionId,
     );
 
     return LoginChallenge(
       imageBytes: captchaBytes,
       kind: ChallengeKind.digits4,
+      sessionId: sessionId,
     );
   }
 
@@ -143,6 +156,20 @@ class CullinanPortalClient implements PortalClient {
   }) async {
     final accountId = username;
     final pending = _pendingLogins.remove(accountId);
+
+    // The answer must be posted in the session that holds the challenge.
+    //
+    // The student may have taken minutes to read four digits, and the app may
+    // have read the portal in the meantime — and a read of the login page
+    // replaces the session the challenge lives in. So the session the answer
+    // names is restored before the POST, and the answer is judged against the
+    // challenge the student actually read.
+    final sessionId = challenge?.sessionId ?? pending?.sessionId;
+    if (sessionId != null) {
+      transport.jars
+          .jarFor(accountId)
+          .setCookie('ASP.NET_SessionId=$sessionId');
+    }
 
     final body = <String, String>{
       // The viewstate must accompany the answer: it is what ties the POST to
@@ -1329,8 +1356,15 @@ class _PendingLogin {
   const _PendingLogin({
     required this.viewState,
     required this.viewStateGenerator,
+    this.sessionId,
   });
 
   final String viewState;
   final String viewStateGenerator;
+
+  /// The session the challenge was fetched in.
+  ///
+  /// The challenge lives in this session, so the answer has to be posted in
+  /// it — even if something else has read the login page since.
+  final String? sessionId;
 }
