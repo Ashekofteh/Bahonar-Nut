@@ -31,6 +31,19 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | 8 | Reminders digest — offline mirror, ledger reconciliation | `done` | Phase 3, 7 |
 | 9 | Reminders platform — scheduler, notifications, screens | `done` | Phase 5, 8 |
 | 10 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 4, 9 |
+| 11 | Reservations — the table, the booking sheet, the cancel | `done` | Phase 2, 5 |
+| 12 | Top-up — the ePay flow, the bank gateway, the payment list | `done` | Phase 2, 5 |
+
+**The five portal workflows, all in the app** (the app's purpose is that the
+student never has to open the web portal):
+
+| Workflow | Where it lives | State |
+|---|---|---|
+| Account top-up / balance recharge | the accounts screen → the top-up sheet → the bank's gateway | done, live |
+| Meal booking / reservation | the reservations table → the booking sheet | done, live |
+| Viewing active reservations | the reservations table, and the dashboard | done, live |
+| Locked / past-cutoff days | shown as locked on the table, from the portal's clock | done, live |
+| Cancelling an eligible reservation | the row's cancel button | done, live |
 
 **Phase 5 progress:** the Persian RTL app shell, the accounts screen (with the
 alias chain), the reservations screen, the finance dashboard (multi-select
@@ -39,6 +52,18 @@ Android 14 emulator** — the reservations screen shows live portal data, and a
 reminder alarm fires, posts its Persian digest and re-arms itself. The
 foreground service, the exact alarms, the Android Keystore-backed stores and
 the real portal wiring are all done and on the device.
+
+**Phases 11 and 12 progress:** the reservations screen is now a **table** of
+the days that can still be acted on — the held meals with their prices in
+Toman, the locked days shown as locked, and a tap on a bookable row opening
+a booking sheet. The full **book → cancel → re-book cycle** is proven against
+the live portal: the reservations went 7 → 6 → 7, the credit 75,000 →
+225,000 → 75,000 Rial, and the transactions 50 → 51 → 52, with the app's
+screen and the portal agreeing at every step. The **top-up** is in the app
+too: the amount and the bank on a sheet, the payment handed to the bank's own
+gateway in a WebView, and the settlement read from the portal's payment list
+rather than from the balance (a top-up is credited asynchronously, so the
+balance lies for a while).
 
 **Phase 2 progress:** the full `PortalClient` is implemented and live-proven.
 The **write** paths have been exercised against the live portal: a weekly
