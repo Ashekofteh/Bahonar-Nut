@@ -30,7 +30,7 @@ auto-reserve ("sniping") — optimized for Persian RTL and minimal mobile resour
 | 7 | Reminders domain — alias chain, config, `composeNotification` | `done` | Phase 1 |
 | 8 | Reminders digest — offline mirror, ledger reconciliation | `done` | Phase 3, 7 |
 | 9 | Reminders platform — scheduler, notifications, screens | `done` | Phase 5, 8 |
-| 10 | Hardening — battery profiling, Doze tests, OCR fallback | `pending` | Phase 4, 9 |
+| 10 | Hardening — battery profiling, Doze tests, OCR fallback | `in progress` | Phase 4, 9 |
 | 11 | Reservations — the table, the booking sheet, the cancel | `done` | Phase 2, 5 |
 | 12 | Top-up — the ePay flow, the bank gateway, the payment list | `done` | Phase 2, 5 |
 
@@ -77,10 +77,19 @@ a fired alarm reaches the Dart side as its own method, and the delivery posts
 the digest and re-arms the slot. The digest is scoped to the day it fires
 for, and the mirror holds only the meals that are still ahead.
 
-**Still to come in phase 10:** battery profiling, Doze and OEM-killer
-behaviour under a long hunt, a live read of the request budget against the
-portal, and the semi-automated CAPTCHA fallback (R8). Phase 6, the Windows
-shell, remains the one untouched platform — by design, it is a free-rider.
+**Phase 10 progress.** The **CAPTCHA fallback is done and verified on the
+device**: when the on-device solver declines, the student is asked to read the
+code, and the answer is accepted — proven live, with the code read off the
+image, typed, and the dashboard rendering the balance afterwards. The part that
+made it work is that the portal judges the answer against the **session** the
+image was fetched in, so the challenge now carries its session id and the answer
+is posted back in it. That is what makes the student's reading time safe, and
+what lets the app keep reading the portal while they read.
+
+**Still to come in phase 10:** battery profiling (the duty cycle and the radio
+wake-ups), Doze and OEM-killer behaviour under a long hunt, and a live read of
+the request budget against the portal. Phase 6, the Windows shell, remains the
+one untouched platform — by design, it is a free-rider.
 
 **Transport** (phase 1 remainder) is done: per-account cookie jars, Date-header
 capture, explicit redirect following, HTML parsing.

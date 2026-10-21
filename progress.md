@@ -1109,3 +1109,92 @@ The earlier device runs exercised the login, the balance and the hunt screen.
 be verified on a device and still be a screen no one has ever read — which is
 the most useful thing this session found, and it was found by reading the
 wiring rather than by looking for it.
+
+---
+
+## 2026-10-21 — Session 26: the top-up, mapped live
+
+The ePay flow was mapped against the live portal: the amount and the bank on a
+sheet, the payment handed to the bank's own gateway in a WebView, and the
+settlement read from the portal's **payment list** rather than from the balance
+— a top-up is credited asynchronously, so the balance lies for a while.
+
+**The top-up is in the app.**
+
+## 2026-10-21 — Session 27: the cycle, closed
+
+The full **book → cancel → re-book cycle** is proven against the live portal:
+the reservations went 7 → 6 → 7, the credit 75,000 → 225,000 → 75,000 Rial, and
+the transactions 50 → 51 → 52, with the app's screen and the portal agreeing at
+every step.
+
+## 2026-10-21 — Session 28: phase 10, the hardening pass
+
+Five defects found and fixed, each of which had been quietly wrong:
+
+- **The request budget counted polls, and a poll is not a request.** A poll is
+  one *or two* requests, so a budget of 400 polls was really 800 requests — the
+  backstop that exists to prevent a ban was letting through twice the traffic it
+  was written to allow. The count now happens in the transport, which is the
+  only place that knows the truth, and it counts the redirect hops and the
+  failed requests too.
+- **A reminder was dropped silently whenever the app was not running.** The
+  alarm fires when the app may not be running, and the delivery was handed over
+  a method channel the *activity* populates — so with a dead process the call
+  was a no-op and the reminder was lost. The native side now records the
+  delivery before handing it over.
+- **A network read in Doze does not fail. It hangs.** Measured in deep Doze with
+  the app killed: the socket waits for the system to open a maintenance window,
+  which can be minutes away. The digests go first — they need no network — and
+  the nudge's read is bounded.
+- **The exact-alarm permission is declared but never asked for** (F73), and
+  **there is no battery-optimisation exemption anywhere** (F74).
+- **The hunt's foreground service has no worker in it** (F75), and
+  **`HuntConfig.enabled` has no consumer** (F76) — the flag does nothing, so a
+  hunt the student switched off still runs.
+
+## 2026-10-22 — Session 29: the typed CAPTCHA, verified on the device
+
+The on-device solver reads the portal's 4-digit CAPTCHA well enough that the
+student is normally never asked. When it declines, the app now asks — and the
+device showed that the **fallback did not work**.
+
+**Why it failed was not obvious, and the app was the reason.** The account card
+reported the **first** sync's error — «کد امنیتی به‌صورت خودکار خوانده نشد.»,
+the code could not be read automatically — even though the student had already
+answered. The real refusal was thrown away, so there was nothing on screen the
+student could act on. A second defect sat behind it: a read that the portal
+bounced after the answer needed a fresh CAPTCHA that nobody asked the student
+for, so the retry ended in a dead end.
+
+**The part that made the typed answer work at all** is that the portal judges
+the answer against the **session** the image was fetched in, and it mints a new
+`ASP.NET_SessionId` every time it renders the login page. The challenge now
+carries its session id, and the answer is posted back in it. That is what makes
+the student's reading time safe, and what lets the app keep reading the portal
+while they read. (F77, verified live against the portal with a dozen probes.)
+
+**On the device, against the live portal:** the code was read off the image
+(`9387`), typed into the dialog, and **accepted** — the dialog closed and the
+card rendered «اعتبار: ۷,۵۰۰ تومان» with no error. The temporary build that
+forced the solver to decline was then reverted, the APK rebuilt and reinstalled,
+and the refresh repeated: the solver read the code, the login succeeded without
+asking, and the card rendered the same balance. **The fallback is a fallback,
+not the only path.**
+
+### The lesson from the automation
+
+The first attempt at this verification was spent on a bug in the *test*, not the
+app: `adb shell input text` typed eleven characters where the password has ten,
+because the `%%s` escape for `@` also typed a space. The app's refusal was
+correct, and the screen was still wrong about it — which is the defect this
+session fixed. **A refusal that carries no reason is a refusal you cannot
+classify, and a symptom you cannot classify is usually the automation, not the
+app.**
+
+### Testing approach
+
+**859 tests pass, analyzer clean.** Two new widget tests pin the two device
+defects, at the level the student sees them: the refusal's reason must reach
+the screen, and the stale first error must not; and a bounced read must ask the
+student again rather than dead-end. Both were checked to fail without the fix.
