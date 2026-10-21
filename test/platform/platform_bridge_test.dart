@@ -164,4 +164,40 @@ void main() {
           at.millisecondsSinceEpoch);
     });
   });
+
+  group('the pending deliveries', () {
+    test('the owed deliveries are read from the platform', () async {
+      // The receiver records a delivery when the alarm fires and the Dart
+      // side cannot be reached. The Dart side reads them back.
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        if (call.method == 'pendingDeliveries') {
+          return <String>['lunch', 'nudge'];
+        }
+        return null;
+      });
+
+      final pending =
+          await PlatformBridge(channel: channel).pendingDeliveries();
+      expect(pending, ['lunch', 'nudge']);
+    });
+
+    test('a delivery that is not owed reads as empty', () async {
+      final pending =
+          await PlatformBridge(channel: channel).pendingDeliveries();
+      expect(pending, isEmpty);
+    });
+
+    test('only the delivered payloads are cleared', () async {
+      // A live fire records the payload and hands it over in the same
+      // breath. The Dart side delivers it and clears **that** copy, so an
+      // older delivery of the same payload is not lost with it.
+      await PlatformBridge(channel: channel).clearPendingDeliveries(['lunch']);
+
+      final clear =
+          calls.firstWhere((c) => c.method == 'clearPendingDeliveries');
+      expect((clear.arguments as Map)['payloads'], ['lunch']);
+    });
+  });
 }

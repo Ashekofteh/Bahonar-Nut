@@ -13,15 +13,26 @@ import android.content.Intent
  *
  *  * A **reminder** alarm (`lunch`, `evening`) asks the Dart side to deliver
  *    a digest. The digest is composed in Dart, from the local meal mirror, so
- *    the receiver hands the payload to the engine and stops. If the engine is
- *    not running there is nothing to compose into, and the Dart side catches
- *    the reminder up on the next launch.
+ *    the receiver hands the payload to the engine and stops.
  *  * A **hunt** wake-up starts the hunt's foreground service, which keeps the
  *    process alive for the length of the hunt.
  *
  * Treating a reminder as a hunt wake-up would post the "monitoring the food
  * basket" notification and leave a foreground service running with no hunt
  * behind it — a stuck notification the user cannot clear.
+ *
+ * ## Why the payload is recorded before it is handed over
+ *
+ * The alarm fires when the app may not be running, and the digest lives in
+ * Dart. So the payload is written to [PendingDelivery] **first**, and only
+ * then handed to the Dart side.
+ *
+ * The order matters. Handing it over first would lose the delivery whenever
+ * the process was dead — the channel is a static field the activity
+ * populates, so with a dead process the call was a no-op and the reminder
+ * was dropped without a sound. Recording first means the delivery is owed
+ * either way: the Dart side delivers it now if it is alive, and the record
+ * is still there for it to pick up if it is not.
  */
 class ReminderAlarmReceiver : BroadcastReceiver() {
 
@@ -29,6 +40,9 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         val payload = intent.getStringExtra(AlarmScheduler.EXTRA_PAYLOAD)
 
         if (ReminderPayloads.isReminder(payload)) {
+            // Recorded first: the delivery is owed, and the record is what
+            // makes it owed even when the process is dead.
+            PendingDelivery.record(context, payload!!)
             PlatformChannelMessenger.notifyReminderFired(payload)
             return
         }

@@ -80,6 +80,36 @@ class PlatformBridge {
     await _call<void>('cancelAlarm', {'requestCode': requestCode});
   }
 
+  /// The reminder deliveries the app owes.
+  ///
+  /// A reminder alarm fires when the app may not be running, and the digest
+  /// is composed in Dart — so when the process was dead the alarm fired into
+  /// nothing and the reminder was lost without a sound. The native side
+  /// records the delivery instead, and the Dart side picks it up when it
+  /// next runs.
+  ///
+  /// This is the **visible catch-up** the risk register asks for: a delivery
+  /// that was owed is not forgotten, and the student learns about it.
+  Future<List<String>> pendingDeliveries() async {
+    final result = await _call<List<Object?>>('pendingDeliveries');
+    if (result == null) return const [];
+    return result.whereType<String>().toList();
+  }
+
+  /// Clears the owed deliveries, after they have been delivered.
+  ///
+  /// Cleared by the side that knows the outcome — the Dart side, once the
+  /// digest has actually been posted. Clearing it in the receiver would
+  /// forget a delivery that was handed over and then lost.
+  ///
+  /// Only the named payloads are cleared, and only their first occurrence: a
+  /// live fire records the payload and hands it to the Dart side in the same
+  /// breath, so the Dart side delivers it and clears that copy — leaving any
+  /// other owed delivery alone.
+  Future<void> clearPendingDeliveries(List<String> payloads) async {
+    await _call<void>('clearPendingDeliveries', {'payloads': payloads});
+  }
+
   /// Starts the hunt's foreground service.
   ///
   /// The service keeps the process alive for the length of the hunt, which a

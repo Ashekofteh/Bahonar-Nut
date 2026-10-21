@@ -101,6 +101,23 @@ class PlatformChannel(
 
                 "plainKeys" -> result.success(preferences.all.keys.toList())
 
+                // --- pending deliveries ---
+                // The deliveries the app owes, recorded by the alarm receiver
+                // when the process was dead and the Dart side could not be
+                // reached. The Dart side reads them, delivers them, and
+                // clears them.
+                "pendingDeliveries" -> result.success(
+                    PendingDelivery.read(context),
+                )
+
+                "clearPendingDeliveries" -> {
+                    PendingDelivery.remove(
+                        context,
+                        call.argument<List<String>>("payloads") ?: emptyList(),
+                    )
+                    result.success(null)
+                }
+
                 // --- notifications ---
                 "postNotification" -> {
                     notifier.post(

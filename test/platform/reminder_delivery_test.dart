@@ -420,4 +420,74 @@ void main() {
       expect(postedNotifications(), isEmpty);
     });
   });
+
+  group('the catch-up', () {
+    late LocalMealStore store;
+    late ReminderService service;
+    late ReminderDelivery delivery;
+
+    setUp(() {
+      store = LocalMealStore();
+      service = ReminderService(bridge: bridge, mealStore: store);
+      delivery = ReminderDelivery(
+        service: service,
+        accounts: [
+          SavedAccount(
+            id: 'a1',
+            studentId: '401405035',
+            alias: 'مقسمی',
+            addedAt: DateTime.utc(2026, 10, 20),
+          ),
+        ],
+        config: const ReminderConfig(accountIds: {'a1'}),
+      );
+    });
+
+    test('a delivery owed while the app was dead is delivered', () async {
+      // The alarm fired when the process was dead, so the digest was owed.
+      // The digest is composed in Dart, from the local mirror, and the
+      // mirror says there is a lunch today.
+      final now = DateTime.now();
+      final today = DateTime.utc(now.year, now.month, now.day);
+      store.put(StoredMeal(
+        accountId: 'a1',
+        date: today,
+        slot: MealSlot.lunch,
+        source: MealSource.weeklyReservation,
+        capturedAt: today,
+        dishName: 'چلو خورشت قیمه',
+      ));
+
+      final delivered = await delivery.deliverPending(['lunch']);
+
+      expect(delivered, ['lunch']);
+      final posted = postedNotifications();
+      expect(posted, hasLength(1));
+      expect(posted.single.$2, contains('چلو خورشت قیمه'));
+    });
+
+    test('nothing owed means nothing delivered', () async {
+      final delivered = await delivery.deliverPending([]);
+
+      expect(delivered, isEmpty);
+      expect(postedNotifications(), isEmpty);
+    });
+
+    test('a delivery that fails stays owed', () async {
+      // The record is cleared by the caller only for what was delivered, so
+      // a failure must not be reported as a delivery — otherwise the owed
+      // reminder is cleared and the student never learns about it.
+      final delivery = ReminderDelivery(
+        service: ReminderService(bridge: bridge, mealStore: store),
+        accounts: const [],
+        // No configuration: the delivery cannot compose anything, and the
+        // slot check rejects it.
+        config: null,
+      );
+
+      final delivered = await delivery.deliverPending(['lunch']);
+
+      expect(delivered, isEmpty);
+    });
+  });
 }

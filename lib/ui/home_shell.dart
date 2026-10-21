@@ -119,11 +119,17 @@ class _HomeShellState extends State<HomeShell> {
     // so "after" is the normal cold-start order. The callback covers the
     // second, and the check below covers the first.
     widget.state.onLoaded = () {
-      if (mounted) _armReminders();
+      if (mounted) {
+        _armReminders();
+        _deliverPending();
+      }
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (widget.state.isLoaded) _armReminders();
+      if (widget.state.isLoaded) {
+        _armReminders();
+        _deliverPending();
+      }
     });
   }
 
@@ -141,12 +147,62 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// Delivers the reminders that were owed while the app was not running.
+  ///
+  /// The alarm fires when the app may not be running, and the digest is
+  /// composed in Dart — so when the process was dead the alarm fired into
+  /// nothing and the reminder was lost without a sound. The native side
+  /// records the delivery, and this delivers it.
+  ///
+  /// It runs after the configuration is loaded, because the digest is
+  /// composed against the configuration: delivering against the *default*
+  /// configuration would name no accounts and say nothing, which is the same
+  /// silence the bug produced.
+  Future<void> _deliverPending() async {
+    final bridge = widget.services.bridge;
+    List<String> pending;
+    try {
+      pending = await bridge.pendingDeliveries();
+    } catch (_) {
+      return;
+    }
+    if (pending.isEmpty) return;
+
+    _delivery
+      ..config = widget.state.reminderConfig
+      ..accounts = widget.state.accounts;
+
+    final delivered = await _delivery.deliverPending(pending);
+
+    // Only what was actually delivered is cleared. A delivery that failed
+    // stays owed, so it is not lost by a transient failure.
+    if (delivered.isNotEmpty) {
+      try {
+        await bridge.clearPendingDeliveries(delivered);
+      } catch (_) {
+        // The record is cleared on the next successful delivery anyway: a
+        // duplicate digest is better than a lost one.
+      }
+    }
+  }
+
   /// Delivers a reminder whose alarm fired.
   Future<void> _onReminderFired(String? payload) async {
     _delivery
       ..config = widget.state.reminderConfig
       ..accounts = widget.state.accounts;
     await _delivery.handleFire(payload);
+
+    // The receiver records the payload before handing it over, so a live
+    // fire has already left a copy of it owed. That copy is cleared here:
+    // the digest has been delivered, and the next launch must not deliver it
+    // a second time.
+    if (payload == null) return;
+    try {
+      await widget.services.bridge.clearPendingDeliveries([payload]);
+    } catch (_) {
+      // A duplicate digest is better than a lost one.
+    }
   }
 
   /// Reads the menu's dishes and halls for the hunt screen.

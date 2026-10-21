@@ -7,17 +7,32 @@
 /// listening for the fire and posting the digest, and that something has to
 /// work without the user having opened the app.
 ///
-/// Two mechanisms, deliberately:
+/// Two paths, deliberately:
 ///
 ///   * **The process is alive** (the app is open, or was backgrounded): the
 ///     platform's method channel carries the fired payload, and this
 ///     coordinator delivers the digest and re-arms the slot for tomorrow.
-///   * **The process is dead** (the app was killed): the service is started
-///     by the alarm itself, which brings the process up and asks for the same
-///     delivery.
+///   * **The process is dead** (the app was killed): the alarm cannot reach
+///     Dart at all, so the native side **records the delivery** and the Dart
+///     side picks it up the next time it runs.
 ///
 /// The second path is the one that matters most: a reminder whose whole job
 /// is to protect a cutoff cannot depend on the student having opened the app.
+///
+/// ## Why the dead-process path is a record and not a delivery
+///
+/// The digest is composed in Dart, from the local meal mirror, so there is
+/// nothing to deliver from the native side. But there is also nothing to
+/// *lose* from the native side: the receiver writes the payload to a place
+/// that survives the process, and the Dart side delivers it when it next
+/// runs. A reminder that was owed is never forgotten.
+///
+/// The alternative — starting a Flutter engine inside the receiver — would
+/// deliver the digest at the exact minute even with the app killed. It is
+/// also a much larger machine: an engine, an isolate, the whole platform
+/// bridge, in a broadcast receiver. The record is the smaller thing that
+/// keeps the promise, and it is honest about what it is: the digest arrives
+/// when the student next opens the app, rather than never.
 library;
 
 import '../core/account.dart';
@@ -120,6 +135,65 @@ class ReminderDelivery {
     await service.armSlot(slot, config);
 
     return slot;
+  }
+
+  /// Delivers the reminders that were owed while the app was not running.
+  ///
+  /// The native side records a delivery when the alarm fires and the Dart
+  /// side cannot be reached. This delivers them, in order, and clears the
+  /// record — but only after each one has actually been delivered, so a
+  /// failure leaves the delivery owed rather than losing it.
+  ///
+  /// Returns the payloads that were delivered.
+  Future<List<String>> deliverPending(List<String> payloads) async {
+    final delivered = <String>[];
+
+    for (final payload in payloads) {
+      try {
+        if (await _deliverOne(payload)) {
+          delivered.add(payload);
+        }
+      } catch (_) {
+        // One failed delivery must not cost the others. The failed one stays
+        // owed: the record is cleared by the caller only for what was
+        // delivered.
+      }
+    }
+
+    return delivered;
+  }
+
+  /// Delivers one owed payload, and says whether it was delivered.
+  ///
+  /// The distinction matters because [handleFire] returns the **slot**, and
+  /// a null slot means two different things: the nudge was handled (and the
+  /// nudge does not have a slot), and the delivery was refused (there was no
+  /// configuration, or the slot had been switched off). Only the first is a
+  /// delivery.
+  ///
+  /// A refused delivery stays owed. That is the right answer: the student
+  /// switched the slot off, so the digest is not wanted — but the *record*
+  /// must not be cleared on a refusal, because the refusal may be a
+  /// configuration that had not loaded yet, and a reminder that is silently
+  /// dropped is the failure this whole path exists to prevent.
+  Future<bool> _deliverOne(String payload) async {
+    if (payload == ReminderService.nudgePayload) {
+      await _handleNudge();
+      return true;
+    }
+
+    final slot = ReminderService.slotFor(payload);
+    if (slot == null) return false;
+
+    // The configuration and the slot's activity decide whether the digest is
+    // posted. Both are checked here rather than inside [handleFire], so the
+    // refusal is visible.
+    final config = this.config;
+    if (config == null) return false;
+    if (!config.isSlotActive(slot)) return false;
+
+    await handleFire(payload);
+    return true;
   }
 
   /// Handles a fired nudge: read the week, post if something is unbooked, and
