@@ -224,6 +224,26 @@ String toPersianDigits(Object input) {
   return buffer.toString();
 }
 
+/// Converts Persian digits to Western ones.
+///
+/// The counterpart of [toPersianDigits], for the other direction: a number
+/// the student **typed** arrives as Persian digits, and it has to become a
+/// Western number before it can be parsed or sent to the portal.
+///
+/// Only the digits are converted. Separators are the caller's business,
+/// because a Persian amount may be written with thousands separators and the
+/// caller knows whether it is reading one.
+String toEnglishDigits(String input) {
+  const persian = '۰۱۲۳۴۵۶۷۸۹';
+  final buffer = StringBuffer();
+  for (final rune in input.runes) {
+    final char = String.fromCharCode(rune);
+    final index = persian.indexOf(char);
+    buffer.write(index >= 0 ? '$index' : char);
+  }
+  return buffer.toString();
+}
+
 /// Formats a Rial amount for display, e.g. `۳۵۰٬۰۰۰ ریال`.
 ///
 /// **This is for the rare case that Rial must be shown.** Iran has not used

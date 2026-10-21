@@ -121,13 +121,28 @@ class PortalTransport {
       _send(accountId, 'GET', path, headers: headers);
 
   /// Performs a POST with a form-encoded body.
+  ///
+  /// Set [followRedirects] to false to get the redirect itself rather than
+  /// its target. That matters for the top-up: the portal answers the payment
+  /// confirmation with a `302` to the **bank's** gateway, and the gateway is
+  /// not reachable from this transport — the TLS handshake fails there (F55).
+  /// Following the redirect would turn a successful handoff into a network
+  /// error, so the redirect is read and the WebView is given the URL.
   Future<TransportResponse> post(
     AccountId accountId,
     String path, {
     Map<String, String> body = const {},
     Map<String, String>? headers,
+    bool followRedirects = true,
   }) =>
-      _send(accountId, 'POST', path, body: body, headers: headers);
+      _send(
+        accountId,
+        'POST',
+        path,
+        body: body,
+        headers: headers,
+        followRedirects: followRedirects,
+      );
 
   /// Puts [cookies] into [accountId]'s jar.
   ///
@@ -170,6 +185,7 @@ class PortalTransport {
     String path, {
     Map<String, String> body = const {},
     Map<String, String>? headers,
+    bool followRedirects = true,
   }) async {
     final uri = resolve(path);
     final startedAt = DateTime.now().toUtc();
@@ -197,7 +213,7 @@ class PortalTransport {
       //
       // A 302 after a POST is followed with GET, as browsers do.
       var hops = 0;
-      while (_isRedirect(response.statusCode) && hops < 5) {
+      while (followRedirects && _isRedirect(response.statusCode) && hops < 5) {
         final location = response.headers['location'];
         if (location == null || location.isEmpty) break;
 

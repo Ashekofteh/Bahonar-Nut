@@ -28,6 +28,7 @@ import 'hunt_service.dart';
 import 'platform_bridge.dart';
 import 'reminder_service.dart';
 import 'reservation_service.dart';
+import 'top_up_service.dart';
 
 /// The portal's base address.
 const String portalBaseUrl = 'https://nut.uk.ac.ir/';
@@ -136,6 +137,12 @@ class AppServices {
     sessions: sessions,
     mealStore: mealStore.store,
     persist: mealStore.persist,
+  );
+
+  /// Starts and settles top-ups.
+  late final TopUpService topUp = TopUpService(
+    client: client,
+    sessions: sessions,
   );
 
   /// The reminder service: builds digests, posts notifications, arms alarms.

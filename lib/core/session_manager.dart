@@ -246,6 +246,27 @@ class SessionManager {
     return read(result.session);
   }
 
+  /// The account's live session cookies.
+  ///
+  /// ## Why the top-up needs them
+  ///
+  /// The bank's gateway returns to the portal, and the portal credits the
+  /// account that **started** the payment. So the WebView that shows the
+  /// gateway has to carry the portal's session cookies, or the return would
+  /// credit nobody (F55).
+  ///
+  /// The session is **established** if it is not already live, because a
+  /// top-up that is started with a stale session would fail at the last
+  /// step, in the bank, where the student is least able to tell what went
+  /// wrong.
+  Future<Map<String, String>> cookiesFor(AccountId accountId) async {
+    final result = await ensureSession(accountId);
+    if (result is! SessionReady) {
+      throw SessionUnavailableException(result as SessionUnavailable);
+    }
+    return result.session.cookies;
+  }
+
   /// Drops all in-memory sessions. Used when the app is backgrounded long
   /// enough that a clock offset may no longer hold.
   void clearMemory() => _live.clear();
@@ -282,9 +303,24 @@ class PortalUnreachableException implements Exception {
   const PortalUnreachableException(this.message);
 
   final String message;
-
   @override
   String toString() => 'PortalUnreachableException: $message';
+}
+
+/// The portal refused a top-up.
+///
+/// A distinct type because the portal's own refusal is **silent**: an
+/// out-of-range amount re-renders the amount form with no message at all
+/// (F56), and an unconfigured bank answers with a server error. Neither is
+/// a transport failure, and neither should be retried — the student has to
+/// change the amount or the bank.
+class TopUpRejectedException implements Exception {
+  const TopUpRejectedException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'TopUpRejectedException: $message';
 }
 
 /// The reservation was refused because the date is no longer bookable.

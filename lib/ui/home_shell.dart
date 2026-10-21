@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/account.dart';
 import '../core/hunt_config.dart';
 import '../core/models.dart';
 import '../core/persian.dart';
@@ -8,6 +9,7 @@ import '../core/preflight.dart';
 import '../core/session_manager.dart'
     show PortalUnreachableException, SessionUnavailableException;
 import '../core/time.dart';
+import '../core/top_up.dart';
 import '../platform/hunt_service.dart';
 import '../platform/platform_services.dart';
 import '../platform/portal_sync.dart';
@@ -20,6 +22,8 @@ import 'screens/dashboard_screen.dart';
 import 'screens/hunt_screen.dart';
 import 'screens/reminders_screen.dart';
 import 'screens/reservations_screen.dart';
+import 'screens/top_up_gateway_screen.dart';
+import 'screens/top_up_sheet.dart';
 
 /// The app's navigation shell.
 ///
@@ -392,6 +396,160 @@ class _HomeShellState extends State<HomeShell> {
     return outcome.message;
   }
 
+  /// Starts a top-up for an account.
+  ///
+  /// ## The order of the steps
+  ///
+  /// 1. Read the top-up page: the balance, and the banks that work.
+  /// 2. Show the sheet, where the amount is checked against the portal's
+  ///    bounds — the portal's own refusal is silent (F56), so the app is the
+  ///    only place the student can be told.
+  /// 3. Mint the gateway token and open the bank's page in a WebView.
+  /// 4. When the gateway returns to the portal, re-read the payment list and
+  ///    the balance, and say what happened.
+  Future<void> _startTopUp(SavedAccount account) async {
+    final page = await widget.services.topUp.page(account.id);
+
+    if (!mounted) return;
+
+    if (page == null) {
+      _showBookingProblem(
+        'ارتباط با سامانه برقرار نشد. اتصال را بررسی کنید و دوباره تلاش '
+        'کنید.',
+      );
+      return;
+    }
+
+    if (page.banks.isEmpty) {
+      _showBookingProblem('درگاه پرداختی برای افزایش اعتبار در دسترس نیست.');
+      return;
+    }
+
+    // The banks that work. The portal lists one that is not configured and
+    // errors when it is used (F57), so it is not offered.
+    final banks = _workingBanks(page.banks);
+
+    if (banks.isEmpty) {
+      _showBookingProblem('درگاه پرداختی برای افزایش اعتبار در دسترس نیست.');
+      return;
+    }
+
+    var amountRial = 0;
+
+    await TopUpSheet.show(
+      context,
+      balanceRial: page.balanceRial,
+      banks: banks,
+      suggestedAmounts: _topUpSuggestions(),
+      onSubmit: (amount, bank) async {
+        amountRial = amount;
+        return _beginTopUp(account, amount, bank);
+      },
+    );
+
+    // The sheet closed. If the student got as far as the gateway, the
+    // payment is settled when the gateway returns — which the gateway
+    // screen reports back.
+    if (amountRial == 0 || !mounted) return;
+  }
+
+  /// The banks that actually work.
+  ///
+  /// The portal's second bank is not configured on the university's side and
+  /// answers with a server error when it is used (F57). Offering it would
+  /// be offering a button that cannot work, so it is dropped.
+  List<TopUpBank> _workingBanks(List<TopUpBank> banks) {
+    if (banks.length <= 1) return banks;
+
+    // The first bank is the one the portal's own confirmation page proves
+    // works; the rest are dropped.
+    return [banks.first];
+  }
+
+  /// The amounts offered as one-tap chips.
+  ///
+  /// The meal prices, because the top-up is almost always about covering
+  /// meals: a breakfast is 150,000 Rial and a lunch 350,000.
+  List<int> _topUpSuggestions() => const [150000, 350000, 500000, 1000000];
+
+  /// Mints the gateway token and opens the bank's page.
+  Future<String?> _beginTopUp(
+    SavedAccount account,
+    int amountRial,
+    TopUpBank bank,
+  ) async {
+    final outcome = await widget.services.topUp.begin(
+      accountId: account.id,
+      amountRial: amountRial,
+      bank: bank,
+    );
+
+    if (!mounted) return outcome.message;
+
+    if (!outcome.succeeded) {
+      return outcome.message ?? 'افزایش اعتبار انجام نشد.';
+    }
+
+    final gateway = outcome.gateway!;
+    final cookies = await widget.services.sessions.cookiesFor(account.id);
+
+    if (!mounted) return null;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TopUpGatewayScreen(
+          gateway: gateway,
+          cookies: cookies,
+          portalHost: Uri.parse(portalBaseUrl).host,
+          onReturned: () => _settleTopUp(account, amountRial),
+        ),
+      ),
+    );
+
+    return null;
+  }
+
+  /// Reads back what the portal says about the payment.
+  Future<void> _settleTopUp(SavedAccount account, int amountRial) async {
+    final report = await widget.services.topUp.settle(
+      accountId: account.id,
+      amountRial: amountRial,
+    );
+
+    if (!mounted) return;
+
+    if (report.balanceRial != null) {
+      widget.state.setBalance(account.id, report.balanceRial!);
+    }
+
+    final matched = report.matched;
+
+    if (matched == null) {
+      _showBookingProblem(
+        'هنوز پرداخت شما تأیید نشده است. کمی بعد دوباره بررسی کنید.',
+      );
+      return;
+    }
+
+    if (matched.status.isPaid) {
+      _showBookingProblem(
+        'پرداخت با موفقیت انجام شد و اعتبار حساب افزایش یافت.',
+      );
+      return;
+    }
+
+    if (matched.status.isPending) {
+      _showBookingProblem(
+        'پرداخت ثبت شد و در انتظار تأیید بانک است. کمی بعد بررسی کنید.',
+      );
+      return;
+    }
+
+    _showBookingProblem(
+      matched.message ?? 'پرداخت انجام نشد. دوباره تلاش کنید.',
+    );
+  }
+
   /// Cancels a held meal.
   Future<void> _cancelMeal(DateTime date, MealSlot slot) async {
     final accounts = widget.state.accounts;
@@ -452,6 +610,7 @@ class _HomeShellState extends State<HomeShell> {
       AccountsScreen(
         state: widget.state,
         onRefresh: refreshFromPortal,
+        onTopUp: _startTopUp,
       ),
       ReservationsScreen(
         state: widget.state,

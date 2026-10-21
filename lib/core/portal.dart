@@ -10,6 +10,7 @@ library;
 import 'dart:typed_data';
 
 import 'models.dart';
+import 'top_up.dart';
 
 /// What the buy page reports about one option's row.
 ///
@@ -375,6 +376,33 @@ abstract class PortalClient {
   /// slot** without anyone noticing (F65), so the pair is carried as values
   /// now.
   Future<CancelOutcome> cancel(Session session, MealRef ref);
+
+  // --- Top-up ---
+
+  /// Reads the top-up page: the balance, and the banks that work.
+  Future<TopUpPage> fetchTopUpPage(Session session);
+
+  /// Starts a top-up and returns the **bank gateway** the student must pay at.
+  ///
+  /// The top-up is a three-step portal flow (F54), and this method performs
+  /// the first two:
+  ///
+  ///   1. POST the amount and the chosen bank, which the portal answers with
+  ///      a confirmation page;
+  ///   2. POST the confirmation's `btnPay`, which the portal answers with a
+  ///      **redirect to the bank's gateway**, carrying a token.
+  ///
+  /// The redirect is read, not followed: the gateway is unreachable from this
+  /// transport (F55), and it is a browser page anyway.
+  ///
+  /// The returned URL must be opened in a WebView, not fetched.
+  Future<Uri> beginTopUp(Session session, int amountRial, TopUpBank bank);
+
+  /// The account's internet-payment history, newest first.
+  ///
+  /// This is the **proof** that a top-up landed, not the balance: the credit
+  /// is applied asynchronously, after the portal re-queries the bank (F58).
+  Future<List<TopUpPayment>> fetchTopUpPayments(Session session);
 
   // --- Navigation ---
 

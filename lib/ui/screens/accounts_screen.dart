@@ -14,12 +14,20 @@ import '../widgets.dart';
 /// at a glance that the app knows their real name but they have not given it a
 /// nickname, and can fix that in one tap.
 class AccountsScreen extends StatefulWidget {
-  const AccountsScreen({super.key, required this.state, this.onRefresh});
+  const AccountsScreen({
+    super.key,
+    required this.state,
+    this.onRefresh,
+    this.onTopUp,
+  });
 
   final AppState state;
 
   /// Reads the portal for the saved accounts. Null in tests.
   final Future<void> Function()? onRefresh;
+
+  /// Starts a top-up for an account. Null in tests.
+  final void Function(SavedAccount account)? onTopUp;
 
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
@@ -75,6 +83,9 @@ class _AccountsScreenState extends State<AccountsScreen> {
                     account: accounts[index],
                     onEdit: () => _editAccount(context, accounts[index]),
                     onDelete: () => _deleteAccount(context, accounts[index]),
+                    onTopUp: widget.onTopUp == null
+                        ? null
+                        : () => widget.onTopUp!(accounts[index]),
                     balanceRial: widget.state.balanceFor(accounts[index].id),
                     syncError: widget.state.syncErrorFor(accounts[index].id),
                   ),
@@ -182,6 +193,7 @@ class _AccountTile extends StatelessWidget {
     required this.account,
     required this.onEdit,
     required this.onDelete,
+    this.onTopUp,
     this.balanceRial,
     this.syncError,
   });
@@ -189,6 +201,9 @@ class _AccountTile extends StatelessWidget {
   final SavedAccount account;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+
+  /// Starts a top-up for this account. Null when the top-up is not offered.
+  final VoidCallback? onTopUp;
 
   /// The balance last read from the portal, in Rial. Null when the account
   /// has not been read yet.
@@ -231,12 +246,9 @@ class _AccountTile extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             if (balanceRial != null)
-              Text(
-                'اعتبار: ${formatTomanPersian(balanceRial!)}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.secondary,
-                  fontWeight: FontWeight.w600,
-                ),
+              _BalanceLine(
+                balanceRial: balanceRial!,
+                onTopUp: onTopUp,
               )
             else if (syncError != null)
               Text(
@@ -283,6 +295,58 @@ class _AccountTile extends StatelessWidget {
       NameSource.studentId => 'نام پروفایل در دسترس نیست',
     };
     return '${identity.studentId} • $source';
+  }
+}
+
+/// The balance line, with the top-up affordance.
+///
+/// The balance is the reason the student opens this screen, and the top-up
+/// is what they do when it is too low. So the two sit together: the amount
+/// in teal (money is teal in this app), and a small button beside it.
+///
+/// The amount gets its own row rather than sharing one with the button.
+/// Side by side, the button's label ate the digits — and the digits are the
+/// part the student came to read.
+class _BalanceLine extends StatelessWidget {
+  const _BalanceLine({required this.balanceRial, this.onTopUp});
+
+  final int balanceRial;
+  final VoidCallback? onTopUp;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'اعتبار: ${formatTomanPersian(balanceRial)}',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.secondary,
+            fontWeight: FontWeight.w600,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        if (onTopUp != null)
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton.icon(
+              onPressed: onTopUp,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('افزایش اعتبار'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: theme.textTheme.labelMedium,
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 

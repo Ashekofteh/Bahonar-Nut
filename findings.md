@@ -1878,6 +1878,360 @@ first attempt to watch a fire *failed*: the clock jump cancelled the pending
 alarm, and the delivery did not happen. The second attempt — with the app
 confirmed alive — worked. A missing notification after a clock change is a
 harness artefact, not an app defect, and the two must not be confused.
+## 2026-10-21 — Session 26: the top-up (ePay) workflow, mapped live
+
+The reservation table is done, and the live write path is proven: the portal
+refused a real booking for a 350,000 Rial lunch because the account holds
+only **75,000 Rial**, and the app surfaced the portal's own Persian message
+(«موجودی حساب برای این وعده کافی نیست») inline. So the last of the five
+core workflows — **account top-up** — is both the remaining feature and the
+prerequisite for a *successful* live book-and-cancel cycle.
+
+### F54 — The top-up is a three-step portal flow, and only the middle step is a form
+
+The ePay page (`/ePay/ePay_Payment.aspx`) is not one form. It is three:
+
+| Step | What the app does | What the portal answers |
+|---|---|---|
+| 1 | POST the amount and the bank logo | a **confirmation** page («تأیید پرداخت») with a `btnPay` submit |
+| 2 | POST `btnPay` | a **302** to the bank gateway, carrying a token |
+| 3 | the user pays at the gateway | the portal re-queries the bank and credits the account |
+
+**The amount field is `ctl00$cphMain$txtPaymentAmount`, and the bank logo is
+the submit button** — the page has no `btnOk`. A bank logo is an
+`<input type="image">`, so its post carries its own name plus `.x`/`.y`.
+
+### F55 — The gateway is unreachable from Dart, and that is not a bug in the app
+
+`POST btnPay` answers `302` to
+`https://sadad.shaparak.ir/VPG/Purchase/Index?token=…`. Following that
+redirect **fails the TLS handshake** — for Dart's `HttpClient`, for
+`curl`/schannel, and for Python's `ssl` alike, on all three Shaparak hosts
+(`sadad`, `bpm`, `sep`). The failure is uniform and at the TLS layer, so it
+is the network path, not the client.
+
+Two consequences, and the second is the design:
+
+1. The app **cannot** complete the payment with its own HTTP client.
+2. The app **must not** try. A bank payment page needs a browser engine, and
+   a WebView is the only thing on Android that has one.
+
+So the top-up is a **handoff**: the app mints the gateway token with its own
+transport (the part it owns), then opens a WebView on the gateway URL (the
+part it must not own). The WebView must carry the portal's session cookies,
+or the gateway's return will not credit the account.
+
+### F56 — The amount bounds are 120,000–5,000,000 Rial, and the portal enforces them SILENTLY
+
+Bisected live against the portal:
+
+| Amount (Rial) | Result |
+|---|---|
+| 50,000 | refused |
+| 100,000 | refused |
+| **120,000** | accepted |
+| 150,000 … 1,000,000 | accepted |
+| 5,000,000 | accepted |
+| 5,000,001 | refused |
+| 6,000,000 | refused |
+| 100,000,000 | refused |
+
+**A refused amount produces no message at all.** The portal re-renders the
+amount form with the same value, and the `alertBox` is empty. The only
+signal is the *absence* of the confirmation page.
+
+So the app must validate the amount itself, with the bounds as constants —
+otherwise the user gets a screen that does nothing when they type 50,000.
+
+### F57 — Only one of the two banks works
+
+The page offers two gateways: «درگاه سداد» (Sadad, `ctl00`) and a second,
+unlabelled one with the Mellat logo (`ctl01`).
+
+- `ctl00` (Sadad) → `302 https://sadad.shaparak.ir/VPG/Purchase/Index?token=…`
+- `ctl01` (Mellat) → **no redirect**. The portal answers
+  «خطا در اجرای عملیات! Value cannot be null. Parameter name: String» — the
+  merchant is not configured for that gateway.
+
+An unlabelled, non-functional bank button on the portal's own page is
+exactly the friction this app exists to remove. The app should offer Sadad
+and say plainly that the other is unavailable — or simply not offer it.
+
+### F58 — The proof of a completed payment is the payment list, not the balance
+
+`/MyCullinan/MyePayList.aspx` holds a grid, `cphMain_grdContent`, with one
+row per payment attempt:
+
+| Column | Meaning |
+|---|---|
+| `imgPaymentStatus_N` | `../Images/Icon/Accept16.png` = paid, `Cancel16.png` = not |
+| تاریخ و زمان پرداخت | the payment time (Jalali) |
+| مبلغ | the amount in Rial |
+| شماره فاکتور | the portal's invoice number |
+| بانک | the bank |
+| پیام سیستم | «پرداخت موفق» or «خطا در دریافت اطلاعات از بانک» |
+
+**The balance is not the proof.** A payment is credited asynchronously — the
+gateway returns first, the portal re-queries the bank afterwards — so a
+balance read taken too early shows the old figure even though the money is
+on its way. The payment list, re-read after the handoff, is the portal's own
+account of what happened.
+
+The same grid has a per-row «استعلام» button (`imgbtnVerify_N`): the portal
+re-queries the bank for that row. It is the manual form of the check the app
+should do automatically.
+
+### F59 — The live write path, re-proven against the app's own client
+
+The earlier standalone `tool/book_and_cancel.dart` re-implemented the portal
+protocol and had **drifted from it**: it posted the amount against a week
+it had over-hopped, and its booking landed on a week with no menu, so the
+booking silently did nothing. It reported this as a portal refusal.
+
+That script is not evidence about the app. `tool/live_cycle.dart` drives
+**the app's own `CullinanPortalClient`** instead, and it reads the week
+correctly: 16 menus, 7 bookable dates (2026-10-23 … 10-29), breakfast at
+150,000 and lunch at 350,000/500,000, with the account's six held meals
+listed and untouched.
+
+It then stops for the right reason: **the cheapest meal is 150,000 and the
+balance is 75,000**. The app's own `ReservationService` refuses the booking
+for exactly that reason, before the request — which is the correct place for
+the check to be.
+
+**So the live book-and-cancel cycle cannot complete until the account is
+funded, and funding it is the top-up feature.** These are not two separate
+tasks; they are one, and the top-up is upstream.
+
+### F60 — The whole top-up runs on the device, and the gateway is a WebView
+
+The top-up was verified on the emulator, end to end, on the real portal:
+
+- the account tile shows «اعتبار: ۷٬۵۰۰ تومان» in teal, with «+ افزایش اعتبار»
+  beside it;
+- the sheet opens with the balance, a Toman amount field, four quick-amount
+  chips, and the pay button **disabled** because nothing was typed;
+- typing 5,000 gives a red field and «کمترین مبلغ افزایش اعتبار ۱۲٬۰۰۰ تومان
+  است.» — the bound is enforced in the app, before the request, because the
+  portal enforces it silently (F56);
+- typing 15,000 enables the button, and tapping it mints a **real** gateway
+  token and opens the bank's own payment page **inside the app**: Bank
+  Melli's «درگاه پرداخت بانک ملی», «نام پردازنده: دانشگاه شهید باهنر
+  کرمان», «مبلغ قابل پرداخت: ۱۵۰,۰۰۰ ریال», with the card number,
+  CVV2, expiry, captcha and PIN pad.
+
+This is the leg that F55 said could not be tested any other way. The gateway
+is unreachable from Dart's HTTP client, so the WebView is not a convenience
+— it is the only way the student can pay.
+
+The return leg was exercised too: «انصراف» on the gateway asks for
+confirmation, and confirming it redirects back to `nut.uk.ac.ir` — the
+portal — which is the app's signal to re-read the payment list (F58). The
+balance was correctly unchanged, because the payment was cancelled.
+
+### F61 — The gateway's TLS failure was the VPN, not the code
+
+The gateway's handshake failed for Dart, curl and Python alike — three
+unrelated clients, one failure. The cause was the user's VPN, which routes
+the shaparak hosts somewhere that will not complete the handshake. Once the
+four gateway hosts were exempted (`sadad.shaparak.ir`, `bpm.shaparak.ir`,
+`sep.shaparak.ir`, `ikc.shaparak.ir`), all three clients negotiated TLS
+without complaint.
+
+Worth writing down because the symptom is exactly what a broken client
+looks like. **One failing protocol across three unrelated implementations is
+a network path problem until proven otherwise** — check the path before
+rewriting the code.
+
+### F62 — The balance was the thing being cut off, and it is the reason the screen is opened
+
+The first on-device screenshot of the account tile read
+«اعتبار: ۷٬۵۰۰...» — the amount ellipsized, because the top-up button
+shared the row and its label took the width.
+
+This is worth a finding because the layout bug had a **priority** bug
+inside it: the balance is the reason the student opens the accounts screen,
+and it is the number the ellipsis ate. Side by side, the button won.
+
+The fix gives the amount its own row and puts the button under it, aligned
+to the trailing edge. The amount is now never truncated, and the affordance
+is still one tap away.
+
+### F63 — A successful cancel POST is not a cancelled meal, and the app believed it
+
+Tapping the red X on a held meal whose date had already passed its cutoff
+(1405/07/26 lunch) produced a **green result on screen and a lie underneath**.
+
+What happened, step by step:
+
+1. The app posted the cancel. The portal **ignored it** — a locked row renders
+   `disabled` and the server discards the post with no error label, no alert
+   box and no state change. This is F14, the same silent refusal a booking
+   gets.
+2. The POST came back **200 OK**, because nothing went wrong. The transport
+   cannot tell a refusal from a success.
+3. `ReservationService.cancel` removed the meal from the local mirror **on the
+   strength of that 200**, and reported `true`.
+4. The table redrew without the meal. The student sees a cancel that worked.
+5. A live re-read of the portal proved the opposite: the row for
+   `1405/07/26` lunch is still `checked`, still `lblBuyAmount = 500000`, still
+   carrying the green «خورده شده» icon. The portal still holds the meal.
+6. The app's own persisted mirror (`meals.held` in the plain store) no longer
+   had the 2026-10-18 lunch, so the **reminders** stopped mentioning it too.
+
+So the app hid a meal the student holds, and then told itself the meal was
+gone. A cancel that silently fails is worse than a cancel that visibly fails:
+the student believes a 50,000-Toman meal has been released, and it has not.
+
+**The rule this breaks.** The portal is the authority on what is held, and
+that rule was already written down — in `reserve`, the write path *re-reads
+the week* and only records the meal if the read shows it. The cancel path
+skipped that step. One path verified against the portal, the other trusted
+the transport.
+
+The fix gives the cancel the same shape: the adapter reads the target's week
+back and reports what the portal still holds; the mirror follows the read,
+not the request. A locked row is then reported as a locked cancellation
+rather than a success.
+
+**The lesson is the one from F14, seen from the other side.** "A locked date
+is refused silently" is not a fact about bookings alone. It is a fact about
+*every* write to the weekly grid, and a client that infers the outcome from
+the HTTP status will get it wrong on all of them.
+
+### F64 — The app could not see a reservation the student held, and filed it as an irreversible purchase
+
+The portal holds a reservation in **next week's** grid. The app read only the
+**current** week's grid, so it never saw that meal, and filed it as a Food
+Basket purchase — which cannot be cancelled.
+
+Measured live against the real portal on 2026-10-21:
+
+| What | Count |
+|---|---|
+| Reservations the portal holds (walking both weeks) | **7** |
+| Reservations `fetchReservations()` returned | **6** |
+
+The missing one was a breakfast on 1405/08/03 (2026-10-25), held in week one
+with `مبلغ خرید = 150000` and the green «رزرو شده» icon.
+
+**Why the read stopped at one week.** The weekly page carries one week of
+grids, and `fetchReservations` issued a single GET of it. The portal's
+horizon is exactly two weeks wide — verified by walking the weeks forward:
+the rows of the week ahead are editable, and every row two weeks out renders
+`disabled`. So a student can hold a meal one week ahead, and a one-week read
+misses every one of those meals.
+
+**What the miss cost.** The mirror has two sources: the grid and the ledger.
+A meal the grid does not report falls through to the ledger — and the ledger
+cannot tell the two sources apart, because the portal records a weekly
+reservation and a Food Basket purchase the same way (every row reads
+`type="رزرو غذا"`). So the meal was filed as
+`MealSource.basketPurchase`, and:
+
+1. The table showed «خریداری شده» with **no cancel button**, on a meal the
+   portal would have let the student give back.
+2. The one-meal pre-flight check, which reads the same list, could not see
+   that the slot was already taken — so a hunt aimed at that slot would have
+   been allowed to start.
+3. The next-week nudge reported the meal as **unbooked** — telling the student
+   to book a meal they already had.
+
+**The rule this breaks.** The grid is the authority on what a meal *is*; the
+ledger is the authority only on meals the grid does not show (F16). A read
+that does not cover every week a student can hold a meal in silently
+downgrades a weekly reservation to an irreversible purchase.
+
+**The fix.** The reservation read walks forward a week and parses the two
+pages separately, so a date that appears on neither is simply not held. A
+meal is keyed by (date, slot), so one that appears on both is counted once.
+After the fix the live read returns **7** — exactly what the portal holds.
+
+**The lesson.** A read that answers "what does the account hold?" must cover
+the whole range the account can hold in. The portal's grids are paged by week
+like everything else on that site, and a read that stops at the first page
+does not answer the question — it answers a narrower one, and the answer
+looks complete.
+
+### F65 — The cancel reported a success it never earned, and the app hid a meal the student still held
+
+The app's cancel removed the meal from its mirror and told the student
+«رزرو لغو شد.» The **portal still held the meal**, and its ledger recorded
+no cancellation at all.
+
+Measured live against the real portal on 2026-10-21:
+
+| What | Value |
+|---|---|
+| Meals the portal held before the cancel | **7** |
+| Meals the portal held after the app's cancel | **7** — unchanged |
+| New ledger rows written by the cancel | **0** |
+| Credit before / after | 75,000 / 75,000 — unchanged |
+| What the app reported | «رزرو لغو شد.» |
+
+**Two defects, one symptom.** The first was the *target*; the second was the
+*read-back*. Either alone would have been survivable. Together they turned a
+cancel into a no-op that reported success.
+
+**The first: the meal's slot was parsed into the wrong value.** The cancel
+named its meal with a string, `<date>|<slot>`, and the adapter parsed it
+back. The producer wrote Dart's enum `toString()` — `MealSlot.breakfast` —
+while the parser matched `slot.name` — `breakfast`. The match failed, and
+the parse fell through to a default:
+
+```dart
+final slot = MealSlot.values.firstWhere(
+  (s) => s.name == parts[1],
+  orElse: () => MealSlot.lunch,   // <- breakfast became lunch
+);
+```
+
+So a cancel for a **breakfast** was applied to the **lunch** grid. The
+breakfast row was re-posted as checked, so it survived; the lunch row was
+unchecked; and the read-back then looked for a lunch that was not there.
+
+**The second: the read-back read silence as a release.** The read-back
+answered "is the meal still held?" with a `bool`, and a page that carries
+**no row at all** for the day returns "not held" — the same answer a page
+gives when the meal really was released. The two cases are not the same, and
+the difference is the whole point of reading the portal back (F63): a page
+that does not carry the day has said **nothing** about the meal.
+
+**What made the two defects invisible.** Every layer behaved correctly given
+what it was told. The post carried a valid form body, the portal answered
+`200`, the read-back found no held meal, the service removed the meal from
+the mirror because the outcome was `CancelSucceeded`. Nothing crashed,
+nothing logged, and the state on the device and the state on the portal
+silently diverged — which is the worst shape a bug can have.
+
+**The rule this breaks.** A value that crosses a boundary and comes back as
+the same value must not be one that can be parsed into something else. A
+`(date, slot)` pair encoded as a string, and re-parsed with a default, is a
+pair that can be silently replaced by a different one — and the default was
+a **real** slot, so the mistake produced a plausible result rather than an
+error. The second rule: a read that cannot find what it is looking for has
+not found its absence. It has found a page that does not answer the question.
+
+**The fix.** The meal is now named by a `MealRef` — a `(date, slot)` pair
+carried as values, with nothing to misparse — and the read-back distinguishes
+three states instead of two: `stillHeld`, `gone`, and `notOnPage`. Only a
+page that genuinely carries the day can report `gone`; a page that does not
+carry it yields `CancelAmbiguous`, so the mirror is never emptied on an
+unverified outcome.
+
+**The lesson.** The trace that settled it was one line:
+
+```
+cancel POST label=1405/08/02 ... checkedRows=1 bodyKeys=69
+```
+
+One checked row, on the right week, to the right portal — and the meal was
+still there. The instrumentation was worth more than the reasoning that
+preceded it: two earlier theories (a drifting week pointer, a stale APK)
+were both refuted by measurement, and the third (the read running outside
+the per-account queue) was the only one left standing, until the trace
+showed the post was fine and the *answer* was not.
+
 ## 2026-10-21 — Session 27: the cycle, closed
 
 ### F66 — The portal's week pointer lives in the viewstate CHAIN, not in the session

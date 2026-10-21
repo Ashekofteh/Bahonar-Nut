@@ -35,8 +35,10 @@ import '../core/session_manager.dart'
     show
         LoginRejectedException,
         PortalUnreachableException,
-        ReservationLockedException;
+        ReservationLockedException,
+        TopUpRejectedException;
 import '../core/time.dart';
+import '../core/top_up.dart';
 import '../transport/html_parsing.dart';
 import '../transport/http_transport.dart';
 import 'cullinan_parser.dart';
@@ -49,6 +51,30 @@ class _Paths {
   static const transactions = '/MyCullinan/MyTransaction.aspx';
   static const captcha = '/UserControls/Captcha.ashx';
   static const topUp = '/ePay/ePay_Payment.aspx';
+  static const topUpList = '/MyCullinan/MyePayList.aspx';
+}
+
+/// The top-up form's control names.
+///
+/// The ePay page has **no submit button** — the bank logos are image inputs,
+/// and an image input posts its own name plus the click coordinates. That is
+/// why the bank is part of the *form* rather than a separate parameter.
+class _TopUpFields {
+  static const amount = r'ctl00$cphMain$txtPaymentAmount';
+
+  /// The bank logo for the bank at [index] in the page's list.
+  ///
+  /// The index is **zero-padded to two digits**, as ASP.NET writes it:
+  /// `ctl00` for the first bank, `ctl01` for the second. An unpadded index
+  /// names a control the page does not have, and the post would be answered
+  /// as if no bank had been chosen.
+  static String bankLogo(int index) {
+    final padded = index.toString().padLeft(2, '0');
+    return r'ctl00$cphMain$dataLstBank$ctl' '$padded' r'$imgBankLogo';
+  }
+
+  /// The confirmation page's pay button.
+  static const pay = r'ctl00$cphMain$btnPay';
 }
 
 /// The weekly menu's "next week" postback target.
@@ -865,6 +891,163 @@ class CullinanPortalClient implements PortalClient {
 
   @override
   Uri? topUpUrl(Session session) => transport.resolve(_Paths.topUp);
+
+  @override
+  Future<TopUpPage> fetchTopUpPage(Session session) async {
+    _applySession(session);
+    final page = await transport.get(session.account, _Paths.topUp);
+    _rejectIfBounced(page);
+
+    final balance = parseRial(labelText(page.body, 'lblCredit') ?? '');
+    if (balance == null) {
+      throw const PortalUnreachableException('موجودی خوانده نشد.');
+    }
+
+    return TopUpPage(
+      balanceRial: balance,
+      banks: _topUpBanks(page.body),
+      defaultAmountRial: parseRial(
+        labelText(page.body, 'cphMain_txtPaymentAmount') ??
+            _inputValue(page.body, 'cphMain_txtPaymentAmount') ??
+            '',
+      ),
+    );
+  }
+
+  /// The banks the page offers.
+  ///
+  /// A bank whose logo is missing is still offered — the portal renders the
+  /// second bank's title empty (F57), but the control is there and the
+  /// student may be able to use it. The app filters on the *gateway's*
+  /// behaviour, not on the title, and refuses the ones that cannot work.
+  List<TopUpBank> _topUpBanks(String html) {
+    final out = <TopUpBank>[];
+
+    for (final match in RegExp(
+      r'<input[^>]*type="image"[^>]*id="cphMain_dataLstBank_imgBankLogo_(\d+)"'
+      r'[^>]*>',
+      dotAll: true,
+    ).allMatches(html)) {
+      final index = match.group(1)!;
+      final tag = match.group(0)!;
+      final title =
+          labelText(html, 'cphMain_dataLstBank_lblBankTitle_$index')?.trim();
+
+      out.add(TopUpBank(
+        id: _TopUpFields.bankLogo(int.parse(index)),
+        // The portal leaves the second bank's title empty, so the name falls
+        // back to something the student can still recognise.
+        name: (title == null || title.isEmpty) ? 'درگاه پرداخت' : title,
+        logoPath: _firstSrc(tag),
+      ));
+    }
+
+    return out;
+  }
+
+  /// The first `src` attribute in a tag.
+  ///
+  /// The portal writes the bank logo as `<input ... src="NewMelli.jpg" src="" />`
+  /// — **two** `src` attributes, the second one empty. A greedy match takes
+  /// the empty one and the logo is lost, so the first is taken.
+  static String? _firstSrc(String tag) {
+    final match = RegExp(r'src="([^"]*)"').firstMatch(tag);
+    final value = match?.group(1);
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  @override
+  Future<Uri> beginTopUp(
+    Session session,
+    int amountRial,
+    TopUpBank bank,
+  ) async {
+    _applySession(session);
+
+    // Step 1: the amount and the bank. The bank logo is the submit button,
+    // so the post carries its name and the click coordinates.
+    final page = await transport.get(session.account, _Paths.topUp);
+    _rejectIfBounced(page);
+
+    final amountBody = _topUpFormState(page.body)
+      ..[_TopUpFields.amount] = '$amountRial'
+      ..['${bank.id}.x'] = '10'
+      ..['${bank.id}.y'] = '10';
+
+    final confirmation =
+        await transport.post(session.account, _Paths.topUp, body: amountBody);
+    _rejectIfBounced(confirmation);
+
+    // The confirmation page is the proof that the amount was accepted: the
+    // portal refuses an out-of-range amount **silently**, re-rendering the
+    // amount form with no message (F56). So the absence of the pay button is
+    // the only signal, and it is checked here rather than left to the
+    // student to discover.
+    if (!confirmation.body.contains(_TopUpFields.pay)) {
+      throw const TopUpRejectedException(
+        'این مبلغ پذیرفته نشد. کمترین ۱۲٬۰۰۰ و بیشترین ۵۰۰٬۰۰۰ تومان است.',
+      );
+    }
+
+    // Step 2: confirm, and read the redirect to the bank's gateway.
+    final payBody = _topUpFormState(confirmation.body)
+      ..[_TopUpFields.pay] = 'پرداخت';
+
+    final response = await transport.post(
+      session.account,
+      _Paths.topUp,
+      body: payBody,
+      // The redirect points at the **bank**, and the bank is not reachable
+      // from this transport — the TLS handshake fails there (F55). Following
+      // it would turn a successful handoff into a network error, so the
+      // location is read and handed to the WebView instead.
+      followRedirects: false,
+    );
+
+    final location = response.headers['location'];
+    if (location == null || location.isEmpty) {
+      throw const TopUpRejectedException(
+        'درگاه پرداخت پاسخ نداد. لطفاً دوباره تلاش کنید.',
+      );
+    }
+
+    final gateway = Uri.tryParse(location);
+    if (gateway == null || !gateway.hasScheme) {
+      throw const TopUpRejectedException(
+        'نشانی درگاه پرداخت معتبر نبود.',
+      );
+    }
+
+    return gateway;
+  }
+
+  @override
+  Future<List<TopUpPayment>> fetchTopUpPayments(Session session) async {
+    _applySession(session);
+    final page = await transport.get(session.account, _Paths.topUpList);
+    _rejectIfBounced(page);
+    return CullinanParser.parseTopUpPayments(page.body);
+  }
+
+  /// The ePay form's own state, with the fields that must travel with it.
+  ///
+  /// The `__VIEWSTATE` is the whole form state: a post without it is
+  /// processed against no state at all and silently does nothing.
+  static Map<String, String> _topUpFormState(String html) => {
+        '__VIEWSTATE': hiddenFieldValue(html, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR': hiddenFieldValue(html, '__VIEWSTATEGENERATOR'),
+        '__VIEWSTATEENCRYPTED': hiddenFieldValue(html, '__VIEWSTATEENCRYPTED'),
+        '__EVENTTARGET': '',
+        '__EVENTARGUMENT': '',
+      };
+
+  /// The value of an `<input>`, found by its id.
+  static String? _inputValue(String html, String id) {
+    final match = RegExp('id="${RegExp.escape(id)}"[^>]*value="([^"]*)"')
+        .firstMatch(html);
+    return match?.group(1);
+  }
 
   // ------------------------------------------------------------- internals
 

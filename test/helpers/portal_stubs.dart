@@ -20,6 +20,7 @@ library;
 
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/portal.dart';
+import 'package:bahonar_nut/core/top_up.dart';
 
 /// A portal that does nothing, and reports the top-up state a test sets.
 ///
@@ -29,6 +30,17 @@ class FakePortalClient implements PortalClient {
 
   /// The balance the portal reports.
   int balanceRial;
+
+  /// The payments the portal reports.
+  List<TopUpPayment> topUpPayments = const [];
+
+  /// The gateway the portal hands back.
+  Uri topUpGateway =
+      Uri.parse('https://sadad.shaparak.ir/VPG/Purchase/Index?token=stub');
+
+  /// The amount the portal was asked to top up, and the bank it was asked for.
+  int? topUpRequestedAmountRial;
+  TopUpBank? topUpRequestedBank;
 
   // --- Authentication ---
 
@@ -118,6 +130,36 @@ class FakePortalClient implements PortalClient {
   @override
   Future<CancelOutcome> cancel(Session session, MealRef ref) async =>
       const CancelSucceeded();
+
+  // --- Top-up ---
+
+  @override
+  Future<TopUpPage> fetchTopUpPage(Session session) async => TopUpPage(
+        balanceRial: balanceRial,
+        banks: const [
+          TopUpBank(
+            id: r'ctl00$cphMain$dataLstBank$ctl00$imgBankLogo',
+            name: 'درگاه سداد',
+            logoPath: null,
+          ),
+        ],
+        defaultAmountRial: balanceRial,
+      );
+
+  @override
+  Future<Uri> beginTopUp(
+    Session session,
+    int amountRial,
+    TopUpBank bank,
+  ) async {
+    topUpRequestedAmountRial = amountRial;
+    topUpRequestedBank = bank;
+    return topUpGateway;
+  }
+
+  @override
+  Future<List<TopUpPayment>> fetchTopUpPayments(Session session) async =>
+      topUpPayments;
 
   // --- Navigation ---
 

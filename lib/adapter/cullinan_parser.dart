@@ -24,6 +24,7 @@ library;
 import '../core/models.dart';
 import '../core/persian.dart';
 import '../core/portal.dart';
+import '../core/top_up.dart';
 import '../transport/html_parsing.dart';
 
 /// The Persian meal names the portal renders.
@@ -542,7 +543,104 @@ abstract final class CullinanParser {
     return out;
   }
 
-    /// True when the row's reserve checkbox is disabled, meaning the date is
+  /// Parses the internet-payment list (`MyePayList.aspx`).
+  ///
+  /// ## Why this is the proof of a top-up
+  ///
+  /// A top-up is credited **asynchronously**: the bank gateway answers first,
+  /// and the portal re-queries the bank afterwards. So a balance read taken
+  /// right after the handoff shows the old figure even though the money is on
+  /// its way, and the balance alone cannot say whether the payment landed.
+  /// This list is the portal's own account of what happened (F58).
+  ///
+  /// ## The row shape
+  ///
+  /// | cell | meaning |
+  /// |---|---|
+  /// | 0 | the row number |
+  /// | 1 | the status **icon** — `Accept16.png` (paid) or `Cancel16.png` (not) |
+  /// | 2 | the payment time, in the portal's Jalali format |
+  /// | 3 | the amount, in Rial |
+  /// | 4 | the invoice number |
+  /// | 5 | the bank's tracking code (`-` when there is none) |
+  /// | 6 | the bank |
+  /// | 7 | the portal's own message |
+  ///
+  /// The status is read from the **icon**, not the message: the message is
+  /// free text, and a row whose status the app cannot classify must not be
+  /// read as a success.
+  ///
+  /// The list is rendered **newest first** (verified live: the newest attempt
+  /// appears at the top), so the order is preserved.
+  static List<TopUpPayment> parseTopUpPayments(String html) {
+    final table = RegExp(
+      '<table[^>]*id="[^"]*grdContent"[^>]*>(.*?)</table>',
+      dotAll: true,
+    ).firstMatch(html);
+    if (table == null) return const [];
+
+    final out = <TopUpPayment>[];
+
+    for (final match in RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true)
+        .allMatches(table.group(1)!)) {
+      final raw = match.group(1)!;
+      final cells = RegExp(r'<td[^>]*>(.*?)</td>', dotAll: true)
+          .allMatches(raw)
+          .map((m) => stripTags(m.group(1)!))
+          .toList();
+      if (cells.length < 8) continue;
+
+      // The row number is the first cell; a row without one is a header or a
+      // spacer.
+      if (int.tryParse(cells[0].trim()) == null) continue;
+
+      final amount = parseRial(cells[3]);
+      if (amount == null || amount <= 0) continue;
+
+      out.add(TopUpPayment(
+        amountRial: amount,
+        status: _topUpStatus(raw, cells[7].trim()),
+        paidAtJalali: _emptyToNull(cells[2].trim()),
+        invoiceNumber: _emptyToNull(cells[4].trim()),
+        bank: _emptyToNull(cells[6].trim()),
+        message: _emptyToNull(cells[7].trim()),
+      ));
+    }
+
+    return out;
+  }
+
+  /// The status of a payment row, read from its icon.
+  ///
+  /// The icon is the authority. The message is a fallback for a row whose
+  /// icon the app does not recognise, and a row with neither is **unknown** —
+  /// never a success, because a mis-read row would tell the student their
+  /// money arrived when it did not.
+  static TopUpStatus _topUpStatus(String rowHtml, String message) {
+    final icon = RegExp(r'<img[^>]*src="([^"]*)"', dotAll: true)
+        .firstMatch(rowHtml)
+        ?.group(1)
+        ?.toLowerCase();
+
+    if (icon != null) {
+      if (icon.contains('accept')) return TopUpStatus.paid;
+      if (icon.contains('cancel')) return TopUpStatus.failed;
+    }
+
+    // The portal's own words, for a row whose icon is missing or new.
+    if (message.contains('موفق')) return TopUpStatus.paid;
+    if (message.contains('خطا') || message.contains('ناموفق')) {
+      return TopUpStatus.failed;
+    }
+    if (message.isEmpty) return TopUpStatus.pending;
+
+    return TopUpStatus.unknown;
+  }
+
+  static String? _emptyToNull(String value) =>
+      value.isEmpty || value == '-' ? null : value;
+
+  /// True when the row's reserve checkbox is disabled, meaning the date is
   /// locked by the server.
   static bool _isDisabled(String rowHtml, String suffix) =>
       inputBySuffix(rowHtml, suffix)?.disabled ?? false;

@@ -39,6 +39,7 @@ import 'dart:async';
 
 import 'models.dart';
 import 'portal.dart';
+import 'top_up.dart';
 
 /// A [PortalClient] that serialises its operations per account.
 class SerialisedPortalClient implements PortalClient {
@@ -190,6 +191,27 @@ class SerialisedPortalClient implements PortalClient {
   @override
   Future<CancelOutcome> cancel(Session session, MealRef ref) =>
       _exclusive(session.account, () => _inner.cancel(session, ref));
+
+  // --- Top-up ---
+
+  @override
+  Future<TopUpPage> fetchTopUpPage(Session session) =>
+      _exclusive(session.account, () => _inner.fetchTopUpPage(session));
+
+  @override
+  Future<Uri> beginTopUp(
+    Session session,
+    int amountRial,
+    TopUpBank bank,
+  ) =>
+      _exclusive(
+        session.account,
+        () => _inner.beginTopUp(session, amountRial, bank),
+      );
+
+  @override
+  Future<List<TopUpPayment>> fetchTopUpPayments(Session session) =>
+      _exclusive(session.account, () => _inner.fetchTopUpPayments(session));
 
   // --- Navigation ---
 
