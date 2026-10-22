@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.net.Uri
 import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import io.flutter.plugin.common.MethodChannel
@@ -110,9 +111,96 @@ class AlarmScheduler(private val context: Context) {
         alarmManager.cancel(pendingIntent)
     }
 
+    /**
+     * Schedules the hunt's wake-up for [accountId] at [triggerAtMillis].
+     *
+     * ## Why the hunt has its own action
+     *
+     * The reminder alarms and the hunt alarms are different things, and the
+     * receiver has to tell them apart *before* the Dart side can be asked. The
+     * reminder alarms carry a payload the Dart side defines ("lunch",
+     * "evening", "nudge"); the hunt's carries an account id. Guessing from
+     * the payload's shape would mean a payload the app did not recognise was
+     * treated as a hunt — so the action says which it is, and the payload
+     * only says which account.
+     *
+     * ## Why the account is in the intent's data, not only in its extra
+     *
+     * A `PendingIntent` is identified by its request code **and** its intent's
+     * action, data, type and component — but not by its extras. So two
+     * accounts' hunt alarms, sharing a request code and an intent, would be
+     * the *same* pending intent: arming the second would silently replace
+     * the first, and cancelling one would cancel both.
+     *
+     * Putting the account in the data URI makes each account's alarm a
+     * distinct pending intent, so each can be armed, replaced and cancelled
+     * on its own. The request code is then the same for all of them, and the
+     * data does the distinguishing.
+     */
+    fun scheduleHunt(accountId: String, triggerAtMillis: Long) {
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            HUNT_REQUEST_CODE,
+            huntIntent(accountId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        if (canScheduleExact()) {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerAtMillis,
+                pendingIntent,
+            )
+        } else {
+            // Without the permission the alarm still fires, just not exactly.
+            // A late hunt is worth less than a punctual one — it may find the
+            // market already empty — which is why the app asks for the
+            // permission in the first place.
+            alarmManager.setWindow(
+                AlarmManager.RTC_WAKEUP,
+                triggerAtMillis,
+                INEXACT_WINDOW_MILLIS,
+                pendingIntent,
+            )
+        }
+    }
+
+    /** Cancels the hunt's wake-up for [accountId]. */
+    fun cancelHunt(accountId: String) {
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            HUNT_REQUEST_CODE,
+            huntIntent(accountId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        alarmManager.cancel(pendingIntent)
+    }
+
+    /** The intent that identifies a hunt's wake-up for [accountId]. */
+    private fun huntIntent(accountId: String): Intent =
+        Intent(context, ReminderAlarmReceiver::class.java).apply {
+            action = ACTION_HUNT
+            // The data is part of the pending intent's identity, so each
+            // account's alarm is its own.
+            data = Uri.parse("bahonar-nut://hunt/${Uri.encode(accountId)}")
+            putExtra(EXTRA_PAYLOAD, accountId)
+        }
+
     companion object {
         const val ACTION_REMINDER = "ir.ac.uk.bahonar_nut.REMINDER"
+
+        /** The hunt's own wake-up, which the receiver tells apart by action. */
+        const val ACTION_HUNT = "ir.ac.uk.bahonar_nut.HUNT"
+
         const val EXTRA_PAYLOAD = "payload"
+
+        /**
+         * The request code every hunt alarm shares.
+         *
+         * The accounts are told apart by the intent's data, not by the
+         * request code — see [scheduleHunt].
+         */
+        const val HUNT_REQUEST_CODE = 4300
 
         /** How much an inexact alarm may drift, in milliseconds. */
         private const val INEXACT_WINDOW_MILLIS = 10 * 60 * 1000L

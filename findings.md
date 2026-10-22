@@ -2721,3 +2721,165 @@ spent on a bug in the *test*, not the app: `adb shell input text` typed eleven
 characters where the password has ten, because the `%%s` escape for `@` also
 typed a space. The app's refusal was correct, and the screen was still wrong
 about it — which is F78, found the hard way.
+
+### F83 — The hunt's automatic start had no trigger, and no date
+
+**Severity:** high — the feature's central promise was false.
+
+**Found by:** reading the hunt's own code against the screen it owns, then
+verifying on the device.
+
+#### The defect
+
+`HuntConfig.enabled` was decoded, persisted, and read by the switch on the
+hunt screen — and the card's subtitle claimed:
+
+> «این شکار روشن است و هنگام بازه زمانی خود شروع می‌شود.»
+> ("this hunt is on and starts by itself during its time window")
+
+Nothing made that true. There were **two** independent faults underneath the
+one lie.
+
+**1. No trigger.** No alarm was ever armed for a hunt. The native side had
+`scheduleAlarm` for reminders and nothing for hunts, and the Dart side had no
+code path that armed one. The switch changed a boolean; a boolean that nothing
+reads cannot start anything.
+
+**2. No date.** Even given a trigger, the window was a bare time of day
+(`16:30`–`20:30`). A hunt set up in the morning for **tomorrow's** dinner
+found its window open *today*, hunted today's market — which it could never
+buy from — burned its request budget against it, and ended a day early. The
+engine asked "is it between 16:30 and 20:30?" and never asked "is it the
+right day?".
+
+The breakfast case is the sharpest. A breakfast is **collected with the
+previous evening's dinner**, so a hunt for Thursday's breakfast has to be in
+the market on *Wednesday*. The offset is not a constant — it comes from the
+serving calendar, and a Friday breakfast does not exist at all (Thursday
+serves no dinner) nor does a Saturday breakfast (Friday serves no dinner).
+
+#### The fix
+
+**The domain half** (`lib/core/hunt_schedule.dart`) is pure and derives when a
+hunt actually runs:
+
+- `HuntSchedules.collectionDate` walks back one day for a breakfast and then
+  asks `ServiceCalendar` whether that evening serves dinner. If it does not,
+  the breakfast does not exist and the result is `mealNotServed`.
+- `HuntSchedules.scheduleFor` turns the collection date and the window into a
+  UTC wake instant and a UTC window end, and reports one of six statuses:
+  `scheduled`, `disabled`, `noTargetDate`, `mealNotServed`, `windowPassed`,
+  `windowInvalid`.
+
+**A window that has passed is not pushed to tomorrow.** That was the first
+implementation, and it was wrong. The window belongs to the *collection date*,
+and the meal is released *in* that window — so a hunt that woke tomorrow would
+poll a market that no longer carries the meal. A passed window is
+`windowPassed`, and the hunt does not run.
+
+**The engine is now date-aware.** `SnipeRule` carries the collection date, and
+`isOpenAt(clockTime, portalDate)` checks the time *and* the day. A rule with
+no date keeps the old time-of-day behaviour, and an unknown date falls back to
+it too — a date nobody can name is not a reason to refuse the window.
+
+**The native half** (`AlarmScheduler.kt`) arms a real exact alarm:
+
+- `ACTION_HUNT = "ir.ac.uk.bahonar_nut.HUNT"`, request code `4300`,
+  `setExactAndAllowWhileIdle`.
+- The account id goes in the intent's **data URI**
+  (`bahonar-nut://hunt/<account>`), not in the extras. `PendingIntent`
+  identity is request code plus action/data/type/component — **extras are not
+  part of it**. Two accounts sharing a request code and an intent would have
+  been the *same* pending intent: arming the second would silently replace the
+  first, and cancelling one would cancel both. The data URI is what makes the
+  alarm per-account.
+
+**The receiver now dispatches on the action, not on the payload's shape.** The
+old code told a reminder from a hunt by asking whether the payload was one of
+the three it knew, and treated **everything else as a hunt**. That made an
+unrecognised payload a hunt wake-up — which is how a reminder that went
+missing could have started a hunt for an account nobody named. The action is
+unambiguous: the app arms a hunt with `ACTION_HUNT` and a reminder with
+`ACTION_REMINDER`, and nothing else. An unknown alarm now starts nothing and
+records nothing.
+
+**The card states the truth.** The hunt screen shows the start instant in the
+portal's own wall clock («در ساعت ۱۶:۳۰ در پنج‌شنبه ۳۰ مهر»), and when the
+hunt will *not* start it says **which** reason, because the reasons call for
+different things from the student:
+
+| Status | What the student is told |
+|---|---|
+| `noTargetDate` | pick a date first |
+| `mealNotServed` | the portal does not serve that meal that day |
+| `windowPassed` | the window has passed — change the date or the window |
+| `windowInvalid` | the end time is not after the start time |
+
+A switch that looks live but never fires is a lie, and a refusal without a
+reason is a refusal you cannot act on.
+
+#### What this does *not* fix
+
+**The background execution is not implemented.** The alarm is armed and it
+fires; the receiver records the request and starts the service; but the hunt's
+Dart engine does not yet run with the app closed. Today the wake-up reaches
+the Dart side through the F75 "record, don't deliver" path: the request is
+written to `requests.pending` and the hunt starts on the next launch.
+
+The mechanism for the real thing is understood but unproven. Reading the
+engine source at `/d/flutter/engine/src/flutter` settled it: a *spawned*
+isolate's `MethodChannel` resolves to `BackgroundIsolateBinaryMessenger`,
+which needs a root isolate to have registered it and cannot receive messages
+— so the background hunt needs its **own `FlutterEngine`**, whose Dart *is*
+the root isolate with its own `defaultBinaryMessenger`. `DartIsolate::RunFromLibrary`
+and `DartEntrypoint`'s 3-arg form are the entry points. Two facts remain
+unverified on the device: whether a `BroadcastReceiver` woken by an exact alarm
+may call `startForegroundService()` on Android 12+ (the background-FGS-start
+exemption list), and whether a headless Dart entrypoint in a second
+`FlutterEngine` can carry the hunt's engine into a background service with the
+activity closed.
+
+#### The device verification
+
+The card's claim was checked on the screen the feature owns, on the emulator
+(API 34), and the native alarm was checked in the system's own alarm table.
+
+**The card now states the time.** With the hunt switched on for a dinner on
+پنج‌شنبه ۳۰ مهر:
+
+> این شکار روشن است و در ساعت ۱۶:۳۰ در پنج‌شنبه ۳۰ مهر به‌طور خودکار شروع می‌شود.
+
+**The alarm is armed, at the right instant.** `adb shell dumpsys alarm` shows:
+
+```
+RTC_WAKEUP #20: Alarm{e187dc1 type 0 origWhen 1792674000000 ... ir.ac.uk.bahonar_nut}
+  tag=*walarm*:ir.ac.uk.bahonar_nut.HUNT
+  type=RTC_WAKEUP origWhen=2026-10-22 16:30:00.000 window=0 exactAllowReason=allow-listed
+```
+
+`exactAllowReason=allow-listed` — the exact alarm permission is granted and the
+alarm is exact, so Doze will not defer it to a window. `origWhen` is
+`16:30` **portal-local**, which is the same clock the window is set in.
+
+**The receiver dispatches correctly.** Firing the hunt intent at the receiver
+wrote `requests.pending = hunt:acc-…` to the store — the request was owed
+rather than dropped. Relaunching the app consumed it and cleared the key, and
+the alarm was re-armed at the same instant.
+
+**One false alarm during the verification, and it was the test's fault.** The
+first two attempts used `adb shell am broadcast` as the shell user, and the
+receiver produced nothing at all. The receiver is `exported="false"`, so a
+broadcast from another uid is **silently dropped** — no exception, no log
+line, just a missing record. The symptom looked exactly like a broken
+dispatch, and the cause was the harness. `adb root` made the same broadcast
+work. Worth knowing: a silent drop from `exported="false"` is indistinguishable
+from a broken receiver in the log, so any future "the receiver did not run"
+report must be checked against the export flag before the code is blamed.
+
+**The stale APK nearly hid the whole fix.** The first device run showed the
+*old* card wording, and the natural reading was that the fix had not been
+built. The APK on the device was from `04:40` while the sources were edited at
+`07:03`–`07:05` — the build had not been re-run, and the build had in fact
+**failed silently** with `No Android SDK found` because `ANDROID_HOME` was
+not exported in that shell. `scripts/env.sh` holds the toolchain; the rule is
+to source it before any `flutter` command.

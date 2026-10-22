@@ -80,6 +80,26 @@ class PlatformBridge {
     await _call<void>('cancelAlarm', {'requestCode': requestCode});
   }
 
+  /// Arms the hunt's wake-up for [accountId].
+  ///
+  /// The hunt's alarm is separate from the reminder alarms, and the account
+  /// is part of its identity — so arming one account's hunt does not replace
+  /// another's, and cancelling one does not cancel the other.
+  Future<void> scheduleHuntAlarm({
+    required AccountId accountId,
+    required DateTime triggerAt,
+  }) async {
+    await _call<void>('scheduleHuntAlarm', {
+      'accountId': accountId,
+      'triggerAtMillis': triggerAt.millisecondsSinceEpoch,
+    });
+  }
+
+  /// Cancels the hunt's wake-up for [accountId].
+  Future<void> cancelHuntAlarm(AccountId accountId) async {
+    await _call<void>('cancelHuntAlarm', {'accountId': accountId});
+  }
+
   /// The reminder deliveries the app owes.
   ///
   /// A reminder alarm fires when the app may not be running, and the digest

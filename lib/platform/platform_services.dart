@@ -26,6 +26,7 @@ import '../core/snipe_engine.dart';
 import '../core/time.dart';
 import '../transport/http_transport.dart';
 import 'hunt_service.dart';
+import 'hunt_schedule_service.dart';
 import 'platform_bridge.dart';
 import 'reminder_service.dart';
 import 'reservation_service.dart';
@@ -151,6 +152,10 @@ class AppServices {
 
   /// The hunt's platform service: runs the hunt and reports its outcome.
   late final HuntService hunts = HuntService(bridge: bridge, engine: engine);
+
+  /// The hunt's schedule: arms the wake-up that starts the hunt by itself.
+  late final HuntScheduleService huntSchedule =
+      HuntScheduleService(bridge: bridge);
 
   /// Books and cancels weekly meals.
   late final ReservationService reservations = ReservationService(

@@ -176,6 +176,24 @@ class PlatformChannel(
                     result.success(null)
                 }
 
+                // --- the hunt's own wake-up ---
+                // The hunt's alarm is armed per account, and the account is
+                // part of the pending intent's identity — so one account's
+                // hunt never replaces another's, and cancelling one does not
+                // cancel the other.
+                "scheduleHuntAlarm" -> {
+                    alarms.scheduleHunt(
+                        call.argument<String>("accountId")!!,
+                        call.argument<Long>("triggerAtMillis")!!,
+                    )
+                    result.success(null)
+                }
+
+                "cancelHuntAlarm" -> {
+                    alarms.cancelHunt(call.argument<String>("accountId")!!)
+                    result.success(null)
+                }
+
                 "canScheduleExactAlarms" -> result.success(alarms.canScheduleExact())
 
                 "requestExactAlarmPermission" -> {

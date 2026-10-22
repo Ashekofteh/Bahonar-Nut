@@ -734,7 +734,11 @@ void main() {
           ],
         ),
         listener: RecordingListener(),
-        now: DateTime.utc(2026, 10, 28, 14, 30),
+        // The breakfast of 2026-10-28 is collected with that Tuesday's
+        // dinner, so its window opens on the **27th** — and the clock has to
+        // be inside it. This is the change F83 made: a hunt's window belongs
+        // to the day the meal is taken, not to the day it is dated.
+        now: DateTime.utc(2026, 10, 27, 14, 30),
       );
 
       await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
@@ -919,6 +923,69 @@ void main() {
       expect(harness.engine.isRunning('r1'), isFalse,
           reason: 'the window closed, so the hunt is over');
       expect(harness.listener.ends, isNotEmpty);
+    });
+
+    test('a hunt for tomorrow does not poll on today', () async {
+      // The defect F83 fixed: a hunt's window was a bare time of day, so a
+      // hunt for tomorrow's dinner, started this afternoon, found its window
+      // open *today* and hunted today's market — a market it can never buy
+      // from — burning the request budget against it.
+      final client = TimelineClient(pages: [[]]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          slot: MealSlot.dinner,
+          targetDate: DateTime.utc(2026, 10, 29),
+          windowStart: const ClockTime(16, 30),
+          windowEnd: const ClockTime(20, 30),
+        ),
+        listener: RecordingListener(),
+        // 18:00 portal-local on the 28th: inside the *time* of day, but a
+        // day early.
+        now: DateTime.utc(2026, 10, 28, 14, 30),
+      );
+
+      // The day each poll happened on, in the portal's frame.
+      final pollDays = <int>[];
+      client.onPoll = () => pollDays.add(
+            harness.clock.portalNow.toUtc().difference(
+                  DateTime.utc(2026, 10, 28),
+                ).inDays,
+          );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await harness.engine.stop('r1');
+
+      expect(
+        pollDays.every((d) => d == 1),
+        isTrue,
+        reason: 'the hunt is for the 29th, so every poll must land on the '
+            '29th. Polls landed on day offsets: $pollDays',
+      );
+    });
+
+    test('a hunt for tomorrow polls once its day arrives', () async {
+      final client = TimelineClient(pages: [[]]);
+      final harness = Harness(
+        client: client,
+        config: huntConfig(
+          slot: MealSlot.dinner,
+          targetDate: DateTime.utc(2026, 10, 29),
+          windowStart: const ClockTime(16, 30),
+          windowEnd: const ClockTime(20, 30),
+        ),
+        listener: RecordingListener(),
+        // 18:00 portal-local on the 29th: the hunt's own day.
+        now: DateTime.utc(2026, 10, 29, 14, 30),
+      );
+
+      await harness.engine.start(ruleFor(harness.config), hunt: harness.config);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await harness.engine.stop('r1');
+
+      expect(client.pollStarts, isNotEmpty,
+          reason: 'the hunt is for the 29th, and this is the 29th');
     });
   });
 

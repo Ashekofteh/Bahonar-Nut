@@ -86,10 +86,25 @@ image was fetched in, so the challenge now carries its session id and the answer
 is posted back in it. That is what makes the student's reading time safe, and
 what lets the app keep reading the portal while they read.
 
-**Still to come in phase 10:** battery profiling (the duty cycle and the radio
-wake-ups), Doze and OEM-killer behaviour under a long hunt, and a live read of
-the request budget against the portal. Phase 6, the Windows shell, remains the
-one untouched platform — by design, it is a free-rider.
+**Phase 10 progress, continued.** The **hunt's automatic start is armed and
+verified on the device**. The card's claim that a switched-on hunt starts by
+itself was false in two ways at once: no alarm was ever armed for a hunt, and
+the window was a bare time of day, so a hunt for tomorrow's dinner hunted
+today's market and ended a day early. Both are fixed. The window's date is
+derived from the serving calendar — a breakfast is collected with the previous
+evening's dinner, so a Friday breakfast does not exist at all — and the hunt
+now arms a real exact alarm, per account, keyed on the account in the intent's
+data URI because `PendingIntent` identity ignores extras. On the device the
+card states the start instant in the portal's own clock, and `dumpsys alarm`
+shows the alarm armed and exact (`exactAllowReason=allow-listed`).
+
+**Still to come in phase 10:** the hunt's **headless execution** — the Dart
+engine running the hunt with the app closed, which needs its own
+`FlutterEngine` rather than a spawned isolate — plus battery profiling (the
+duty cycle and the radio wake-ups), Doze and OEM-killer behaviour under a long
+hunt, and a live read of the request budget against the portal. Phase 6, the
+Windows shell, remains the one untouched platform — by design, it is a
+free-rider.
 
 **Transport** (phase 1 remainder) is done: per-account cookie jars, Date-header
 capture, explicit redirect following, HTML parsing.

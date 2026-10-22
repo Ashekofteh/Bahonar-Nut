@@ -1198,3 +1198,92 @@ app.**
 defects, at the level the student sees them: the refusal's reason must reach
 the screen, and the stale first error must not; and a bounced read must ask the
 student again rather than dead-end. Both were checked to fail without the fix.
+
+## 2026-10-22 — Session 30: the hunt's automatic start, made true
+
+The hunt screen promised that a switched-on hunt «شروع می‌شود» — starts by
+itself. It did not. Two separate faults sat under the one false claim, and
+both had to be fixed before the sentence on the card could be true.
+
+**There was no trigger.** No alarm was ever armed for a hunt. `HuntConfig.enabled`
+was decoded, persisted, and read by a switch, and nothing ever read it to start
+anything. A boolean nothing consumes cannot start a hunt. The native side now
+arms a real `setExactAndAllowWhileIdle` alarm, per account.
+
+**And there was no date.** The window was a bare time of day, so a hunt set up
+in the morning for tomorrow's dinner found its window open *today*, hunted
+today's market — which it could never buy from — burned its request budget
+against it, and ended a day early. The engine now checks the day as well as the
+time, and the day is derived rather than assumed: a breakfast is collected with
+the previous evening's dinner, so a hunt for Thursday's breakfast must be in
+the market on Wednesday, and a Friday breakfast does not exist at all because
+Thursday serves no dinner.
+
+**The receiver had a worse bug underneath.** It told a reminder from a hunt by
+asking whether the payload was one of the three it knew, and treated everything
+else as a hunt. An unrecognised payload was therefore a hunt wake-up — which is
+how a reminder that went missing could have started a hunt for an account
+nobody named. It now dispatches on the intent's **action**, and an alarm it
+does not recognise starts nothing and records nothing.
+
+**Two things had to be right for the alarm to be per-account.** `PendingIntent`
+identity is request code plus action/data/type/component — **extras are not part
+of it** — so two accounts on the same request code and intent were the *same*
+pending intent: arming the second replaced the first, cancelling one cancelled
+both. The account id therefore lives in the intent's data URI
+(`bahonar-nut://hunt/<account>`). And the hunt's own alarm is a different
+request code from the reminders', so the two never collide.
+
+### The device verification
+
+The card's claim was checked on the screen the feature owns, and the alarm was
+checked in the system's own alarm table rather than in the app's own words.
+
+The card now reads «این شکار روشن است و در ساعت ۱۶:۳۰ در پنج‌شنبه ۳۰ مهر
+به‌طور خودکار شروع می‌شود.» And `dumpsys alarm` shows the alarm armed and
+**exact**: `origWhen=2026-10-22 16:30:00.000`, `exactAllowReason=allow-listed`
+— the permission is granted and Doze will not defer it to a window. Firing the
+hunt intent at the receiver wrote `requests.pending` to the store, and
+relaunching consumed it and re-armed the alarm at the same instant.
+
+### Two false alarms, both mine
+
+**The receiver looked broken and was not.** The first two attempts used
+`adb shell am broadcast` as the shell user and the receiver produced nothing at
+all. It is `exported="false"`, so a broadcast from another uid is **silently
+dropped** — no exception, no log line, just a missing record, which is
+indistinguishable from a broken dispatch. `adb root` made the same broadcast
+work. A silent drop from the export flag must be ruled out before the code is
+blamed.
+
+**The APK was stale, and the build had failed silently.** The first device run
+showed the *old* card wording, which reads as "the fix is not in the build".
+The APK was from `04:40` and the sources were edited at `07:03`–`07:05`: the
+build had never been re-run, and it had in fact **failed** with
+`No Android SDK found` because `ANDROID_HOME` was not exported. `scripts/env.sh`
+holds the toolchain — source it before any `flutter` command, and check the
+APK's timestamp against the sources' before believing the device.
+
+### What is still not done
+
+**The hunt still does not run with the app closed.** The alarm fires, the
+receiver records the request, the service starts — but the Dart engine does not
+yet run headless. Today the wake-up takes the F75 path: the request is owed and
+the hunt starts on the next launch.
+
+The mechanism is now understood, from the engine source rather than the docs: a
+spawned isolate's `MethodChannel` resolves to `BackgroundIsolateBinaryMessenger`,
+which needs a root isolate to have registered it and cannot receive messages —
+so the background hunt needs **its own `FlutterEngine`**, whose Dart *is* the
+root isolate. Two things remain unproven on the device: whether an exact-alarm
+`BroadcastReceiver` may call `startForegroundService()` on Android 12+, and
+whether a headless Dart entrypoint in a second engine can carry the hunt into a
+background service with the activity closed.
+
+### Testing approach
+
+**912 tests pass, analyzer clean.** 21 new tests pin the schedule domain (the
+collection date, the wake instant, the six statuses), the engine's date-aware
+window, the arming in the shell, and the card's wording — including that a
+hunt which will not start says **which** reason, and that a switched-off hunt
+makes no claim about starting at all.

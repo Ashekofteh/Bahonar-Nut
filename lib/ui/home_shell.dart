@@ -95,6 +95,15 @@ class _HomeShellState extends State<HomeShell> {
           .catchError((_) {});
     };
 
+    // A hunt configuration change re-arms that account's wake-up, so the
+    // promise the hunt screen makes — «این شکار ... هنگام بازه زمانی خود شروع
+    // می‌شود» — is kept in step with the settings the student can see.
+    //
+    // The callback carries the account, because the alarm is per account.
+    widget.state.onHuntConfigChanged = (accountId, config) {
+      _armHunt(accountId, config);
+    };
+
     // The platform can ask for a hunt, or report that a reminder alarm fired.
     widget.services.bridge.onHuntRequested((payload) {
       if (!mounted) return;
@@ -138,6 +147,7 @@ class _HomeShellState extends State<HomeShell> {
     widget.state.onLoaded = () {
       if (mounted) {
         _armReminders();
+        _armHunts();
         _deliverPending();
         _answerPendingRequests();
       }
@@ -146,10 +156,48 @@ class _HomeShellState extends State<HomeShell> {
       if (!mounted) return;
       if (widget.state.isLoaded) {
         _armReminders();
+        _armHunts();
         _deliverPending();
         _answerPendingRequests();
       }
     });
+  }
+
+  /// Arms the wake-up for every account that has a hunt.
+  ///
+  /// The alarm is derived from the configuration, so it is armed on **load**
+  /// as well as on change: a hunt that was set up yesterday must still start
+  /// by itself today, with the app closed and never opened since. And a
+  /// reboot clears every alarm, so the re-arm after a reboot is the same
+  /// call.
+  Future<void> _armHunts() async {
+    for (final account in widget.state.accounts) {
+      final config = widget.state.huntConfigFor(account.id);
+      if (config == null) continue;
+      await _armHunt(account.id, config);
+    }
+  }
+
+  /// Arms the wake-up for one account's hunt, and records the schedule.
+  ///
+  /// The result is recorded so the hunt screen can say **when** the hunt will
+  /// start. A card that claims the hunt starts by itself, without saying
+  /// when, is a claim the student cannot check — and the whole point of the
+  /// switch is that they can.
+  Future<void> _armHunt(AccountId accountId, HuntConfig config) async {
+    try {
+      final result = await widget.services.huntSchedule.arm(
+        accountId: accountId,
+        config: config,
+        clock: widget.services.clock,
+      );
+      if (!mounted) return;
+      widget.state.setHuntSchedule(accountId, result);
+    } catch (_) {
+      // The platform may not be ready, or the exact-alarm permission may not
+      // be granted. The hunt screen states the permission situation, and a
+      // failed arm must not take the app down with it.
+    }
   }
 
   /// Answers the requests the platform made while the app was not running.
@@ -194,6 +242,7 @@ class _HomeShellState extends State<HomeShell> {
         case PendingRequestKind.rearm:
           // The alarms were cleared by the reboot; arm them again.
           await _armReminders();
+          await _armHunts();
           answered.add(entry);
 
         case PendingRequestKind.hunt:
@@ -975,6 +1024,7 @@ class _HomeShellState extends State<HomeShell> {
           marketError: _marketError,
           targetDates: _targetDates(),
           isRunning: state.huntRunning,
+          schedule: state.huntScheduleFor(activeId),
           preflightSummary: state.huntPreflightSummary,
           preflightRefusal: state.huntPreflightRefusal,
           onConfigChanged: (updated) => _onConfigChanged(updated),

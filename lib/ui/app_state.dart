@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import '../core/account.dart';
 import '../core/account_store.dart';
 import '../core/hunt_config.dart';
+import '../core/hunt_schedule.dart';
 import '../core/hunt_store.dart';
 import '../core/local_meal_store.dart';
 import '../core/models.dart';
@@ -73,6 +74,13 @@ class AppState extends ChangeNotifier {
   String? _huntPreflightSummary;
   String? _huntPreflightRefusal;
 
+  /// The hunt's schedule, per account.
+  ///
+  /// What the wake-up was armed for, and whether it was armed at all. The
+  /// screen shows it, because the card claims the hunt starts by itself — and
+  /// a claim without a time is a claim the student cannot check.
+  final Map<AccountId, HuntScheduleResult> _huntSchedules = {};
+
   /// The dashboard's filter. Multi-select on both dimensions.
   SpendFilter _spendFilter = const SpendFilter();
 
@@ -118,6 +126,19 @@ class AppState extends ChangeNotifier {
 
   /// Whether a hunt is running.
   bool get huntRunning => _huntRunning;
+
+  /// The schedule of the account's hunt, when there is one.
+  ///
+  /// Null when the account has no hunt configuration, or when the schedule
+  /// has not been worked out yet.
+  HuntScheduleResult? huntScheduleFor(AccountId accountId) =>
+      _huntSchedules[accountId];
+
+  /// Records the schedule that was armed for an account.
+  void setHuntSchedule(AccountId accountId, HuntScheduleResult result) {
+    _huntSchedules[accountId] = result;
+    notifyListeners();
+  }
 
   /// The transactions the dashboard is computed from.
   List<Transaction> get transactions => _transactions;
@@ -343,7 +364,21 @@ class AppState extends ChangeNotifier {
     _huntPreflightSummary = null;
     _huntPreflightRefusal = null;
     notifyListeners();
+
+    // The wake-up is derived from the configuration, so a change has to
+    // re-arm it. A hunt the student switched off must stop firing, and one
+    // they switched on — or retargeted — must start at the right time.
+    //
+    // The callback carries the account, because the alarm is per account: a
+    // change to one account's hunt must not touch another's.
+    onHuntConfigChanged?.call(accountId, config);
   }
+
+  /// Called after a hunt configuration changes, so the wake-up can be re-armed.
+  ///
+  /// The state owns the configuration; the platform owns the alarms. The
+  /// platform layer sets this.
+  void Function(AccountId accountId, HuntConfig config)? onHuntConfigChanged;
 
   /// Records the pre-flight verdict for the hunt.
   void setHuntPreflight({String? summary, String? refusal}) {

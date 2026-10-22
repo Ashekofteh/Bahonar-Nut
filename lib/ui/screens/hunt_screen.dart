@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/hunt_config.dart';
 import '../../core/hunt_notify.dart';
+import '../../core/hunt_schedule.dart';
 import '../../core/models.dart';
 import '../../core/persian.dart';
 import '../../core/service_calendar.dart';
@@ -66,6 +67,7 @@ class HuntScreen extends StatefulWidget {
     this.isRunning = false,
     this.marketError,
     this.targetDates = const [],
+    this.schedule,
   });
 
   /// The dates the portal will serve that the hunt may target.
@@ -107,6 +109,12 @@ class HuntScreen extends StatefulWidget {
   /// Whether a hunt is currently running.
   final bool isRunning;
 
+  /// When the hunt will start by itself, and whether it will.
+  ///
+  /// Null when the schedule has not been worked out — which is a state the
+  /// card has to be honest about rather than paper over.
+  final HuntScheduleResult? schedule;
+
   @override
   State<HuntScreen> createState() => _HuntScreenState();
 }
@@ -124,6 +132,7 @@ class _HuntScreenState extends State<HuntScreen> {
           _EnabledCard(
             config: config,
             isRunning: widget.isRunning,
+            schedule: widget.schedule,
             onChanged: widget.onConfigChanged,
           ),
           const SizedBox(height: 12),
@@ -184,22 +193,27 @@ class _EnabledCard extends StatelessWidget {
   const _EnabledCard({
     required this.config,
     required this.isRunning,
+    required this.schedule,
     required this.onChanged,
   });
 
   final HuntConfig config;
   final bool isRunning;
+  final HuntScheduleResult? schedule;
   final void Function(HuntConfig) onChanged;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final projected = config.projectedRequests();
+    final start = _startText();
 
     return SectionCard(
       title: 'فعال‌سازی شکار',
       subtitle: config.enabled
-          ? 'این شکار روشن است و هنگام بازه زمانی خود شروع می‌شود.'
+          ? (start == null
+              ? 'این شکار روشن است.'
+              : 'این شکار روشن است و $start به‌طور خودکار شروع می‌شود.')
           : 'شکار خاموش است. تا آن را روشن نکنید، شکاری اجرا نمی‌شود.',
       trailing: Switch(
         value: config.enabled,
@@ -233,6 +247,16 @@ class _EnabledCard extends StatelessWidget {
               ),
             ],
           ),
+          if (config.enabled && start == null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _noScheduleReason(),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           Text(
             'هزینه تقریبی این شکار در بازه فعلی: '
@@ -256,6 +280,58 @@ class _EnabledCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// When the hunt will start, in Persian, or null when it will not.
+  ///
+  /// ## Why the time is spelled out
+  ///
+  /// The card says the hunt «شروع می‌شود» — "starts". A student who reads
+  /// that has no way to tell a hunt that starts at 16:30 tonight from one
+  /// that starts tomorrow morning, or one that will not start at all because
+  /// its window has passed. So the time is here, in the same card, and a hunt
+  /// that cannot start says so instead of saying nothing.
+  String? _startText() {
+    final result = schedule;
+    if (result == null) return null;
+    if (!result.isScheduled) return null;
+
+    final wakeAt = result.schedule!.wakeAtUtc;
+    // The instant is a UTC moment, but the student thinks in the portal's
+    // wall clock — the same clock the window is set in.
+    final local = wakeAt.add(ServerClock.portalUtcOffset);
+
+    return 'در ساعت ${formatClockTimePersian(local.hour, local.minute)} '
+        'در ${formatPersianDate(local)}';
+  }
+
+  /// Why the hunt will not start, in Persian.
+  ///
+  /// The reasons are different and they call for different things from the
+  /// student, so they are told apart rather than pooled into one message.
+  String _noScheduleReason() {
+    final result = schedule;
+    if (result == null) {
+      return 'زمان شروع خودکار هنوز مشخص نشده است.';
+    }
+
+    switch (result.status) {
+      case HuntScheduleStatus.disabled:
+        return 'این شکار خاموش است.';
+      case HuntScheduleStatus.noTargetDate:
+        return 'برای شروع خودکار، ابتدا تاریخ این وعده را انتخاب کنید.';
+      case HuntScheduleStatus.mealNotServed:
+        return 'این وعده در این تاریخ ارائه نمی‌شود، پس شکاری برای آن معنا '
+            'ندارد.';
+      case HuntScheduleStatus.windowPassed:
+        return 'بازه زمانی این شکار گذشته است. برای شروع خودکار، تاریخ یا '
+            'بازه را تغییر دهید.';
+      case HuntScheduleStatus.windowInvalid:
+        return 'بازه زمانی معتبر نیست: ساعت پایان باید پس از ساعت شروع '
+            'باشد.';
+      case HuntScheduleStatus.scheduled:
+        return '';
+    }
   }
 }
 

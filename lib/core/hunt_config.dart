@@ -27,6 +27,7 @@ library;
 
 import 'models.dart';
 import 'priority.dart';
+import 'hunt_schedule.dart';
 import 'snipe.dart';
 import 'time.dart';
 
@@ -531,6 +532,17 @@ class HuntConfig {
             ? DateTarget.today
             : DateTarget.explicit,
         explicitDate: targetDate,
+        // The window is attached to the **collection date**, not to the target
+        // date: a breakfast is collected the evening before its date, so a
+        // hunt for tomorrow's breakfast opens its window tonight.
+        //
+        // Without this the window is a bare time of day, and a hunt that wakes
+        // on the wrong day opens the wrong day's window — hunting a market it
+        // can never buy from, against a request budget meant for another day.
+        windowDate: HuntSchedules.collectionDate(
+          targetDate: targetDate,
+          slot: targetSlot,
+        ),
         preferences: {
           targetSlot: toSlotPreference(offeredHalls: hallPriority),
         },

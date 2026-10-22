@@ -53,6 +53,15 @@ class _RequestBridge extends PlatformBridge {
   /// The alarms the shell armed, by request code.
   final List<int> armed = [];
 
+  /// The hunt wake-ups the shell armed, by account.
+  final List<String> huntsArmed = [];
+
+  /// The hunt wake-ups the shell cancelled, by account.
+  final List<String> huntsCancelled = [];
+
+  /// The instant each hunt wake-up was armed for.
+  final Map<String, DateTime> huntWakeAt = {};
+
   @override
   Future<List<String>> pendingRequests() async => List.of(owed);
 
@@ -73,6 +82,21 @@ class _RequestBridge extends PlatformBridge {
 
   @override
   Future<void> cancelAlarm(int requestCode) async {}
+
+  @override
+  Future<void> scheduleHuntAlarm({
+    required String accountId,
+    required DateTime triggerAt,
+  }) async {
+    huntsArmed.add(accountId);
+    huntWakeAt[accountId] = triggerAt;
+  }
+
+  @override
+  Future<void> cancelHuntAlarm(String accountId) async {
+    huntsCancelled.add(accountId);
+    huntWakeAt.remove(accountId);
+  }
 }
 
 /// A store seeded with one known account.
@@ -236,5 +260,44 @@ void main() {
     await pumpShell(tester, bridge: bridge);
 
     expect(bridge.cleared, isEmpty);
+  });
+
+  group('the hunt\'s wake-up', () {
+    testWidgets('a switched-on hunt is armed for its window', (tester) async {
+      final bridge = _RequestBridge([]);
+
+      await pumpShell(tester, bridge: bridge, huntEnabled: true);
+
+      expect(bridge.huntsArmed, contains(accountId),
+          reason: 'a hunt the student switched on must have a wake-up armed, '
+              'or the card\'s claim that it starts by itself is false');
+
+      // The shell's fixture targets a breakfast on 2026-10-22, which is
+      // collected with the 21st's dinner — so the window opens on the 21st.
+      final wakeAt = bridge.huntWakeAt[accountId]!;
+      expect(wakeAt.isBefore(DateTime.utc(2026, 10, 22)), isTrue,
+          reason: 'a breakfast is collected the evening before its date');
+    });
+
+    testWidgets('a switched-off hunt is not armed', (tester) async {
+      final bridge = _RequestBridge([]);
+
+      await pumpShell(tester, bridge: bridge, huntEnabled: false);
+
+      expect(bridge.huntsArmed, isEmpty,
+          reason: 'a hunt the student switched off must not start by itself');
+      expect(bridge.huntsCancelled, contains(accountId),
+          reason: 'and any earlier alarm for it must be cancelled');
+    });
+
+    testWidgets('a reboot re-arms the hunt\'s wake-up too', (tester) async {
+      final bridge = _RequestBridge(['rearm']);
+
+      await pumpShell(tester, bridge: bridge, huntEnabled: true);
+
+      expect(bridge.huntsArmed, contains(accountId),
+          reason: 'a reboot clears every alarm, and the hunt\'s wake-up is '
+              'one of them');
+    });
   });
 }

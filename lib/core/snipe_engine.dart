@@ -450,8 +450,16 @@ class DefaultSnipeEngine implements SnipeEngine {
       final clockTime = _clock.isSynced
           ? ClockTime(_clock.portalNow.hour, _clock.portalNow.minute)
           : null;
+      final portalDate = _clock.isSynced ? _clock.portalTodayUtc : null;
 
-      if (clockTime != null && !rule.isWithinWindow(clockTime)) {
+      // The window is checked against the **date** as well as the time of
+      // day, for a hunt whose window is attached to a collection date.
+      //
+      // A time-of-day check alone would open today's window for a hunt that
+      // belongs to tomorrow, and the hunt would poll the wrong day's market —
+      // burning the request budget against listings it can never buy, and
+      // ending a day early.
+      if (clockTime != null && !rule.isOpenAt(clockTime, portalDate)) {
         // Outside the window the hunt does **not** poll at all. It waits.
         //
         // The spec is explicit: outside the hunt window the engine does not
@@ -820,8 +828,9 @@ class DefaultSnipeEngine implements SnipeEngine {
       final current = _clock.isSynced
           ? ClockTime(_clock.portalNow.hour, _clock.portalNow.minute)
           : now;
+      final today = _clock.isSynced ? _clock.portalTodayUtc : null;
 
-      if (rule.isWithinWindow(current)) return _WindowWait.opened;
+      if (rule.isOpenAt(current, today)) return _WindowWait.opened;
 
       if (deadline != null && !_clock.nowUtc.isBefore(deadline)) {
         run.ledger.record(
@@ -848,16 +857,35 @@ class DefaultSnipeEngine implements SnipeEngine {
   ///
   /// Null when the clock is not synced, because the answer is a date and a
   /// date cannot be guessed.
+  ///
+  /// ## When the rule carries a date
+  ///
+  /// A rule with a [SnipeRule.windowDate] is attached to a **collection
+  /// date** — the day its meal is taken. The window ends on that date, and
+  /// the deadline is that instant: a hunt waiting for tomorrow's window must
+  /// not give up tonight, and a hunt whose collection day has passed must not
+  /// wait forever for a day that will never come.
+  ///
+  /// Without a date the rule's window is a bare time of day, and the old
+  /// behaviour applies: it ends today if it has not ended yet, tomorrow
+  /// otherwise.
   DateTime? _windowEndUtc(SnipeRule rule, ClockTime now) {
     final today = _clock.portalTodayUtc;
     final endMinutes = rule.windowEnd.minutesSinceMidnight;
     final nowMinutes = now.minutesSinceMidnight;
 
-    // The window has already ended today, so its next occurrence is
-    // tomorrow's.
-    final day = endMinutes <= nowMinutes
-        ? today.add(const Duration(days: 1))
-        : today;
+    final windowDate = rule.windowDate;
+    final day = windowDate != null
+        // The collection date, unless it has already passed — in which case
+        // the window is behind us and there is nothing left to wait for.
+        ? (windowDate.isAfter(today)
+            ? windowDate
+            : (endMinutes <= nowMinutes
+                ? windowDate.add(const Duration(days: 1))
+                : windowDate))
+        : (endMinutes <= nowMinutes
+            ? today.add(const Duration(days: 1))
+            : today);
 
     // The window is a *portal-local* wall-clock time, so the instant is that
     // time minus the portal's offset — the same arithmetic the reservation

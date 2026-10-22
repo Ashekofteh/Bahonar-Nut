@@ -39,6 +39,24 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val payload = intent.getStringExtra(AlarmScheduler.EXTRA_PAYLOAD)
 
+        // The **action** says which kind of alarm this is, not the payload's
+        // shape.
+        //
+        // The old code told a reminder from a hunt by asking whether the
+        // payload was one of the three the app knows — and treated everything
+        // else as a hunt. That made an unrecognised payload a hunt wake-up,
+        // which is how a reminder that went missing could have started a
+        // hunt for an account nobody named. The action is unambiguous: the
+        // app arms a hunt with ACTION_HUNT and a reminder with
+        // ACTION_REMINDER, and nothing else.
+        if (intent.action == AlarmScheduler.ACTION_HUNT) {
+            // A hunt wake-up. The service records the request itself — it is
+            // the one that has to decide whether a Dart side was there to take
+            // it.
+            HuntService.start(context, payload)
+            return
+        }
+
         if (ReminderPayloads.isReminder(payload)) {
             // Recorded first: the delivery is owed, and the record is what
             // makes it owed even when the process is dead.
@@ -47,9 +65,8 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             return
         }
 
-        // A hunt wake-up. The service records the request itself — it is the
-        // one that has to decide whether a Dart side was there to take it.
-        HuntService.start(context, payload)
+        // An alarm the app does not recognise. Nothing is started and nothing
+        // is recorded: an unknown alarm is not a hunt.
     }
 }
 

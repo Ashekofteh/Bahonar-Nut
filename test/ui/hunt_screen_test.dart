@@ -1,4 +1,5 @@
 import 'package:bahonar_nut/core/hunt_config.dart';
+import 'package:bahonar_nut/core/hunt_schedule.dart';
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/time.dart';
 import 'package:bahonar_nut/ui/screens/hunt_screen.dart';
@@ -428,6 +429,100 @@ void main() {
         reason: 'a hunt spends requests as well as money, and the number is '
             'the thing the student is trading against',
       );
+    });
+
+    group('the automatic start', () {
+      /// A hunt scheduled to wake at a known instant.
+      HuntScheduleResult scheduled(DateTime wakeAtUtc) => HuntScheduleResult(
+            status: HuntScheduleStatus.scheduled,
+            schedule: HuntSchedule(
+              collectionDate: DateTime.utc(2026, 10, 22),
+              wakeAtUtc: wakeAtUtc,
+              windowEndUtc: wakeAtUtc.add(const Duration(hours: 4)),
+            ),
+          );
+
+      testWidgets('the card says when the hunt will start', (tester) async {
+        // 13:00 UTC is 16:30 portal-local.
+        await tester.pumpWidget(wrap(HuntScreen(
+          config: HuntConfig(enabled: true),
+          dishes: dishes,
+          halls: const [central, technical],
+          schedule: scheduled(DateTime.utc(2026, 10, 22, 13, 0)),
+          onConfigChanged: (_) {},
+        )));
+
+        expect(
+          find.textContaining('شروع می‌شود'),
+          findsOneWidget,
+          reason: 'the card claims the hunt starts by itself, so it must say '
+              'when',
+        );
+        expect(
+          find.textContaining('در ساعت ۱۶:۳۰'),
+          findsOneWidget,
+          reason: 'the time is in the portal\'s own clock — the same clock '
+              'the window is set in',
+        );
+      });
+
+      testWidgets('a hunt whose window has passed says so', (tester) async {
+        await tester.pumpWidget(wrap(HuntScreen(
+          config: HuntConfig(enabled: true),
+          dishes: dishes,
+          halls: const [central, technical],
+          schedule: const HuntScheduleResult(
+            status: HuntScheduleStatus.windowPassed,
+          ),
+          onConfigChanged: (_) {},
+        )));
+
+        expect(
+          find.textContaining('بازه زمانی این شکار گذشته است'),
+          findsOneWidget,
+          reason: 'a hunt that will not start must say why — a switch that '
+              'looks live but never fires is a lie',
+        );
+        expect(
+          find.textContaining('شروع می‌شود'),
+          findsNothing,
+          reason: 'the claim that it starts by itself must not stand when it '
+              'will not',
+        );
+      });
+
+      testWidgets('a hunt for a meal the portal does not serve says so',
+          (tester) async {
+        await tester.pumpWidget(wrap(HuntScreen(
+          config: HuntConfig(enabled: true),
+          dishes: dishes,
+          halls: const [central, technical],
+          schedule: const HuntScheduleResult(
+            status: HuntScheduleStatus.mealNotServed,
+          ),
+          onConfigChanged: (_) {},
+        )));
+
+        expect(find.textContaining('ارائه نمی‌شود'), findsOneWidget);
+      });
+
+      testWidgets('a switched-off hunt makes no claim about starting',
+          (tester) async {
+        await tester.pumpWidget(wrap(HuntScreen(
+          config: HuntConfig(enabled: false),
+          dishes: dishes,
+          halls: const [central, technical],
+          schedule: scheduled(DateTime.utc(2026, 10, 22, 13, 0)),
+          onConfigChanged: (_) {},
+        )));
+
+        expect(
+          find.textContaining('شروع می‌شود'),
+          findsNothing,
+          reason: 'a hunt that is off will not start, and must not claim it '
+              'will',
+        );
+      });
     });
   });
 }
