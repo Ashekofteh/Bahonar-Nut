@@ -258,6 +258,10 @@ void main() {
       await tester.tap(find.text('چلو اکبرجوجه,دوغ'));
       await tester.pumpAndSettle();
 
+      // The second dish is scrolled to rather than tapped where it happens
+      // to be: a widget that is built but off-screen cannot be tapped, and
+      // the tap would land on nothing.
+      await scrollTo(tester, 'چلو گوشت,ماست');
       await tester.tap(find.text('چلو گوشت,ماست'));
       await tester.pumpAndSettle();
 
@@ -369,6 +373,61 @@ void main() {
 
       expect(risky.needsRiskAcknowledgement, isTrue);
       expect(safe.needsRiskAcknowledgement, isFalse);
+    });
+  });
+
+  group('the enable switch', () {
+    // The flag that decides whether a hunt runs at all. It was decoded and
+    // persisted and never read: a hunt the student switched off still ran.
+    testWidgets('a hunt that has never been switched on says so',
+        (tester) async {
+      await tester.pumpWidget(wrap(HuntScreen(
+        config: HuntConfig(),
+        dishes: dishes,
+        halls: const [central, technical],
+        onConfigChanged: (_) {},
+      )));
+
+      expect(find.text('فعال‌سازی شکار'), findsOneWidget);
+      expect(
+        find.textContaining('شکار خاموش است'),
+        findsOneWidget,
+        reason: 'the default is off, and the screen must say which state it '
+            'is in rather than leaving the student to guess',
+      );
+    });
+
+    testWidgets('the switch turns the hunt on', (tester) async {
+      HuntConfig? changed;
+
+      await tester.pumpWidget(wrap(HuntScreen(
+        config: HuntConfig(),
+        dishes: dishes,
+        halls: const [central, technical],
+        onConfigChanged: (c) => changed = c,
+      )));
+
+      await tester.tap(find.byType(Switch).first);
+      await tester.pumpAndSettle();
+
+      expect(changed!.enabled, isTrue);
+    });
+
+    testWidgets('the cost of the hunt is stated while it is off',
+        (tester) async {
+      await tester.pumpWidget(wrap(HuntScreen(
+        config: HuntConfig(),
+        dishes: dishes,
+        halls: const [central, technical],
+        onConfigChanged: (_) {},
+      )));
+
+      expect(
+        find.textContaining('هزینه تقریبی این شکار'),
+        findsOneWidget,
+        reason: 'a hunt spends requests as well as money, and the number is '
+            'the thing the student is trading against',
+      );
     });
   });
 }

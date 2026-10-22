@@ -21,6 +21,8 @@ class PlatformChannel(
 
     private val secureStore = SecureCredentialStore(context)
 
+    private val battery = BatteryExemption(context)
+
     private val preferences: SharedPreferences =
         context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
@@ -118,6 +120,25 @@ class PlatformChannel(
                     result.success(null)
                 }
 
+                // --- pending requests ---
+                // The requests the platform made that the Dart side has not
+                // answered: a hunt wake-up with the app killed, and the
+                // re-arm after a reboot. Both used to be delivered through a
+                // channel that only exists while the app is open, so both
+                // were lost — and the reboot one could never arrive even in
+                // principle, because a boot happens with the process dead.
+                "pendingRequests" -> result.success(
+                    PendingRequest.read(context),
+                )
+
+                "clearPendingRequests" -> {
+                    PendingRequest.remove(
+                        context,
+                        call.argument<List<String>>("entries") ?: emptyList(),
+                    )
+                    result.success(null)
+                }
+
                 // --- notifications ---
                 "postNotification" -> {
                     notifier.post(
@@ -161,13 +182,29 @@ class PlatformChannel(
                     alarms.requestExactAlarmPermission(result)
                 }
 
+                // --- battery optimisation ---
+                // The Doze exemption, which the spec asks for with an
+                // explanation rather than silently.
+                "isIgnoringBatteryOptimizations" -> result.success(battery.isExempt())
+
+                "requestIgnoreBatteryOptimizations" -> {
+                    result.success(battery.request())
+                }
+
                 // --- foreground service ---
                 "startHuntService" -> {
                     // The service keeps the process alive for the length of the
                     // hunt, and asks the Dart side to run it. The payload
                     // identifies which account's hunt, so the Dart side knows
                     // whose configuration to read.
-                    HuntService.start(context, call.argument<String>("payload"))
+                    //
+                    // The start is marked as the Dart side's own, so it is not
+                    // recorded as a request the Dart side still owes.
+                    HuntService.start(
+                        context,
+                        call.argument<String>("payload"),
+                        fromDart = true,
+                    )
                     result.success(null)
                 }
 

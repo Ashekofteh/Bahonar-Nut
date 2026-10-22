@@ -69,12 +69,15 @@ class NoopEngine implements SnipeEngine {
 }
 
 void main() {
+  // A hunt is opt-in, so the fixture switches it on: these tests are about
+  // the service's behaviour, not about the switch.
   final config = HuntConfig(
     targetSlot: MealSlot.dinner,
     dishPriority: [
       HuntDish(optionId: '62742', name: 'لوبیا پلو', priceRial: 350000),
     ],
     targetDate: DateTime.utc(2026, 10, 28),
+    enabled: true,
   );
 
   group('starting a hunt', () {

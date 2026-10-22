@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/persian.dart';
 import '../../core/reminder.dart';
 import '../../core/time.dart';
+import '../../platform/platform_bridge.dart';
 import '../app_state.dart';
 import '../widgets.dart';
 
@@ -20,10 +21,20 @@ import '../widgets.dart';
 ///     speak about.
 ///   * A **live portal check** as an opt-in, off by default. Off means the
 ///     reminders read the local store and never need to log in.
+///   * The **permission card**, which states what the system is actually
+///     allowing. A reminder whose alarm was never granted is a reminder that
+///     silently never fires, and a screen that shows a working switch while
+///     the switch does nothing is a lie.
 class RemindersScreen extends StatelessWidget {
-  const RemindersScreen({super.key, required this.state});
+  const RemindersScreen({super.key, required this.state, this.bridge});
 
   final AppState state;
+
+  /// The platform bridge, for the permission checks.
+  ///
+  /// Null in a test that does not exercise them; the card then says nothing
+  /// about the platform rather than claiming a state it cannot know.
+  final PlatformBridge? bridge;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +51,10 @@ class RemindersScreen extends StatelessWidget {
             children: [
               _MasterSwitchCard(state: state, config: config),
               const SizedBox(height: 12),
+              if (bridge != null) ...[
+                _PermissionCard(bridge: bridge!),
+                const SizedBox(height: 12),
+              ],
               _SlotCard(
                 state: state,
                 config: config,
@@ -65,6 +80,251 @@ class RemindersScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// What the system is currently allowing the reminders to do.
+///
+/// ## Why this card exists
+///
+/// A reminder needs two grants from the system, and both are refusals the
+/// user can make without noticing:
+///
+///   * **The notification permission** (Android 13+). Without it the
+///     reminders post nothing — silently, because `NotificationManager.notify`
+///     does not throw.
+///   * **The exact-alarm grant** (Android 12+). Without it the alarm still
+///     fires, but inexact: a 10:30 reminder can arrive at 11:20, which is
+///     after the cutoff it exists to protect.
+///
+/// Both are refusals the user has to make on purpose, and both happen on
+/// screens the app does not own. So the app asks — here, where the switch
+/// that depends on them is.
+///
+/// ## The Doze exemption
+///
+/// The third card is the battery-optimisation exemption, which is a **named
+/// mitigation in the spec** ("Requested explicitly with rationale shown to
+/// the user"). It is on this screen rather than asked for on launch, because
+/// a permission the student has not earned is a prompt they dismiss, and a
+/// dismissed prompt is indistinguishable from a silent refusal.
+class _PermissionCard extends StatefulWidget {
+  const _PermissionCard({required this.bridge});
+
+  final PlatformBridge bridge;
+
+  @override
+  State<_PermissionCard> createState() => _PermissionCardState();
+}
+
+class _PermissionCardState extends State<_PermissionCard> with WidgetsBindingObserver {
+  bool? _notifications;
+  bool? _exactAlarms;
+  bool? _batteryExempt;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // The platform announces the answer when the system dialog closes. The
+    // request itself returns before the answer is known, so without this the
+    // card would keep warning about a grant the student has already given.
+    widget.bridge.onPermissionChanged(_read);
+
+    _read();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Two of the three grants are given in the **system settings**, not in a
+    // dialog: the exact-alarm grant and the battery exemption. The student
+    // leaves the app to grant them and comes back, so the card re-reads on
+    // the way back in.
+    if (state == AppLifecycleState.resumed) _read();
+  }
+
+  /// Reads the three states from the platform.
+  ///
+  /// A read that fails leaves the state unknown, and the card then says
+  /// nothing about it — an unknown is not a refusal, and telling the user
+  /// their notifications are blocked when the app simply could not ask is
+  /// worse than saying nothing.
+  Future<void> _read() async {
+    final bridge = widget.bridge;
+
+    bool? notifications;
+    bool? exactAlarms;
+    bool? battery;
+
+    try {
+      notifications = await bridge.hasNotificationPermission();
+    } catch (_) {
+      notifications = null;
+    }
+    try {
+      exactAlarms = await bridge.canScheduleExactAlarms();
+    } catch (_) {
+      exactAlarms = null;
+    }
+    try {
+      battery = await bridge.isIgnoringBatteryOptimizations();
+    } catch (_) {
+      battery = null;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _notifications = notifications;
+      _exactAlarms = exactAlarms;
+      _batteryExempt = battery;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notifications = _notifications;
+    final exactAlarms = _exactAlarms;
+    final battery = _batteryExempt;
+
+    // Nothing is known yet, or everything is granted: no card.
+    //
+    // A card that lists three satisfied permissions is noise, and noise is how
+    // a real warning stops being read.
+    final allGranted = notifications != false &&
+        exactAlarms != false &&
+        battery != false;
+    if (allGranted) return const SizedBox.shrink();
+
+    return SectionCard(
+      title: 'اجازه‌های لازم',
+      subtitle: 'بدون این اجازه‌ها یادآورها به‌درستی کار نمی‌کنند.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (notifications == false)
+            _PermissionRow(
+              icon: Icons.notifications_off_outlined,
+              title: 'ارساع اعلان‌ها',
+              detail: 'بدون این اجازه، هیچ یادآوری نمایش داده نمی‌شود.',
+              actionLabel: 'اجازه می‌دهم',
+              onPressed: () => _requestNotifications(),
+            ),
+          if (exactAlarms == false)
+            _PermissionRow(
+              icon: Icons.alarm_off_outlined,
+              title: 'زنگ دقیق',
+              detail: 'بدون این اجازه، یادآور با تأخیر می‌رسد و ممکن است '
+                  'از مهلت رزرو بگذرد.',
+              actionLabel: 'اجازه می‌دهم',
+              onPressed: () => _requestExactAlarms(),
+            ),
+          if (battery == false)
+            _PermissionRow(
+              icon: Icons.battery_saver_outlined,
+              title: 'مستثنا شدن از بهینه‌سازی باتری',
+              detail: 'در حالت خواب، دسترسی برنامه به اینترنت قطع می‌شود و '
+                  'یادآورها با تأخیر زیاد می‌رسند.',
+              actionLabel: 'اجازه می‌دهم',
+              onPressed: () => _requestBattery(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _requestNotifications() async {
+    try {
+      await widget.bridge.requestNotificationPermission();
+    } catch (_) {
+      // The system dialog owns the outcome; the re-read below finds it.
+    }
+    await _read();
+  }
+
+  Future<void> _requestExactAlarms() async {
+    try {
+      await widget.bridge.requestExactAlarmPermission();
+    } catch (_) {
+      // The settings screen owns the outcome.
+    }
+    await _read();
+  }
+
+  Future<void> _requestBattery() async {
+    try {
+      await widget.bridge.requestIgnoreBatteryOptimizations();
+    } catch (_) {
+      // The settings screen owns the outcome.
+    }
+    await _read();
+  }
+}
+
+/// One missing permission, with the reason and the button that asks for it.
+class _PermissionRow extends StatelessWidget {
+  const _PermissionRow({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.actionLabel,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String detail;
+  final String actionLabel;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20, color: theme.colorScheme.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            detail,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: onPressed,
+              icon: Icon(Icons.open_in_new, size: 18),
+              label: Text(actionLabel),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

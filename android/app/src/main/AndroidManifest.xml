@@ -2,11 +2,19 @@
     <!-- Reminders need to post notifications (Android 13+ asks the user). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Exact alarms, so a 10:30 reminder arrives at 10:30 and not at 11:20.
-         Requested in-app with an explanation. -->
+         Requested in-app with an explanation.
+
+         **Not** USE_EXACT_ALARM. That is the auto-granted variant, reserved
+         for alarm-clock apps, and Play rejects it elsewhere. Declaring it made
+         canScheduleExactAlarms() always true, which turned the grant path
+         into dead code and the "the user may not have granted this" state into
+         something the app could not even see. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- Re-arm the alarms after a reboot, which clears them. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The Doze exemption. Requested in-app, with the rationale shown, and
+         never silently: the spec requires an explained request. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- The hunt runs as a foreground service so it survives Doze. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

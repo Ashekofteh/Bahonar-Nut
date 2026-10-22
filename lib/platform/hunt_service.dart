@@ -45,10 +45,23 @@ class HuntService {
   /// The foreground service is started first, because the system kills an app
   /// that calls `startForegroundService` without posting its notification
   /// promptly.
+  ///
+  /// ## A switched-off hunt does not start
+  ///
+  /// The flag is checked **here**, not only in the screen, because the UI is
+  /// not the only thing that can start a hunt: the platform can ask for one at
+  /// a moment when the student is not looking at the screen. A hunt spends
+  /// money, so "off" has to mean off on every path — not just the one the
+  /// student touched.
+  ///
+  /// The check is before the service is started, so a refused hunt leaves no
+  /// foreground notification behind claiming the basket is being watched.
   Future<void> start({
     required AccountId accountId,
     required HuntConfig config,
   }) async {
+    if (!config.enabled) return;
+
     await bridge.startHuntService(payload: accountId);
 
     final rule = config.toRule(id: _ruleId(accountId), account: accountId);

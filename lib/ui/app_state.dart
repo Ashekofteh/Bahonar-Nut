@@ -103,6 +103,13 @@ class AppState extends ChangeNotifier {
   HuntConfig? get activeHuntConfig =>
       _activeHuntAccount == null ? null : _huntConfigs[_activeHuntAccount];
 
+  /// The configuration of a named account's hunt, or null when it has none.
+  ///
+  /// Needed by the path that starts a hunt the **platform** asked for: the
+  /// request names the account, and the account's configuration is where its
+  /// dishes, halls and rate live.
+  HuntConfig? huntConfigFor(AccountId accountId) => _huntConfigs[accountId];
+
   /// The last pre-flight verdict: what the hunt would buy, when it is ready.
   String? get huntPreflightSummary => _huntPreflightSummary;
 

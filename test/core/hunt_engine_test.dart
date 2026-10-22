@@ -61,6 +61,9 @@ HuntConfig huntConfig({
       requestBudget: requestBudget,
       windowStart: windowStart ?? const ClockTime(16, 30),
       windowEnd: windowEnd ?? const ClockTime(20, 30),
+      // A hunt is opt-in, so the fixture switches it on: these tests are
+      // about the engine's behaviour, not about the switch.
+      enabled: true,
     );
 
 SnipeRule ruleFor(HuntConfig config) =>

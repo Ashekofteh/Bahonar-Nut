@@ -4,6 +4,7 @@ import '../core/account.dart';
 import '../core/hunt_config.dart';
 import '../core/models.dart';
 import '../core/persian.dart';
+import '../core/pending_request.dart';
 import '../core/portal.dart';
 import '../core/preflight.dart';
 import '../core/session.dart'
@@ -104,7 +105,20 @@ class _HomeShellState extends State<HomeShell> {
       if (ReminderService.slotFor(payload) != null ||
           payload == ReminderService.nudgePayload) {
         _onReminderFired(payload);
+        return;
       }
+      // Anything else is the platform asking for a hunt, and the payload
+      // names the account. The request is answered only if that account's
+      // hunt is switched on — a hunt the student turned off must not start
+      // because an alarm fired.
+      //
+      // The payload is checked against the known accounts rather than
+      // assumed: this handler also carries the reboot (a null payload) and
+      // the deep link of a tapped notification (a URI), and neither names an
+      // account to hunt for.
+      if (payload == null) return;
+      if (!widget.state.accounts.any((a) => a.id == payload)) return;
+      _answerHuntRequest(payload);
     });
 
     // The alarms are armed from the configuration, so they exist as soon as
@@ -125,6 +139,7 @@ class _HomeShellState extends State<HomeShell> {
       if (mounted) {
         _armReminders();
         _deliverPending();
+        _answerPendingRequests();
       }
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -132,8 +147,85 @@ class _HomeShellState extends State<HomeShell> {
       if (widget.state.isLoaded) {
         _armReminders();
         _deliverPending();
+        _answerPendingRequests();
       }
     });
+  }
+
+  /// Answers the requests the platform made while the app was not running.
+  ///
+  /// ## Why this exists
+  ///
+  /// The platform can ask the Dart side to do things at moments when there is
+  /// no Dart side to ask. A **hunt** wake-up fires from an alarm, and a
+  /// **reboot** fires from `BootReceiver` — and at boot the process is by
+  /// definition dead, so the reboot's signal could never arrive even in
+  /// principle. Both were delivered through a channel that only exists while
+  /// the activity is alive, so both were lost: the service started, posted
+  /// its notification, and told nobody.
+  ///
+  /// The native side records them now, and this picks them up.
+  ///
+  /// ## The re-arm comes first
+  ///
+  /// The alarms are cleared by a reboot, so the re-arm is the request that
+  /// must not be lost. And it is cheap — it needs no network and no session.
+  /// The hunt is answered afterwards, and only if its account's configuration
+  /// says the hunt is switched on: a hunt the student turned off must not be
+  /// started by a wake-up they did not ask for.
+  Future<void> _answerPendingRequests() async {
+    final bridge = widget.services.bridge;
+
+    List<String> entries;
+    try {
+      entries = await bridge.pendingRequests();
+    } catch (_) {
+      return;
+    }
+    if (entries.isEmpty) return;
+
+    final answered = <String>[];
+
+    for (final entry in entries) {
+      final request = PendingRequest.parse(entry);
+      if (request == null) continue;
+
+      switch (request.kind) {
+        case PendingRequestKind.rearm:
+          // The alarms were cleared by the reboot; arm them again.
+          await _armReminders();
+          answered.add(entry);
+
+        case PendingRequestKind.hunt:
+          if (await _answerHuntRequest(request.payload!)) {
+            answered.add(entry);
+          }
+      }
+    }
+
+    // Only what was answered is cleared, so a request that was recorded and
+    // then could not be carried out stays owed.
+    if (answered.isEmpty) return;
+    try {
+      await bridge.clearPendingRequests(answered);
+    } catch (_) {
+      // A duplicate answer is better than a lost one.
+    }
+  }
+
+  /// Starts the hunt the platform asked for.
+  ///
+  /// Returns whether the hunt was started. A request for an account with no
+  /// hunt configuration, or with the hunt switched off, is **not** answered:
+  /// there is nothing to start, and clearing the request would lose the fact
+  /// that the platform asked.
+  Future<bool> _answerHuntRequest(AccountId accountId) async {
+    final config = widget.state.huntConfigFor(accountId);
+    if (config == null) return false;
+    if (!config.enabled) return false;
+
+    await _startHunt(accountId, config);
+    return true;
   }
 
   /// Arms the reminder alarms for the current configuration.
@@ -796,7 +888,7 @@ class _HomeShellState extends State<HomeShell> {
         onRefresh: _refreshTable,
       ),
       DashboardScreen(state: widget.state),
-      RemindersScreen(state: widget.state),
+      RemindersScreen(state: widget.state, bridge: widget.services.bridge),
       _huntScreen(),
     ];
 
@@ -1062,6 +1154,9 @@ class _HomeShellState extends State<HomeShell> {
 
   /// The Persian text for a pre-flight refusal.
   String _describeFailures(List<PreflightFailure> failures) {
+    if (failures.contains(PreflightFailure.ruleDisabled)) {
+      return 'این شکار خاموش است. برای اجرای خودکار، آن را روشن کنید.';
+    }
     if (failures.contains(PreflightFailure.alreadyBooked)) {
       return 'برای این تاریخ و وعده، غذای دیگری در حساب شما ثبت شده است. '
           'شکار متوقف شد تا غذای تکراری نخرید.';

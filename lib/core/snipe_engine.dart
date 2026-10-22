@@ -189,6 +189,18 @@ class DefaultSnipeEngine implements SnipeEngine {
   Future<void> start(SnipeRule rule, {HuntConfig? hunt}) async {
     if (_runs.containsKey(rule.id)) return; // idempotent
 
+    // A disabled rule does not run.
+    //
+    // The `enabled` flag is the hunt's opt-in, and it is checked **here**
+    // rather than only in the UI. The UI is not the only thing that can start
+    // a rule: the platform can ask for a hunt at a moment when the student is
+    // not looking at the screen, and a hunt that spends money must not start
+    // because nobody was watching.
+    //
+    // The check is the same one the pre-flight makes, so a rule refused here
+    // is refused there too, and the student sees one reason rather than two.
+    if (!rule.enabled) return;
+
     if (hunt != null) _huntConfigs[rule.id] = hunt;
 
     final run = _Run(rule: rule, status: _initialStatus(rule), hunt: hunt);

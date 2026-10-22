@@ -40,6 +40,26 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * Tells the Dart side that a permission request has been answered.
+     *
+     * The request itself returns before the dialog is answered — the system
+     * dialog is asynchronous — so a Dart side that re-reads the permission
+     * straight after asking reads the *old* answer and reports the grant as
+     * still missing. The app would then keep showing a warning for a
+     * permission the student has already given.
+     *
+     * So the answer is announced here, when it is actually known.
+     */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        channel?.invokeMethod("permissionChanged", requestCode)
+    }
+
     private companion object {
         const val CHANNEL_NAME = "ir.ac.uk.bahonar_nut/platform"
     }

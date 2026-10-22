@@ -121,6 +121,12 @@ class _HuntScreenState extends State<HuntScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         children: [
+          _EnabledCard(
+            config: config,
+            isRunning: widget.isRunning,
+            onChanged: widget.onConfigChanged,
+          ),
+          const SizedBox(height: 12),
           _TargetCard(
             config: config,
             dates: widget.targetDates,
@@ -153,6 +159,100 @@ class _HuntScreenState extends State<HuntScreen> {
             onStart: widget.onStart,
             onStop: widget.onStop,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The switch that turns the hunt on.
+///
+/// ## Why it is at the top
+///
+/// A hunt spends money and makes requests, so it is **opt-in**: the flag
+/// defaults to off, and the pre-flight refuses a rule that is off. This card
+/// is the only place the student can change that, so it is the first thing on
+/// the screen — the state of the hunt, before its details.
+///
+/// ## Why it is more than a switch
+///
+/// The cost of a hunt is not the same everywhere. A hunt at ten seconds makes
+/// about 1,400 requests over a four-hour window; at two seconds it makes
+/// 7,200. So the card says what the hunt will cost while it is off, and the
+/// student can see the number before turning it on rather than after.
+class _EnabledCard extends StatelessWidget {
+  const _EnabledCard({
+    required this.config,
+    required this.isRunning,
+    required this.onChanged,
+  });
+
+  final HuntConfig config;
+  final bool isRunning;
+  final void Function(HuntConfig) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final projected = config.projectedRequests();
+
+    return SectionCard(
+      title: 'فعال‌سازی شکار',
+      subtitle: config.enabled
+          ? 'این شکار روشن است و هنگام بازه زمانی خود شروع می‌شود.'
+          : 'شکار خاموش است. تا آن را روشن نکنید، شکاری اجرا نمی‌شود.',
+      trailing: Switch(
+        value: config.enabled,
+        onChanged: (value) => onChanged(config.copyWith(enabled: value)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                config.enabled
+                    ? Icons.play_circle_outline
+                    : Icons.pause_circle_outline,
+                size: 20,
+                color: config.enabled
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  config.enabled
+                      ? 'با روشن بودن، برنامه در بازه زمانی مشخص‌شده به‌طور خودکار '
+                          'جست‌وجو می‌کند و در صورت یافتن، غذا را می‌خرد.'
+                      : 'روشن کردن این گزینه به معنی اجازه خرید خودکار است.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'هزینه تقریبی این شکار در بازه فعلی: '
+            '${toPersianDigits(projected)} درخواست',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: config.rate.needsRiskAcknowledgement
+                  ? theme.colorScheme.error
+                  : theme.colorScheme.onSurface,
+            ),
+          ),
+          if (isRunning) ...[
+            const SizedBox(height: 6),
+            Text(
+              'یک شکار هم‌اکنون در حال اجراست.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );

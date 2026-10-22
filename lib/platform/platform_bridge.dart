@@ -110,6 +110,48 @@ class PlatformBridge {
     await _call<void>('clearPendingDeliveries', {'payloads': payloads});
   }
 
+  /// The requests the platform made that the Dart side has not answered.
+  ///
+  /// A hunt wake-up fired with the app killed, and the re-arm after a
+  /// reboot. Both were delivered through a channel that only exists while the
+  /// app is open, so both were lost — and the reboot one could never arrive
+  /// even in principle, because a boot happens with the process dead.
+  ///
+  /// The native side records them instead, and the Dart side picks them up
+  /// when it next runs.
+  ///
+  /// Each entry is `kind` or `kind:payload`, where the kind is `hunt` or
+  /// `rearm`.
+  Future<List<String>> pendingRequests() async {
+    final result = await _call<List<Object?>>('pendingRequests');
+    if (result == null) return const [];
+    return result.whereType<String>().toList();
+  }
+
+  /// Clears the answered requests, after they have been acted on.
+  ///
+  /// Only the named entries are cleared, so a request that was recorded and
+  /// then failed to act on stays owed.
+  Future<void> clearPendingRequests(List<String> entries) async {
+    await _call<void>('clearPendingRequests', {'entries': entries});
+  }
+
+  /// Whether the app is exempt from battery optimisation.
+  ///
+  /// Without the exemption, a network read in Doze is **blocked** and does
+  /// not fail — it hangs, waiting for the system to open a maintenance
+  /// window. Measured on the emulator: a read that should have taken a
+  /// second took ten.
+  Future<bool> isIgnoringBatteryOptimizations() async =>
+      await _call<bool>('isIgnoringBatteryOptimizations') ?? false;
+
+  /// Asks for the battery-optimisation exemption.
+  ///
+  /// Opens the system setting. The request is never silent: the screen that
+  /// asks for it states the reason first.
+  Future<bool> requestIgnoreBatteryOptimizations() async =>
+      await _call<bool>('requestIgnoreBatteryOptimizations') ?? false;
+
   /// Starts the hunt's foreground service.
   ///
   /// The service keeps the process alive for the length of the hunt, which a
@@ -158,18 +200,47 @@ class PlatformBridge {
   /// (`lunch`, `evening`); anything else is the platform asking the app to
   /// act on its own state.
   void onHuntRequested(void Function(String? payload) handler) {
+    _installHandler();
+    _huntHandler = handler;
+  }
+
+  /// Registers a handler for the platform saying a permission was answered.
+  ///
+  /// The permission request returns **before** the system dialog is
+  /// answered, so a read straight after the ask reads the old answer. The
+  /// platform announces the answer when it is known, and the app re-reads
+  /// then — otherwise the app keeps warning about a grant the student has
+  /// already given.
+  void onPermissionChanged(void Function() handler) {
+    _installHandler();
+    _permissionHandler = handler;
+  }
+
+  void Function(String? payload)? _huntHandler;
+  void Function()? _permissionHandler;
+  bool _handlerInstalled = false;
+
+  /// Installs the channel's method handler, once.
+  ///
+  /// A method channel has **one** handler: setting a second replaces the
+  /// first. So the bridge owns the dispatch and routes each method to the
+  /// subscriber that wants it, rather than letting each subscriber claim
+  /// the whole channel — which is how one registration used to silence the
+  /// other.
+  void _installHandler() {
+    if (_handlerInstalled) return;
+    _handlerInstalled = true;
+
     _channel.setMethodCallHandler((call) async {
-      if (call.method == 'huntRequested') {
-        handler(call.arguments as String?);
-      }
-      if (call.method == 'reminderFired') {
-        handler(call.arguments as String?);
-      }
-      if (call.method == 'rebootCompleted') {
-        handler(null);
-      }
-      if (call.method == 'deepLink') {
-        handler(call.arguments as String?);
+      switch (call.method) {
+        case 'huntRequested':
+        case 'reminderFired':
+        case 'deepLink':
+          _huntHandler?.call(call.arguments as String?);
+        case 'rebootCompleted':
+          _huntHandler?.call(null);
+        case 'permissionChanged':
+          _permissionHandler?.call();
       }
       return null;
     });

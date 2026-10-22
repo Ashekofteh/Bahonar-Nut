@@ -47,6 +47,8 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             return
         }
 
+        // A hunt wake-up. The service records the request itself — it is the
+        // one that has to decide whether a Dart side was there to take it.
         HuntService.start(context, payload)
     }
 }

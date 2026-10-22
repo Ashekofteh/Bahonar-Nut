@@ -200,4 +200,42 @@ void main() {
       expect((clear.arguments as Map)['payloads'], ['lunch']);
     });
   });
+
+  group('the channel dispatch', () {
+    // A method channel has **one** handler: setting a second replaces the
+    // first. So the bridge has to own the dispatch, or the second
+    // registration silences the first — and the shell's hunt handler and the
+    // reminders screen's permission handler are both subscribers.
+    test('both subscribers are reached by their own methods', () async {
+      final bridge = PlatformBridge(channel: channel);
+
+      final hunts = <String?>[];
+      var permissionChanges = 0;
+
+      bridge.onHuntRequested((payload) => hunts.add(payload));
+      bridge.onPermissionChanged(() => permissionChanges++);
+
+      // The platform's own method calls are delivered to the Dart side
+      // through the same channel.
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('huntRequested', 'acc-1'),
+        ),
+        (_) {},
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('permissionChanged'),
+        ),
+        (_) {},
+      );
+
+      expect(hunts, ['acc-1']);
+      expect(permissionChanges, 1);
+    });
+  });
 }

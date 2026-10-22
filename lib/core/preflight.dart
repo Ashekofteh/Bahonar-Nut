@@ -45,6 +45,14 @@ enum PreflightFailure {
   /// A refusal rather than a pass: starting a hunt without knowing whether the
   /// slot is already filled is exactly how a double purchase happens.
   holdingsUnreadable,
+
+  /// The rule is switched off.
+  ///
+  /// A hunt spends money and makes requests, so it is opt-in. The flag is
+  /// checked here rather than in the UI alone, because the UI is not the only
+  /// thing that can start a rule — the platform can ask for a hunt at a moment
+  /// when the student is not looking at the screen.
+  ruleDisabled,
 }
 
 /// The verdict of a preflight check.
@@ -101,6 +109,18 @@ class PreflightChecker {
   }) {
     final failures = <PreflightFailure>[];
     final notes = <String>[];
+
+    // The switch comes first, because it is the cheapest check and it makes
+    // every other check irrelevant: a rule that is off must not run, whatever
+    // else is true.
+    //
+    // The flag defaults to **off**, so a rule that has never been switched on
+    // is refused. That is the point of the flag: a hunt spends money and
+    // makes requests, so it is opt-in.
+    if (!rule.enabled) {
+      failures.add(PreflightFailure.ruleDisabled);
+      notes.add('این شکار خاموش است.');
+    }
 
     // Clock first: without a trustworthy time every other judgement is guesswork.
     if (!clock.isSynced) {
