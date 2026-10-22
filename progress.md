@@ -1287,3 +1287,67 @@ collection date, the wake instant, the six statuses), the engine's date-aware
 window, the arming in the shell, and the card's wording — including that a
 hunt which will not start says **which** reason, and that a switched-off hunt
 makes no claim about starting at all.
+
+## 2026-10-22 — Session 30b: the two platform questions, answered on the device
+
+F83 armed the hunt's alarm and made the card's claim true, but the hunt still
+does not run with the app closed. Two platform questions stood in the way, and
+both were left open because the documentation fetch had been refused with a
+403:
+
+1. May an exact-alarm `BroadcastReceiver` call `startForegroundService()` on
+   Android 12+?
+2. Does the alarm actually fire and start the service when the app is not
+   running?
+
+**Both are now answered on the device, not from memory.** (F84.)
+
+**Question 1: yes.** The alarm fires on its own with the app backgrounded, and
+the system's own log says
+`Background started FGS: Allowed ... reasonCode:SYSTEM_ALLOW_LISTED`. An
+exact-alarm receiver *is* on the background-FGS exemption list, and
+`dumpsys activity services` confirms `isForeground=true foregroundId=4201` with
+the notification posted.
+
+**Question 2: yes, with the process dead.** The app was killed with `kill -9`,
+the clock moved to the alarm instant, and the alarm fired: the request was
+written to the store as `requests.pending = hunt:acc-…` — which only happens
+inside `HuntService.onStartCommand` — so the receiver ran and the service
+started with no Dart side alive. The service then stopped itself and left no
+stuck notification, which is the F75 behaviour working as designed: the
+request stays owed rather than being dropped, and a foreground service with no
+hunt behind it is not left on screen.
+
+### Two harness traps, both of which produced a wrong conclusion first
+
+**`am force-stop` is not "the app is closed".** It puts the package into the
+*stopped* state, and Android **cancels the package's alarms** when it does.
+The alarm vanished from `dumpsys alarm`, which reads exactly like a hunt whose
+alarm was never armed. The realistic case is the **process dying while the
+package stays alive** — what a swipe-away or a system kill does. The test
+kills the process with `kill -9` and leaves the package running; the alarm
+survives.
+
+**`am broadcast` from the shell user is silently dropped.** The receiver is
+`exported="false"`, so a broadcast from another uid produces **no exception and
+no log line** — just a missing record, indistinguishable from a broken
+dispatch. `adb root` on the emulator makes the same broadcast work. Any
+future "the receiver did not run" report must rule out the export flag before
+the code is blamed.
+
+### What this changes
+
+The headless hunt is **unblocked, not speculative**. The platform half works
+on a real device; the only thing missing is the Dart engine in its own
+`FlutterEngine`. The two questions left are no longer platform questions —
+they are questions about the app's own code: does a headless Dart entrypoint
+in a second engine run the hunt's engine and reach the portal with the
+activity closed, and does that engine's `MethodChannel` reach the same native
+code the app's own engine does.
+
+### Testing approach
+
+No code changed, so no tests were added. This session answered questions with
+the device rather than with assertions — the evidence is in `findings.md` (F84)
+and in the system's own tables (`dumpsys alarm`, `dumpsys activity services`,
+`dumpsys notification`), not in a test suite.

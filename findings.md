@@ -2883,3 +2883,97 @@ built. The APK on the device was from `04:40` while the sources were edited at
 **failed silently** with `No Android SDK found` because `ANDROID_HOME` was
 not exported in that shell. `scripts/env.sh` holds the toolchain; the rule is
 to source it before any `flutter` command.
+
+### F84 — The two facts the hunt's headless execution rested on are now settled
+
+**Severity:** informational — this closes two open questions rather than
+fixing a defect.
+
+#### Why they were open
+
+F83 armed the alarm and made the card's claim true, but the hunt still does
+not run with the app closed: the wake-up reaches the Dart side through the
+F75 "record, don't deliver" path, and the hunt starts on the next launch. The
+mechanism for the real thing was worked out from the engine source (the
+background hunt needs **its own `FlutterEngine`**, whose Dart *is* the root
+isolate — a spawned isolate's `MethodChannel` resolves to
+`BackgroundIsolateBinaryMessenger`, which cannot receive messages), but two
+platform questions were left unanswered because the documentation fetch was
+refused with a 403:
+
+1. May a `BroadcastReceiver` woken by an exact alarm call
+   `startForegroundService()` on Android 12+? (the background-FGS-start
+   exemption list)
+2. Does the alarm actually fire and start the service when the app is not
+   running?
+
+Both are now answered **on the device**, not from memory.
+
+#### What was tested, and how
+
+The hard part was making the alarm fire *on its own* with no Dart side
+present. Two traps, both of which cost a wrong conclusion before the right
+one:
+
+**`am force-stop` is not "the app is closed".** It puts the package into the
+*stopped* state, and Android cancels the package's alarms when it does. The
+alarm vanished from `dumpsys alarm` — which looks exactly like a hunt whose
+alarm is not really armed. The realistic case is the **process dying while
+the package stays alive**, which is what a user swiping the app away or the
+system killing it does. The test kills the process with `kill -9`, leaving the
+package running; the alarm survives.
+
+**`am broadcast` from the shell user is silently dropped.** The receiver is
+`exported="false"`, so a broadcast from another uid produces **no exception and
+no log line** — just a missing record, indistinguishable from a broken
+dispatch. `adb root` on the emulator makes the same broadcast work. This is
+worth knowing for any future "the receiver did not run" report: the export
+flag must be ruled out before the code is blamed.
+
+#### The result
+
+**The alarm fires on its own, with the app backgrounded.** With the clock set
+to the alarm instant, `dumpsys alarm` shows the alarm firing and the app's
+own log shows:
+
+```
+Background started FGS: Allowed [callingPackage: ir.ac.uk.bahonar_nut;
+  callingUid: 10196; uidState: RCVR;
+  intent: Intent { act= ir.ac.uk.bahonar_nut.HUNT_START
+                   cmp= ir.ac.uk.bahonar_nut/.HuntService (has extras) };
+  code:ACTIVITY_VISIBILITY_GRACE_PERIOD;
+  reasonCode:SYSTEM_ALLOW_LISTED]
+```
+
+`reasonCode:SYSTEM_ALLOW_LISTED` — so **fact 1 is settled**: an exact-alarm
+receiver *is* on the background-FGS exemption list, and the foreground service
+starts. `dumpsys activity services` confirms
+`isForeground=true foregroundId=4201 types=00000001` with the notification
+posted on the `bahonar_nut.service` channel.
+
+**And it works with the process dead.** The app was killed with `kill -9`
+(alarm intact), the clock was moved to the alarm instant, and the alarm fired:
+the request was written to the store as `requests.pending = hunt:acc-…`, which
+**only happens inside `HuntService.onStartCommand`** — so the receiver ran and
+the service started with no Dart side alive. **Fact 2 is settled.**
+
+**And the service stops itself, cleanly.** With no Dart side to hand the hunt
+to, `HuntService` recorded the request and then called `stopForeground` and
+`stopSelf`. The notification left the screen: `dumpsys notification` shows no
+record for the package. This is the F75 behaviour working as designed — a
+foreground service with no hunt behind it is a battery drain and a stuck
+notification, and the request stays owed instead.
+
+#### What this changes
+
+The headless hunt is now **unblocked**, not speculative: the platform half
+works on a real device, and the only thing missing is the Dart engine in its
+own `FlutterEngine`. The two remaining questions are narrow:
+
+- does a headless Dart entrypoint in a second `FlutterEngine` run the hunt's
+  engine and reach the portal, with the activity closed?
+- does that engine's `MethodChannel` reach the same native code the app's own
+  engine does, so the hunt can report progress and stop itself?
+
+Both are answerable on the device, and neither is a platform question any
+more — they are questions about the app's own code.

@@ -106,6 +106,17 @@ hunt, and a live read of the request budget against the portal. Phase 6, the
 Windows shell, remains the one untouched platform — by design, it is a
 free-rider.
 
+**The headless hunt is unblocked, not speculative.** Both platform questions
+that F83 left open were answered on the device rather than from memory (F84).
+The exact alarm fires **on its own** with the app backgrounded, and the
+foreground service starts with `reasonCode:SYSTEM_ALLOW_LISTED` — an
+exact-alarm receiver *is* on the background-FGS exemption list. It works with
+the process dead too: killed with `kill -9` (the package alive, so the alarm
+survives), the alarm fired and `HuntService` ran and recorded the request with
+no Dart side alive, then stopped itself cleanly and left no stuck
+notification. **The only thing still missing is the Dart engine in its own
+`FlutterEngine`** — the platform half is done.
+
 **Transport** (phase 1 remainder) is done: per-account cookie jars, Date-header
 capture, explicit redirect following, HTML parsing.
 
