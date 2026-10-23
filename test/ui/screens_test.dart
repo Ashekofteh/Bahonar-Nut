@@ -3,7 +3,9 @@ import 'package:bahonar_nut/core/local_meal_store.dart';
 import 'package:bahonar_nut/core/meal_invariant.dart';
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/portal.dart';
+import 'package:bahonar_nut/core/session.dart';
 import 'package:bahonar_nut/ui/app_state.dart';
+import '../helpers/memory_stores.dart';
 import 'package:bahonar_nut/ui/screens/accounts_screen.dart';
 import 'package:bahonar_nut/ui/screens/dashboard_screen.dart';
 import 'package:bahonar_nut/ui/screens/reminders_screen.dart';
@@ -18,11 +20,13 @@ void main() {
   Future<AppState> buildState({
     List<Transaction> transactions = const [],
     bool withAccounts = true,
+    MemorySecureStore? secureStore,
   }) async {
     final state = AppState(
       accountStore: InMemoryAccountStore(),
       reminderConfigStore: InMemoryReminderConfigStore(),
       mealStore: LocalMealStore(),
+      credentialStore: secureStore,
       transactions: transactions,
     );
     await state.load();
@@ -108,6 +112,62 @@ void main() {
       expect(find.text('افزودن حساب'), findsWidgets);
       expect(find.text('شماره دانشجویی'), findsOneWidget);
       expect(find.text('نام دلخواه (اختیاری)'), findsOneWidget);
+    });
+
+    testWidgets('the edit dialog saves a typed password to the secure store',
+        (tester) async {
+      // The edit dialog's password field starts empty even in edit mode. A
+      // non-empty value must reach the secure store — a silent drop would
+      // leave the no-credentials warning standing while the user believes
+      // they saved everything (F86: found on device, the red warning never
+      // cleared after saving through the edit dialog).
+      final secure = MemorySecureStore();
+      final state = await buildState(secureStore: secure);
+      await tester.pumpWidget(wrap(state, AccountsScreen(state: state)));
+
+      // Open the edit dialog for the first account and type a password.
+      final pencil = find.byIcon(Icons.edit_outlined).first;
+      await tester.tap(pencil);
+      await tester.pumpAndSettle();
+      expect(find.text('ویرایش حساب'), findsOneWidget);
+
+      await tester.enterText(
+        find.byType(TextField).at(2),
+        'pass-401405035',
+      );
+      await tester.tap(find.text('ذخیره'));
+      await tester.pumpAndSettle();
+
+      // The credentials landed in the secure store — not plain prefs, not
+      // the account record.
+      final accountId = state.accounts.first.id;
+      final stored = await secure.read(accountId);
+      expect(stored, isNotNull);
+      expect(stored!.password, 'pass-401405035');
+      expect(stored.studentId, '401405035');
+      expect(await state.hasCredentials(accountId), isTrue);
+    });
+
+    testWidgets('an empty password field in the edit dialog leaves the '
+        'stored credentials alone', (tester) async {
+      final secure = MemorySecureStore();
+      final state = await buildState(secureStore: secure);
+      final accountId = state.accounts.first.id;
+      await state.saveCredentials(
+        accountId,
+        const Credentials(studentId: '401405035', password: 'old-pass'),
+      );
+      await tester.pumpWidget(wrap(state, AccountsScreen(state: state)));
+      expect(await secure.read(accountId), isNotNull);
+
+      // Edit without touching the password field: the old password stays.
+      await tester.tap(find.byIcon(Icons.edit_outlined).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ذخیره'));
+      await tester.pumpAndSettle();
+
+      final stored = await secure.read(accountId);
+      expect(stored!.password, 'old-pass');
     });
   });
 

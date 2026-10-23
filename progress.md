@@ -1351,3 +1351,31 @@ No code changed, so no tests were added. This session answered questions with
 the device rather than with assertions — the evidence is in `findings.md` (F84)
 and in the system's own tables (`dumpsys alarm`, `dumpsys activity services`,
 `dumpsys notification`), not in a test suite.
+
+## 2026-10-23 — Session 31: F87 & F87b, hunt gating, quiet balance refresh & headless hunt verified
+
+### What was built
+
+1. **Gating hunt activation (`_confirmHuntEnable` in `hunt_screen.dart`):**
+   - The switch refuses activation if `scheduleFor` returns `mealNotServed` (e.g. Thursday dinner, Friday all meals), `windowPassed` (e.g. Thursday lunch after cutoff), `noTargetDate`, or `windowInvalid`.
+   - Allows open windows (`windowOpen`) truthfully, displaying appropriate current-window copy.
+   - If dishes are selected, preflight checks `insufficientFunds`. If balance is insufficient, activation is refused, switch reverts to OFF, an explanatory banner is displayed, and an «افزایش اعتبار» tonal button links directly to the top-up bottom sheet.
+2. **Quiet app-launch balance sync:**
+   - `_refreshBalancesQuietly` in `home_shell.dart` refreshes balance automatically upon launch without triggering fallback CAPTCHA modals, keeping balance current for preflight checks.
+3. **FGS leak fix on preflight refusal (F87b):**
+   - `_startHunt` returns `Future<bool>`. If preflight refuses the hunt, `_answerHuntRequest` promptly stops the foreground service via `bridge.stopHuntService()`, preventing notification 4201 from lingering stuck.
+4. **Headless hunt execution (F85):**
+   - `BackgroundHuntEngine.kt` and `lib/background/hunt_entrypoint.dart` allow execution with the app closed.
+
+### Live device verification
+
+1. **Unserved meal refusal:** Thursday dinner (`پنج‌شنبه ۳۰ مهر`, `شام`) toggle attempt refused: switch reverted to OFF, displayed «این وعده در این تاریخ ارائه نمی‌شود، پس شکاری برای آن معنا ندارد. برای فعال‌سازی، تاریخ یا وعده را تغییر دهید.». No alarm armed.
+2. **Insufficient funds refusal:** Sunday dinner (`یک‌شنبه ۳ آبان`, `شام`) with Lubia Polo (35,000 Toman) while balance was 7,500 Toman refused: switch reverted to OFF, displayed «موجودی حساب برای خرید همه غذاهای فهرست اولویت کافی نیست.», and showed «+ افزایش اعتبار». Tapping opened the top-up sheet.
+3. **Successful activation with empty priority list:** Sunday dinner toggled ON: switch turned ON, schedule displayed «این شکار روشن است و در ساعت ۱۶:۳۰ در یکشنبه ۳ آبان به‌طور خودکار شروع می‌شود.», and `dumpsys alarm` confirmed `RTC_WAKEUP` armed for `2026-10-25 16:30:00.000` with `tag=*walarm*:ir.ac.uk.bahonar_nut.HUNT`.
+4. **Headless execution on killed app:** Process killed with `kill -9`, clock set to alarm instant (`Sun Oct 25 16:30:00 2026`). Alarm fired with `reasonCode:ALARM_MANAGER_WHILE_IDLE`, `ReminderAlarmReceiver` started `HuntService`, `BackgroundHuntEngine` launched secondary `FlutterEngine`, headless preflight ran, posted refusal notification 4151 («🔎 شکار انجام نشد: هیچ غذایی انتخاب نشده است.»), and cleaned up foreground service 4201 cleanly.
+5. **App-launch silent balance refresh:** Automatically fetched balance upon launch, displaying `اعتبار: ۷,۵۰۰ تومان` on account card.
+
+### Testing approach
+
+- 947 unit and widget tests pass (`home_shell_pending_test.dart`, `hunt_schedule_test.dart`, `captcha_fallback_test.dart`, `screens_test.dart`).
+

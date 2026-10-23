@@ -68,6 +68,8 @@ class HuntScreen extends StatefulWidget {
     this.marketError,
     this.targetDates = const [],
     this.schedule,
+    this.enableRefusal,
+    this.onTopUp,
   });
 
   /// The dates the portal will serve that the hunt may target.
@@ -115,6 +117,18 @@ class HuntScreen extends StatefulWidget {
   /// card has to be honest about rather than paper over.
   final HuntScheduleResult? schedule;
 
+  /// Why the hunt could not be switched **on**, when it could not.
+  ///
+  /// Null once it can. Distinct from [preflightRefusal], which is about
+  /// starting the hunt now rather than about arming it to start later.
+  final String? enableRefusal;
+
+  /// Offers the top-up that would clear an insufficient-funds refusal.
+  ///
+  /// Null when a top-up is not the fix, so the button is not shown for a
+  /// refusal money cannot solve (a closed window, an unserved meal).
+  final VoidCallback? onTopUp;
+
   @override
   State<HuntScreen> createState() => _HuntScreenState();
 }
@@ -133,6 +147,8 @@ class _HuntScreenState extends State<HuntScreen> {
             config: config,
             isRunning: widget.isRunning,
             schedule: widget.schedule,
+            enableRefusal: widget.enableRefusal,
+            onTopUp: widget.onTopUp,
             onChanged: widget.onConfigChanged,
           ),
           const SizedBox(height: 12),
@@ -195,6 +211,8 @@ class _EnabledCard extends StatelessWidget {
     required this.isRunning,
     required this.schedule,
     required this.onChanged,
+    this.enableRefusal,
+    this.onTopUp,
   });
 
   final HuntConfig config;
@@ -202,19 +220,37 @@ class _EnabledCard extends StatelessWidget {
   final HuntScheduleResult? schedule;
   final void Function(HuntConfig) onChanged;
 
+  /// Why the hunt could not be switched on, when it could not.
+  final String? enableRefusal;
+
+  /// Offers a top-up, when a top-up is what would clear the refusal.
+  final VoidCallback? onTopUp;
+
+  /// Whether the hunt's window is open right now.
+  ///
+  /// The window being open is not a failure and not a schedule: the hunt starts
+  /// immediately, so the card says *that* rather than a start time already
+  /// passed. See [HuntScheduleStatus.windowOpen].
+  bool get isOpenNow => schedule?.isOpenNow ?? false;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final projected = config.projectedRequests();
     final start = _startText();
 
+    final subtitle = config.enabled
+        ? (start == null
+            ? 'این شکار روشن است.'
+            : 'این شکار روشن است و $start به‌طور خودکار شروع می‌شود.')
+        : 'شکار خاموش است. تا آن را روشن نکنید، شکاری اجرا نمی‌شود.';
+
     return SectionCard(
       title: 'فعال‌سازی شکار',
-      subtitle: config.enabled
-          ? (start == null
-              ? 'این شکار روشن است.'
-              : 'این شکار روشن است و $start به‌طور خودکار شروع می‌شود.')
-          : 'شکار خاموش است. تا آن را روشن نکنید، شکاری اجرا نمی‌شود.',
+      subtitle: isOpenNow
+          ? 'این شکار روشن است و بازه زمانی آن همین حالا باز است، '
+              'پس بیدرنگ شروع می‌شود.'
+          : subtitle,
       trailing: Switch(
         value: config.enabled,
         onChanged: (value) => onChanged(config.copyWith(enabled: value)),
@@ -247,7 +283,10 @@ class _EnabledCard extends StatelessWidget {
               ),
             ],
           ),
-          if (config.enabled && start == null) ...[
+          // The red "it will not start" line is suppressed when the window is
+          // open: there it is not a refusal, it is an immediate start, and the
+          // subtitle already says so. Printing both would contradict itself.
+          if (config.enabled && start == null && !isOpenNow) ...[
             const SizedBox(height: 10),
             Text(
               _noScheduleReason(),
@@ -256,6 +295,26 @@ class _EnabledCard extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+          ],
+          if (enableRefusal != null) ...[
+            const SizedBox(height: 10),
+            _Banner(
+              icon: Icons.error_outline,
+              text: enableRefusal!,
+              background: theme.colorScheme.errorContainer,
+              foreground: theme.colorScheme.onErrorContainer,
+            ),
+            if (onTopUp != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: FilledButton.tonalIcon(
+                  onPressed: onTopUp,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('افزایش اعتبار'),
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: 10),
           Text(
@@ -326,9 +385,14 @@ class _EnabledCard extends StatelessWidget {
       case HuntScheduleStatus.windowPassed:
         return 'بازه زمانی این شکار گذشته است. برای شروع خودکار، تاریخ یا '
             'بازه را تغییر دهید.';
+      case HuntScheduleStatus.windowOpen:
+        return 'بازه زمانی این شکار هم‌اکنون باز است. برای شروع خودکار، '
+            'تاریخ این وعده را تغییر دهید.';
       case HuntScheduleStatus.windowInvalid:
         return 'بازه زمانی معتبر نیست: ساعت پایان باید پس از ساعت شروع '
             'باشد.';
+      case HuntScheduleStatus.clockUnsynced:
+        return 'ساعت سرور همگام نشده است، پس زمان شروع خودکار مشخص نیست.';
       case HuntScheduleStatus.scheduled:
         return '';
     }

@@ -98,24 +98,29 @@ data URI because `PendingIntent` identity ignores extras. On the device the
 card states the start instant in the portal's own clock, and `dumpsys alarm`
 shows the alarm armed and exact (`exactAllowReason=allow-listed`).
 
-**Still to come in phase 10:** the hunt's **headless execution** — the Dart
-engine running the hunt with the app closed, which needs its own
-`FlutterEngine` rather than a spawned isolate — plus battery profiling (the
-duty cycle and the radio wake-ups), Doze and OEM-killer behaviour under a long
-hunt, and a live read of the request budget against the portal. Phase 6, the
-Windows shell, remains the one untouched platform — by design, it is a
-free-rider.
+**Phase 10 progress, continued.** The **headless hunt is implemented and verified
+on device** (F85):
+The alarm fires with the app killed (`kill -9`), `ReminderAlarmReceiver` starts
+`HuntService`, and `BackgroundHuntEngine` initializes a secondary `FlutterEngine`
+running `lib/background/hunt_entrypoint.dart` as a root isolate with its own
+platform channel. Preflight runs headless and, on refusal, dispatches
+notification 4151 («🔎 شکار انجام نشد») and releases the foreground service cleanly.
 
-**The headless hunt is unblocked, not speculative.** Both platform questions
-that F83 left open were answered on the device rather than from memory (F84).
-The exact alarm fires **on its own** with the app backgrounded, and the
-foreground service starts with `reasonCode:SYSTEM_ALLOW_LISTED` — an
-exact-alarm receiver *is* on the background-FGS exemption list. It works with
-the process dead too: killed with `kill -9` (the package alive, so the alarm
-survives), the alarm fired and `HuntService` ran and recorded the request with
-no Dart side alive, then stopped itself cleanly and left no stuck
-notification. **The only thing still missing is the Dart engine in its own
-`FlutterEngine`** — the platform half is done.
+**Phase 10 progress, continued.** The **hunt activation gating & preflight checks
+are verified live on device** (F87 & F87b):
+1. Gating prevents enabling the hunt when the target window has passed or the meal
+   is not served (e.g. Thursday dinner, Friday all meals).
+2. Toggling the hunt ON requires sufficient account balance for all selected
+   dishes; otherwise activation is refused, switch reverts to OFF, an explanatory
+   banner is shown, and an «افزایش اعتبار» button opens the top-up sheet.
+3. Silent launch-time balance sync ensures up-to-date balances without CAPTCHA dialogs.
+4. When preflight refuses an in-app hunt request, foreground service 4201 is
+   immediately released, preventing stuck notifications (F87b).
+
+**Still to come in phase 10:** battery profiling (the duty cycle and the radio
+wake-ups), Doze and OEM-killer behaviour under a long hunt, and a live read of
+the request budget against the portal. Phase 6, the Windows shell, remains the
+one untouched platform — by design, it is a free-rider.
 
 **Transport** (phase 1 remainder) is done: per-account cookie jars, Date-header
 capture, explicit redirect following, HTML parsing.

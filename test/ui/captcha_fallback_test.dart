@@ -219,6 +219,12 @@ void main() {
     await pumpShell(tester);
     portal.bounceTheReadAfterLogin = true;
 
+    // The count is taken as a **delta**: the launch does a quiet balance read
+    // of its own (see HomeShell._refreshBalancesQuietly), and that read can
+    // issue a challenge of its own. What this test is about is the *refresh*
+    // the student asked for, so only its challenges are counted.
+    final before = portal.challengesIssued;
+
     await refreshFromPortal(tester);
     expect(find.byType(CaptchaDialog), findsOneWidget);
 
@@ -230,7 +236,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(portal.challengesIssued, 2,
+    expect(portal.challengesIssued - before, 2,
         reason: 'the bounced read needs a fresh code, so the student is '
             'asked again rather than left with a dead end');
     expect(find.byType(CaptchaDialog), findsWidgets,

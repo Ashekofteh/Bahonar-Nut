@@ -79,6 +79,50 @@ class PreflightResult {
       passed ? 'PreflightResult.passed' : 'PreflightResult.failed($failures)';
 }
 
+/// The Persian text for a pre-flight refusal.
+///
+/// ## Why it lives here, and not in the UI
+///
+/// The same refusal can be shown in two places: on the hunt screen, where the
+/// student is looking at it, and in a **notification**, when the hunt ran
+/// headless and there was no screen to show it on.
+///
+/// Two copies of this text would drift — and the copy that drifts is the one
+/// nobody is looking at, which is the one that matters most when the app is
+/// closed. So there is one description, and both callers use it.
+///
+/// A refusal that carries no reason is a refusal the student cannot act on,
+/// and a headless hunt that silently did nothing is indistinguishable from a
+/// broken app.
+String describePreflightFailures(List<PreflightFailure> failures) {
+  if (failures.contains(PreflightFailure.ruleDisabled)) {
+    return 'این شکار خاموش است. برای اجرای خودکار، آن را روشن کنید.';
+  }
+  if (failures.contains(PreflightFailure.alreadyBooked)) {
+    return 'برای این تاریخ و وعده، غذای دیگری در حساب شما ثبت شده است. '
+        'شکار متوقف شد تا غذای تکراری نخرید.';
+  }
+  if (failures.contains(PreflightFailure.insufficientFunds)) {
+    return 'موجودی حساب برای خرید همه غذاهای فهرست اولویت کافی نیست.';
+  }
+  if (failures.contains(PreflightFailure.holdingsUnreadable)) {
+    return 'وضعیت رزروهای فعلی خوانده نشد، پس شکار شروع نشد.';
+  }
+  if (failures.contains(PreflightFailure.balanceUnreadable)) {
+    return 'موجودی حساب خوانده نشد، پس شکار شروع نشد.';
+  }
+  if (failures.contains(PreflightFailure.clockUnsynced)) {
+    return 'ساعت سرور همگام نشده است، پس شکار شروع نشد.';
+  }
+  if (failures.contains(PreflightFailure.noSession)) {
+    return 'ورود به سامانه ممکن نشد، پس شکار شروع نشد.';
+  }
+  if (failures.contains(PreflightFailure.noPreferences)) {
+    return 'هیچ غذایی انتخاب نشده است.';
+  }
+  return 'پیش‌نیازها برقرار نبود.';
+}
+
 /// Runs preconditions for a rule.
 class PreflightChecker {
   const PreflightChecker();

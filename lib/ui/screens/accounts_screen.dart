@@ -146,6 +146,20 @@ class _AccountsScreenState extends State<AccountsScreen> {
     );
     if (result == null) return;
 
+    // The dialog's password field starts empty even in edit mode, so a
+    // non-empty value here is a fresh password the user typed: it must go to
+    // the secure store. Dropping it silently would leave the red
+    // "credentials not saved" warning standing while the user believes they
+    // saved everything — which is exactly the state that breaks the
+    // automated hunt later. An empty field means "leave the stored password
+    // unchanged" (or absent, if none was ever set).
+    if (result.password != null) {
+      await widget.state.saveCredentials(
+        account.id,
+        Credentials(studentId: result.studentId, password: result.password!),
+      );
+    }
+
     await widget.state.setAlias(account.id, result.alias);
     if (result.studentId != account.studentId) {
       await widget.state.upsertAccount(

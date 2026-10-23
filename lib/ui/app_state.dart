@@ -74,6 +74,16 @@ class AppState extends ChangeNotifier {
   String? _huntPreflightSummary;
   String? _huntPreflightRefusal;
 
+  /// Why the hunt could not be switched **on**, when it could not.
+  ///
+  /// Separate from [huntPreflightRefusal] because it is a different moment:
+  /// the pre-flight refusal is the answer to "start the hunt now", while this
+  /// is the answer to "let the hunt start by itself later". A hunt can be
+  /// refused one and allowed the other — a window that has already closed
+  /// cannot be armed, but a manual start inside a window the student is
+  /// looking at is fine.
+  String? _huntEnableRefusal;
+
   /// The hunt's schedule, per account.
   ///
   /// What the wake-up was armed for, and whether it was armed at all. The
@@ -123,6 +133,15 @@ class AppState extends ChangeNotifier {
 
   /// Why the hunt was refused, when it was.
   String? get huntPreflightRefusal => _huntPreflightRefusal;
+
+  /// Why the hunt could not be switched on, when it could not.
+  String? get huntEnableRefusal => _huntEnableRefusal;
+
+  /// Records why the hunt could not be switched on, or clears it.
+  void setHuntEnableRefusal(String? refusal) {
+    _huntEnableRefusal = refusal;
+    notifyListeners();
+  }
 
   /// Whether a hunt is running.
   bool get huntRunning => _huntRunning;
@@ -363,6 +382,11 @@ class AppState extends ChangeNotifier {
     // The verdict was computed for the old configuration.
     _huntPreflightSummary = null;
     _huntPreflightRefusal = null;
+    // The enable refusal is about the configuration that was just replaced:
+    // once the date, window or meal moves, the reason it was refused is no
+    // longer the reason for this hunt. It is cleared rather than kept, so a
+    // stale «موجودی کافی نیست» cannot outlive the top-up that fixed it.
+    _huntEnableRefusal = null;
     notifyListeners();
 
     // The wake-up is derived from the configuration, so a change has to

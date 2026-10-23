@@ -23,6 +23,7 @@ library;
 import 'package:bahonar_nut/core/account.dart';
 import 'package:bahonar_nut/core/account_store.dart';
 import 'package:bahonar_nut/core/hunt_config.dart';
+import 'package:bahonar_nut/core/hunt_schedule.dart';
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/reminder.dart';
 import 'package:bahonar_nut/core/session_manager.dart';
@@ -31,6 +32,7 @@ import 'package:bahonar_nut/platform/platform_bridge.dart';
 import 'package:bahonar_nut/platform/platform_services.dart';
 import 'package:bahonar_nut/ui/app_state.dart';
 import 'package:bahonar_nut/ui/home_shell.dart';
+import 'package:bahonar_nut/ui/screens/hunt_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -97,6 +99,42 @@ class _RequestBridge extends PlatformBridge {
     huntsCancelled.add(accountId);
     huntWakeAt.remove(accountId);
   }
+
+  /// Whether the shell asked for the hunt's foreground service to start.
+  bool huntServiceStarted = false;
+
+  @override
+  Future<void> startHuntService({String? payload}) async {
+    huntServiceStarted = true;
+  }
+
+  /// Whether the shell asked for the hunt's foreground service to be released.
+  bool huntServiceStopped = false;
+
+  @override
+  Future<void> stopHuntService() async {
+    huntServiceStopped = true;
+  }
+
+  /// Asks the shell for a hunt, the way the platform does.
+  ///
+  /// The platform's request arrives on the method channel, and the bridge's
+  /// handler is what receives it. The real `PlatformBridge` installs that
+  /// handler on the channel; this fake keeps the handler the shell installed
+  /// and lets the test call it.
+  void simulateHuntRequested(AccountId accountId) {
+    _handler?.call(accountId);
+  }
+
+  /// The handler the shell installed on the bridge.
+  void Function(String? payload)? _handler;
+
+  /// Remembers the handler the shell registers.
+  @override
+  void onHuntRequested(void Function(String? payload) handler) {
+    _handler = handler;
+    super.onHuntRequested(handler);
+  }
 }
 
 /// A store seeded with one known account.
@@ -141,13 +179,41 @@ void main() {
 
   final clock = FixedServerClock.now(DateTime.utc(2026, 10, 20, 12));
 
+  /// A dish the fake portal serves, so a hunt with a priority list has
+  /// something the pre-flight can credit-check.
+  final dish = HuntDish(
+    optionId: 'opt-1',
+    name: 'چلوگوشت',
+    priceRial: 500000,
+  );
+
+  /// The menu the fake portal serves for the tests' target date, carrying
+  /// [dish] at the same price the config quotes.
+  final menu = MealMenu(
+    date: DateTime.utc(2026, 10, 22),
+    slot: MealSlot.breakfast,
+    halls: const [Hall(id: 'hall-1', name: 'مرکزی')],
+    dishes: const [
+      MenuOption(
+        id: 'opt-1',
+        name: 'چلوگوشت',
+        priceRial: 500000,
+      ),
+    ],
+    reservable: true,
+  );
+
   /// Builds the shell with one account and a hunt configuration.
   Future<void> pumpShell(
     WidgetTester tester, {
     required _RequestBridge bridge,
     bool huntEnabled = false,
+    HuntConfig? config,
+    int balanceRial = 1000000,
+    List<MealMenu>? menus,
   }) async {
-    portal = FakePortalClient();
+    portal = FakePortalClient(balanceRial: balanceRial);
+    portal.menus = menus ?? [menu];
 
     services = AppServices(
       bridge: bridge,
@@ -173,11 +239,12 @@ void main() {
 
     state.selectHuntAccount(accountId);
     await state.saveHuntConfig(
-      HuntConfig(
-        targetDate: DateTime.utc(2026, 10, 22),
-        targetSlot: MealSlot.breakfast,
-        enabled: huntEnabled,
-      ),
+      config ??
+          HuntConfig(
+            targetDate: DateTime.utc(2026, 10, 22),
+            targetSlot: MealSlot.breakfast,
+            enabled: huntEnabled,
+          ),
     );
 
     await tester.pumpWidget(
@@ -230,7 +297,20 @@ void main() {
       (tester) async {
     final bridge = _RequestBridge(['hunt:$accountId']);
 
-    await pumpShell(tester, bridge: bridge, huntEnabled: true);
+    // A hunt with one dish chosen, and the portal serving that dish - so the
+    // pre-flight the answer runs can pass. The dish is priced at what the
+    // config quotes, so the credit check has nothing to refuse.
+    await pumpShell(
+      tester,
+      bridge: bridge,
+      config: HuntConfig(
+        targetDate: DateTime.utc(2026, 10, 22),
+        targetSlot: MealSlot.breakfast,
+        dishPriority: [dish],
+        enabled: true,
+      ),
+    );
+    portal.menus = [menu];
 
     expect(
       bridge.cleared.expand((e) => e),
@@ -238,6 +318,8 @@ void main() {
       reason: 'a hunt the student switched on, asked for by the platform, is '
           'answered and the request is cleared',
     );
+    services.hunts.stop(accountId);
+    await tester.pump(const Duration(minutes: 1));
   });
 
   testWidgets('a hunt request for an account the app does not have is not '
@@ -260,6 +342,98 @@ void main() {
     await pumpShell(tester, bridge: bridge);
 
     expect(bridge.cleared, isEmpty);
+  });
+
+  group('a live hunt request', () {
+    // The defect this pins: the native service records a hunt request
+    // **before** it looks for a Dart side — that is the F75 safety net, and
+    // it is why a hunt survives the app dying between the alarm and the
+    // hand-over. So the record outlives the hand-over, and the next launch
+    // read it and started the hunt a *second* time, for an account that had
+    // already been hunted. Nothing noticed: the two runs are separate, and
+    // the app's own "already running" guard does not span them.
+    //
+    // So the side that acts clears the record. This is the live path — the
+    // app's own engine, awake, answering the platform.
+
+    testWidgets('the record is cleared once the hunt starts',
+        (tester) async {
+      final bridge = _RequestBridge([]);
+
+      // The same fixture as the pending test above: one chosen dish, served
+      // by the portal, priced as quoted - so the pre-flight can pass.
+      await pumpShell(
+        tester,
+        bridge: bridge,
+        config: HuntConfig(
+          targetDate: DateTime.utc(2026, 10, 22),
+          targetSlot: MealSlot.breakfast,
+          dishPriority: [dish],
+          enabled: true,
+        ),
+      );
+      portal.menus = [menu];
+
+      // The platform asks for a hunt while the app is alive.
+      bridge.simulateHuntRequested(accountId);
+      await tester.pumpAndSettle();
+
+      expect(
+        bridge.cleared.expand((e) => e),
+        contains('hunt:$accountId'),
+        reason: 'the record outlives the hand-over, so the side that acts '
+            'has to clear it — or the next launch hunts the same account a '
+            'second time',
+      );
+      services.hunts.stop(accountId);
+      await tester.pump(const Duration(minutes: 1));
+    });
+
+    testWidgets('a request for a switched-off hunt is left owed',
+        (tester) async {
+      final bridge = _RequestBridge([]);
+
+      await pumpShell(tester, bridge: bridge, huntEnabled: false);
+
+      bridge.simulateHuntRequested(accountId);
+      await tester.pumpAndSettle();
+
+      expect(
+        bridge.cleared.expand((e) => e),
+        isNot(contains('hunt:$accountId')),
+        reason: 'a hunt the student switched off must not start, and the '
+            'request stays owed rather than being silently dropped',
+      );
+    });
+
+    testWidgets('a request the pre-flight refuses releases the service',
+        (tester) async {
+      // Found on the device (F87): the alarm started the foreground service
+      // and *then* asked the Dart side. The pre-flight refused — no credit,
+      // no dish — and the early return left «پایش سبد غذا» posted over a hunt
+      // that never ran. It was still there 12 minutes later.
+      final bridge = _RequestBridge([]);
+
+      // A hunt that is switched on but targets a Thursday dinner, which the
+      // halls never serve — so the pre-flight cannot pass.
+      await pumpShell(
+        tester,
+        bridge: bridge,
+        config: HuntConfig(
+          targetDate: DateTime.utc(2026, 10, 22),
+          targetSlot: MealSlot.dinner,
+          enabled: true,
+        ),
+      );
+
+      bridge.simulateHuntRequested(accountId);
+      await tester.pumpAndSettle();
+
+      expect(bridge.huntServiceStopped, isTrue,
+          reason: 'a foreground service with no hunt behind it is a battery '
+              'drain and a notification the student cannot clear');
+      expect(bridge.huntsArmed, isEmpty);
+    });
   });
 
   group('the hunt\'s wake-up', () {
@@ -298,6 +472,126 @@ void main() {
       expect(bridge.huntsArmed, contains(accountId),
           reason: 'a reboot clears every alarm, and the hunt\'s wake-up is '
               'one of them');
+    });
+  });
+
+  group('switching the hunt on is gated', () {
+    // The defect these pin (F87): the switch stored `enabled: true` and armed
+    // an alarm **without checking anything**. On the device that meant a hunt
+    // for a Thursday dinner — a meal the halls never serve — was armed for
+    // 16:30 at 18:11, fired at once, and left its "watching the basket"
+    // notification standing with a balance far below the meal's price.
+
+    /// Opens the hunt tab and returns the switch on it.
+    ///
+    /// The tab is opened rather than merely found: an `IndexedStack` builds
+    /// every destination but only hit-tests the visible one, so a tap on a
+    /// hidden screen's switch would land on whatever is actually on top.
+    Future<Finder> openHuntTab(WidgetTester tester) async {
+      await tester.tap(find.text('شکار'));
+      await tester.pumpAndSettle();
+      return find.descendant(
+        of: find.byType(HuntScreen),
+        matching: find.byType(Switch),
+      );
+    }
+
+    testWidgets('a hunt for a meal that is not served is not switched on',
+        (tester) async {
+      // 2026-10-22 is a Thursday, and Thursday serves no dinner.
+      final bridge = _RequestBridge([]);
+      await pumpShell(
+        tester,
+        bridge: bridge,
+        config: HuntConfig(
+          targetDate: DateTime.utc(2026, 10, 22),
+          targetSlot: MealSlot.dinner,
+        ),
+      );
+
+      await tester.tap(await openHuntTab(tester));
+      await tester.pumpAndSettle();
+
+      // The flag is not stored, so the switch springs back and the reason is
+      // on screen — a hunt that claims to be on with no alarm behind it is
+      // the state the student cannot tell from a working one.
+      expect(state.huntConfigFor(accountId)!.enabled, isFalse);
+      expect(state.huntEnableRefusal, isNotNull);
+      expect(bridge.huntsArmed, isEmpty);
+    });
+
+    testWidgets('a hunt whose window has closed is not switched on',
+        (tester) async {
+      // The clock is 2026-10-20 12:00Z (15:30 portal). A hunt for the 18th's
+      // window — the 18th is a Sunday, so the meal is served — has a window
+      // that has already closed.
+      final bridge = _RequestBridge([]);
+      await pumpShell(
+        tester,
+        bridge: bridge,
+        config: HuntConfig(
+          targetDate: DateTime.utc(2026, 10, 18),
+          targetSlot: MealSlot.dinner,
+        ),
+      );
+
+      await tester.tap(await openHuntTab(tester));
+      await tester.pumpAndSettle();
+
+      expect(state.huntConfigFor(accountId)!.enabled, isFalse);
+      expect(state.huntEnableRefusal, isNotNull);
+      expect(bridge.huntsArmed, isEmpty);
+    });
+
+    testWidgets('a hunt with no dishes chosen may still be switched on',
+        (tester) async {
+      // Nothing is selected yet, so there is no cost to judge and no request
+      // to make. Refusing here would block the normal order of work — the
+      // student picks the date first and the dishes after.
+      final bridge = _RequestBridge([]);
+      await pumpShell(
+        tester,
+        bridge: bridge,
+        config: HuntConfig(
+          targetDate: DateTime.utc(2026, 10, 25),
+          targetSlot: MealSlot.dinner,
+        ),
+      );
+
+      await tester.tap(await openHuntTab(tester));
+      await tester.pumpAndSettle();
+
+      expect(state.huntConfigFor(accountId)!.enabled, isTrue);
+      expect(state.huntEnableRefusal, isNull);
+    });
+
+    testWidgets('a hunt whose window is open now is switched on and armed',
+        (tester) async {
+      // The device's case, and the answer the user chose: an open window is
+      // allowed and starts at once. The clock is 15:30 portal on the 20th, and
+      // this hunt's window is 15:00–16:00 that same day — so the wake instant
+      // (15:00) is behind us and the window's end (16:00) is ahead.
+      final bridge = _RequestBridge([]);
+      await pumpShell(
+        tester,
+        bridge: bridge,
+        config: HuntConfig(
+          targetDate: DateTime.utc(2026, 10, 20),
+          targetSlot: MealSlot.dinner,
+          windowStart: const ClockTime(15, 0),
+          windowEnd: const ClockTime(16, 0),
+        ),
+      );
+
+      await tester.tap(await openHuntTab(tester));
+      await tester.pumpAndSettle();
+
+      expect(state.huntConfigFor(accountId)!.enabled, isTrue);
+      expect(bridge.huntsArmed, contains(accountId),
+          reason: 'an open window is armed for its (past) start, which fires '
+              'at once — the immediate start the student asked for');
+      expect(state.huntScheduleFor(accountId)!.status,
+          HuntScheduleStatus.windowOpen);
     });
   });
 }

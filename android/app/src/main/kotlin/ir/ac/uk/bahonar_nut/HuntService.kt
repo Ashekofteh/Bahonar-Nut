@@ -71,6 +71,14 @@ class HuntService : Service() {
 
     private var notifier: ReminderNotifier? = null
 
+    /**
+     * The engine that runs the hunt when the app is closed.
+     *
+     * Null when the hunt was started by the app's own Dart side, or when no
+     * background engine could be started.
+     */
+    private var background: BackgroundHuntEngine? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -107,20 +115,41 @@ class HuntService : Service() {
         // notification, and told nobody. The hunt never ran, and the
         // notification sat on screen claiming the app was monitoring the
         // basket.
+        //
+        // The record is written **first**, before anybody is asked. That is
+        // the F75 rule — "record, don't deliver" — and it is the safety net:
+        // if the process dies between the alarm and the hand-over, the hunt
+        // is still owed, and the next launch runs it.
+        //
+        // The cost of recording first is that the record outlives a hunt
+        // that *did* run, and the next launch would start a second one. So
+        // the side that acts clears the record: the in-app path does it
+        // through the pending-request sweep, and the background engine does
+        // it in the headless entrypoint. Both are the same rule — the record
+        // is cleared by the side that knows the outcome.
         if (!fromDart) {
             PendingRequest.record(this, PendingRequest.KIND_HUNT, payload)
 
             val delivered = PlatformChannelMessenger.notifyHuntRequested(this, payload)
 
             if (!delivered) {
-                // There was no Dart side to hand the hunt to, so nothing is
-                // running. The service stops rather than sit on the screen
-                // claiming to monitor the basket: a foreground service with no
-                // hunt behind it is a battery drain and a notification the
-                // user cannot clear. The request stays owed, and the hunt
-                // starts when the app next runs.
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                // There was no Dart side to hand the hunt to — the app was
+                // closed, which is the whole reason the alarm fired. So the
+                // hunt gets a Dart side of its own: a second engine, whose
+                // Dart is a root isolate and can therefore use the method
+                // channel.
+                val started = startBackgroundHunt(payload)
+
+                if (!started) {
+                    // The background engine could not start, so nothing is
+                    // running. The service stops rather than sit on the screen
+                    // claiming to monitor the basket: a foreground service
+                    // with no hunt behind it is a battery drain and a
+                    // notification the user cannot clear. The request stays
+                    // owed, and the hunt starts when the app next runs.
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
             }
         }
 
@@ -131,7 +160,26 @@ class HuntService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Starts the background engine for the hunt.
+     *
+     * Returns whether the engine is running the hunt. A false means the hunt
+     * cannot run headless, and the request stays owed.
+     */
+    private fun startBackgroundHunt(payload: String?): Boolean {
+        val engine = BackgroundHuntEngine(this)
+        if (!engine.start(payload)) return false
+        background = engine
+        return true
+    }
+
     override fun onDestroy() {
+        // The engine dies with the service. A second Flutter engine is a
+        // second Dart VM, and a VM held for nothing is a battery drain — so
+        // the hunt's lifetime and the engine's lifetime are the same.
+        background?.destroy()
+        background = null
+
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }

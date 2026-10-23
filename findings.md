@@ -2977,3 +2977,105 @@ own `FlutterEngine`. The two remaining questions are narrow:
 
 Both are answerable on the device, and neither is a platform question any
 more — they are questions about the app's own code.
+
+## 2026-10-22 — Session 30: F86, found while verifying F85 on the device
+
+### F86 — The edit dialog collected a password and silently dropped it
+
+**Severity:** high — the account card's red warning is true, but the dialog
+that could fix it lies by doing nothing.
+
+**Found 2026-10-22, driving the app's own UI on the emulator while setting up
+the F85 headless-hunt verification.**
+
+#### The defect
+
+The account card carries a warning when an account has no stored credentials:
+
+> اطلاعات ورود این حساب ذخیره نشده است
+
+The add dialog saves what it collects: `_addAccount` calls
+`state.saveCredentials` when the draft carries a password. The **edit** dialog
+did not: `_editAccount` saved the alias and the student id, and the password
+field's content was **never read**. The student opens the edit dialog — the
+natural place to add credentials to an account created without them — types
+the password, taps ذخیره, watches the dialog close with no error, and the red
+warning stays standing. Nothing told them the save was dropped.
+
+This is not hypothetical on this codebase: the add path treats the password as
+optional, a credential-less account is a supported state
+(`_AccountDraft.password` is nullable, the field is labelled «اختیاری»), and
+the hunt needs the password to log in. An account prepared this way fails the
+hunt's preflight with a refusal that is truthful but named a defect the
+student already believed they had fixed.
+
+#### The trap in the diagnosis
+
+The prefs file for credentials is **`bahonar_nut.secure.xml`** — a separate
+`SharedPreferences` file from the account store (`bahonar_nut.store.xml`),
+written by the *Kotlin* `SecureCredentialStore` (AES-GCM, Keystore key). The
+first diagnostic reflex — "read the prefs the app writes" — found the account
+record in `store.xml` and nothing else, and suggested the write went
+nowhere at all. That was the right instinct but the wrong file: the credential
+file would only exist after a first successful write. Its absence proved
+exactly one useful fact — `secureWrite` had never been called — and the code
+reading that followed showed why: the only caller in the UI sat in the
+**add** path.
+
+(The same read ruled out one suspect at no cost: the emulator's keystore2
+error noise — "User ECDH key missing", "Generating fresh key" — is
+`flutter_secure_storage`'s first-run initialisation on a fresh emulator, a
+dependency the app does not even use. Benign, and not the failure.)
+
+#### The fix
+
+`_editAccount` now persists a non-empty dialog password through
+`state.saveCredentials`. An empty field deliberately leaves the stored
+credentials untouched — the field starts empty in edit mode, so an empty
+value must not be able to erase a password the student saved yesterday.
+
+Two widget tests pin the behaviour: a typed password reaches
+`MemorySecureStore`, and an empty field preserves a previously stored one.
+
+#### The general lesson
+
+The red warning was **correct** the whole time — the student's account
+genuinely had no credentials. What failed was the path the student would
+navigate to fix it. Verification of a *different* feature (F85's setup)
+caught it, which is the standard the device-verification rule is asking for:
+the screen the feature owns is also the screen where new wiring breaks, and
+the six-point checklist could not have started while the credentials the
+preflight reads did not exist.
+
+## 2026-10-23 — Session 31: F87 & F87b, Gating Hunt Enablement & Releasing Refused Service
+
+### F87 — The hunt switch allowed activation for invalid windows and insufficient funds
+
+**Severity:** high — the switch claimed the hunt was armed and would buy food, when the meal was impossible to serve, the window had passed, or the student lacked the funds to pay for it.
+
+#### The defect
+
+The hunt screen's toggle switch allowed activating the hunt unconditionally:
+1. **Unserved meals & passed windows:** A user could toggle the switch ON for a meal that is never served (e.g. Thursday dinner, Friday all meals, Saturday breakfast) or a meal whose target window had already elapsed. The UI displayed a scheduled wake-up that could never succeed.
+2. **Insufficient funds:** When dishes were chosen in the priority list whose total cost exceeded the student's available balance, the switch could still be turned ON. The student expected the hunt to purchase their chosen dishes, but the hunt would immediately fail at execution time with an empty balance.
+
+#### The fix
+
+1. **Preflight Gating on Toggle (`_confirmHuntEnable`):** Toggling the switch to ON now performs validation:
+   - Validates `scheduleFor(config)` against `mealNotServed`, `windowPassed`, `noTargetDate`, and `windowInvalid`. If invalid, the switch springs back to OFF and displays an explicit refusal message explaining why the meal or window cannot be hunted.
+   - For open windows (`HuntScheduleStatus.windowOpen`), truth in advertising is maintained: activation is allowed immediately, displaying «این شکار روشن است و بازه زمانی آن هم‌اکنون باز است...».
+   - If dishes are selected, runs `engine.preflight(rule, hunt: config)`. If balance < `requiredCreditRial`, refuses activation, keeps switch OFF, shows «موجودی حساب برای خرید همه غذاهای فهرست اولویت کافی نیست.», and renders an «+ افزایش اعتبار» action button linking directly to the top-up bottom sheet.
+2. **Silent Launch-Time Balance Refresh:** To prevent stale balance data from producing false passes or false refusals, `_refreshBalancesQuietly` executes on app start (`onLoaded` and post-frame `isLoaded`) without triggering fallback CAPTCHA modals.
+
+### F87b — Preflight refusal of platform-requested hunt leaked foreground service 4201
+
+**Severity:** medium — notification 4201 ("پایش سبد غذا") remained permanently stuck in the status bar if an in-app hunt request was refused by preflight.
+
+#### The defect
+
+When `HuntService` woke the app and handed over a hunt request via `notifyHuntRequested`, `_answerHuntRequest` invoked `_startHunt`. If `preflight` refused the hunt, `_startHunt` returned without starting the loop. However, `HuntService` had already posted foreground notification 4201, which was never cleared, leaving a misleading persistent notification claiming the app was monitoring the food basket.
+
+#### The fix
+
+`_startHunt` now returns `Future<bool>`. If preflight fails or the hunt cannot run, `_answerHuntRequest` catches the `false` return and promptly calls `_releaseHuntService()` (`bridge.stopHuntService()`), clearing the notification drawer.
+

@@ -1,6 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+// The headless hunt's entrypoint, imported for its existence and nothing else.
+//
+// The native side starts a second engine and names this file as a **string**;
+// no Dart code is supposed to call it. That is exactly the problem: a name
+// that exists only in Kotlin is invisible to the Dart compiler, and a library
+// that nothing imports is never compiled into the app. The native call then
+// asks the VM to run a library that is not there — at 16:30, in the
+// background, with no screen to say so.
+//
+// This import is the only edge that puts the file in the program. The
+// function's own `@pragma('vm:entry-point')` is what keeps it, and everything
+// it reaches, from being shaken out of a release build.
+//
+// ignore: unused_import
+import 'background/hunt_entrypoint.dart';
+
 import 'platform/platform_services.dart';
 import 'ui/app_state.dart';
 import 'ui/home_shell.dart';

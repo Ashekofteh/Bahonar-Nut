@@ -31,6 +31,9 @@ class FakePortalClient implements PortalClient {
   /// The balance the portal reports.
   int balanceRial;
 
+  /// The menus the portal reports. Empty until a test sets them.
+  List<MealMenu> menus = const [];
+
   /// The payments the portal reports.
   List<TopUpPayment> topUpPayments = const [];
 
@@ -88,7 +91,7 @@ class FakePortalClient implements PortalClient {
 
   @override
   Future<List<MealMenu>> fetchMenu(Session session, DateTime date) async =>
-      const [];
+      menus;
 
   @override
   Future<BookableMenus> fetchBookableMenus(

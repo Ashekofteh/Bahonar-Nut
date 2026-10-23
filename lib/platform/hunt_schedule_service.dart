@@ -53,6 +53,63 @@ class HuntScheduleService {
     );
   }
 
+  /// Arms the hunt's wake-up again, after a run has ended.
+  ///
+  /// ## Why the re-arm is not the first arm
+  ///
+  /// The first arm is the student's own action, so a window that is open now
+  /// is a window they mean to hunt in and it fires at once. A re-arm follows
+  /// a run that has just ended — usually because the hunt **refused** (no
+  /// credit, no session) or ran out of its request budget — and arming into
+  /// the same open window would start the hunt again immediately, and again,
+  /// for as long as the window stayed open.
+  ///
+  /// So the re-arm only arms a window that is still **ahead**. A window that
+  /// has opened is reported as [HuntScheduleStatus.windowOpen] and no alarm
+  /// is set: the hunt has had its chance at that window, and the student
+  /// chooses a new date.
+  ///
+  /// ## The clock must be synced
+  ///
+  /// The comparison is between a portal-derived instant and "now", so "now"
+  /// has to be the portal's now. An unsynced clock cannot supply it, so the
+  /// re-arm is refused rather than guessed: a re-arm that fires at once is
+  /// the failure this exists to prevent.
+  Future<HuntScheduleResult> rearm({
+    required AccountId accountId,
+    required HuntConfig config,
+    required ServerClock clock,
+  }) async {
+    await bridge.cancelHuntAlarm(accountId);
+
+    if (!config.enabled) {
+      return const HuntScheduleResult(
+        status: HuntScheduleStatus.disabled,
+      );
+    }
+
+    if (!clock.isSynced) {
+      return const HuntScheduleResult(
+        status: HuntScheduleStatus.clockUnsynced,
+      );
+    }
+
+    final result = HuntSchedules.rearmFor(
+      targetDate: config.targetDate,
+      slot: config.targetSlot,
+      windowStart: config.windowStart,
+      windowEnd: config.windowEnd,
+      nowUtc: clock.nowUtc,
+    );
+    if (!result.isScheduled) return result;
+
+    await bridge.scheduleHuntAlarm(
+      accountId: accountId,
+      triggerAt: result.schedule!.wakeAtUtc,
+    );
+    return result;
+  }
+
   /// Arms the hunt's wake-up for [accountId], or disarms it.
   ///
   /// Returns the schedule that was armed, or the status that stopped it.
@@ -64,6 +121,19 @@ class HuntScheduleService {
   /// The alarm is **cancelled first** in every case, so a hunt that is
   /// switched off, retargeted, or has no schedule never leaves a stale alarm
   /// behind to fire at the wrong time.
+  ///
+  /// ## A window that is already open is armed, on purpose
+  ///
+  /// This is the **student's own** action: they flipped the switch with the
+  /// hunt's window on screen. A window that is open right now is a window they
+  /// mean to hunt in, so the alarm is set for the window's start — an instant
+  /// already gone — and fires at once. That is the immediate start, and it is
+  /// what "arm a hunt whose window is open" has always meant.
+  ///
+  /// What changed is that the result now **says** so: the status is
+  /// [HuntScheduleStatus.windowOpen], not `scheduled`, so the screen can tell
+  /// the student the hunt starts now rather than printing a start time that
+  /// has already passed.
   Future<HuntScheduleResult> arm({
     required AccountId accountId,
     required HuntConfig config,
@@ -78,7 +148,7 @@ class HuntScheduleService {
     }
 
     final result = scheduleFor(config, clock);
-    if (!result.isScheduled) return result;
+    if (!result.isScheduled && !result.isOpenNow) return result;
 
     await bridge.scheduleHuntAlarm(
       accountId: accountId,

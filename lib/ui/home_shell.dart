@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/account.dart';
 import '../core/hunt_config.dart';
+import '../core/hunt_schedule.dart';
 import '../core/models.dart';
 import '../core/persian.dart';
 import '../core/pending_request.dart';
@@ -150,6 +151,7 @@ class _HomeShellState extends State<HomeShell> {
         _armHunts();
         _deliverPending();
         _answerPendingRequests();
+        _refreshBalancesQuietly();
       }
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -159,8 +161,63 @@ class _HomeShellState extends State<HomeShell> {
         _armHunts();
         _deliverPending();
         _answerPendingRequests();
+        _refreshBalancesQuietly();
       }
     });
+  }
+
+  /// Reads every account's balance once, at launch, without a prompt.
+  ///
+  /// ## Why this is not [refreshFromPortal]
+  ///
+  /// The student asked for the balance to be fresh whenever they open the app
+  /// — it is the figure they judge a hunt against, and a balance from three
+  /// days ago is the figure the hunt's own pre-flight will contradict the
+  /// moment it wakes. But a launched app is not a student looking at a dialog:
+  /// if the portal wants a CAPTCHA, [refreshFromPortal] would open a modal
+  /// over whatever screen the app started on.
+  ///
+  /// So this path never prompts. The session is asked for with no solver
+  /// fallback — `SessionManager.sync` returns `needsCaptcha` rather than
+  /// stopping for an answer — and a result that needs one is left alone: the
+  /// balance stays as it was, the student's own refresh (which *does* ask) is
+  /// how they answer it, and nothing is reported as an error. A quiet failure
+  /// that leaves a stale figure is better than a modal the student did not
+  /// ask for.
+  ///
+  /// ## Why it does not touch the syncing flag
+  ///
+  /// That flag drives the refresh button's spinner. A quiet read that never
+  /// prompted must not make the button look busy — the student would read it
+  /// as "a refresh is running" and wait for a result that is not coming.
+  Future<void> _refreshBalancesQuietly() async {
+    final accounts = widget.state.accounts;
+    if (accounts.isEmpty) return;
+
+    final transactions = <Transaction>[];
+    var allRead = true;
+
+    for (final account in accounts) {
+      if (!mounted) return;
+      final result = await _sync.sync(account.id);
+      if (!mounted) return;
+
+      if (result.ok) {
+        widget.state.setBalance(account.id, result.balanceRial ?? 0);
+        transactions.addAll(result.transactions);
+      } else {
+        // A CAPTCHA was needed, or the read failed. The student is not being
+        // asked, so this account is left as it was — and the transactions are
+        // not recomputed, because a partial set would silently drop this
+        // account's spending from the dashboard.
+        allRead = false;
+      }
+    }
+
+    // The dashboard's spend metric is computed from the transactions the sync
+    // read. They are recorded only when **every** account was read, so a
+    // skipped account cannot erase spending the app already knew about.
+    if (allRead) widget.state.setTransactions(transactions);
   }
 
   /// Arms the wake-up for every account that has a hunt.
@@ -268,13 +325,60 @@ class _HomeShellState extends State<HomeShell> {
   /// hunt configuration, or with the hunt switched off, is **not** answered:
   /// there is nothing to start, and clearing the request would lose the fact
   /// that the platform asked.
+  ///
+  /// ## The record is cleared once the hunt is under way
+  ///
+  /// The native side records a hunt request **before** it looks for a Dart
+  /// side, because it cannot know whether one will be there — that is the
+  /// F75 safety net, and it is why a hunt survives the app dying between the
+  /// alarm and the hand-over.
+  ///
+  /// So the record outlives the hand-over, and something has to clear it. If
+  /// nothing did, the next launch would read the record and start the hunt a
+  /// **second** time, for an account that has already been hunted — and
+  /// because the two runs are separate, nothing would notice.
+  ///
+  /// So the side that acts clears the record. The headless engine does the
+  /// same thing in the background entrypoint: the rule is the same, and both
+  /// paths clear only their own account's entry.
   Future<bool> _answerHuntRequest(AccountId accountId) async {
     final config = widget.state.huntConfigFor(accountId);
     if (config == null) return false;
     if (!config.enabled) return false;
 
-    await _startHunt(accountId, config);
+    final started = await _startHunt(accountId, config);
+
+    if (!started) {
+      // The pre-flight refused, or the screen went away. The platform's
+      // foreground service is standing with nothing behind it, so it is
+      // released here — the same rule the headless path follows, where the
+      // service stops rather than sit on screen claiming to watch the basket.
+      //
+      // The record is left owed: the platform asked, and the answer was no.
+      // Clearing it would lose the fact that a wake-up was missed, and the
+      // next launch should try again once the reason is fixed.
+      await _releaseHuntService();
+      return false;
+    }
+
+    await _clearPendingHuntRequest(accountId);
+
     return true;
+  }
+
+  /// Clears the recorded hunt request for [accountId].
+  ///
+  /// A failure to clear is not worth failing the hunt over: the hunt has
+  /// started, and a leftover record would only make the *next* launch repeat
+  /// it — which is worse, but not as bad as not hunting at all.
+  Future<void> _clearPendingHuntRequest(AccountId accountId) async {
+    try {
+      await widget.services.bridge.clearPendingRequests(
+        [PendingRequest.hunt(accountId).entry],
+      );
+    } catch (_) {
+      // A duplicate hunt is better than a lost one.
+    }
   }
 
   /// Arms the reminder alarms for the current configuration.
@@ -1030,6 +1134,10 @@ class _HomeShellState extends State<HomeShell> {
           onConfigChanged: (updated) => _onConfigChanged(updated),
           onStart: () => _startHunt(activeId, config),
           onStop: () => _stopHunt(activeId),
+          enableRefusal: state.huntEnableRefusal,
+          onTopUp: _refusalNeedsTopUp
+              ? () => _startTopUpFor(activeId)
+              : null,
         );
       },
     );
@@ -1089,6 +1197,29 @@ class _HomeShellState extends State<HomeShell> {
   /// date does. The read is also skipped when only the rate changed, for the
   /// same reason: every read is a request the portal sees.
   Future<void> _onConfigChanged(HuntConfig updated) async {
+    // Turning the hunt **on** is not an ordinary edit: it is the moment the
+    // app promises to start a hunt by itself, hours from now, with the app
+    // closed. So it is the moment to check that the promise can be kept —
+    // before the flag is stored, not after the alarm has already fired.
+    //
+    // Every other change (date, window, meal, rate) is saved as before. Only
+    // the off→on edge is gated.
+    final turningOn = updated.enabled && !(_currentHuntConfig?.enabled ?? false);
+    if (turningOn) {
+      // True means "no objection": either the check passed, or the answer
+      // arrived after the screen was gone and there is nothing to report.
+      final allowed = await _confirmHuntEnable(updated);
+      if (!mounted) return;
+      if (!allowed) {
+        // The flag is not stored, so the switch springs back and the screen
+        // keeps saying why. Storing it and refusing afterwards would leave a
+        // hunt that claims to be on with no alarm behind it — the exact state
+        // the student cannot tell from a working one.
+        return;
+      }
+    }
+
+    widget.state.setHuntEnableRefusal(null);
     await widget.state.saveHuntConfig(updated);
 
     final dateMoved = !_sameDate(_marketFor?.targetDate, updated.targetDate);
@@ -1102,6 +1233,140 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     await loadMarket(date: updated.targetDate);
+  }
+
+  /// Whether the hunt may be switched on.
+  ///
+  /// Records the refusal and its kind on the state when it may not, so the
+  /// screen can say why (and, for money, offer the top-up).
+  ///
+  /// ## Why the window is checked here at all
+  ///
+  /// An alarm set for an instant already gone fires **at once**. So a hunt
+  /// enabled after its window opened starts immediately rather than at a
+  /// claimed time — which is fine, and is what the student meant by switching
+  /// it on inside the window. What is not fine is the case where there is no
+  /// window left to start in at all:
+  ///
+  ///  * the window has **closed** — the meal it was for has been released and
+  ///    taken, and the hunt can buy nothing;
+  ///  * the meal is **not served** on that date (a dinner on a Thursday, a
+  ///    Friday) — there is no listing the portal will ever publish.
+  ///
+  /// Both are refusals of the *schedule*, derived from the configuration alone,
+  /// so they are decided before any request is made.
+  ///
+  /// ## Why the funds are checked here too
+  ///
+  /// The hunt spends money, and the balance is the one fact the student can
+  /// act on before the window arrives. A hunt armed with a balance below the
+  /// priority list's cost refuses the moment it wakes — hours later, with
+  /// nobody looking at the screen. Refusing at the switch turns that into a
+  /// message the student can fix now (top up), which is the difference between
+  /// a silent failure and an actionable one.
+  ///
+  /// The check needs a live balance, so it costs a portal read. It runs **only
+  /// when the switch goes on**, never while the rest of the form is edited.
+  ///
+  /// ## Only the checks that have something to judge
+  ///
+  /// The dish priority list is what the funds check is about, and a hunt being
+  /// set up for the first time has an empty list — the student picks dishes
+  /// *after* choosing the date. Refusing that would block the normal order of
+  /// work, so the funds gate applies only when there is a priority list to pay
+  /// for. The **Start** button's full pre-flight stays the authority on whether
+  /// the hunt may run, with its no-preferences rule intact.
+  Future<bool> _confirmHuntEnable(HuntConfig config) async {
+    final schedule = widget.services.huntSchedule.scheduleFor(
+      config,
+      widget.services.clock,
+    );
+
+    // A hunt with no window left to start in is refused from the schedule
+    // alone — no request, and the reason is one the student can act on by
+    // changing the date.
+    final scheduleRefusal = _windowRefusalFor(schedule.status);
+    if (scheduleRefusal != null) {
+      widget.state.setHuntEnableRefusal(scheduleRefusal);
+      _enableNeedsTopUp = false;
+      return false;
+    }
+
+    // Nothing selected yet: there is no cost to check and no dish to buy, so
+    // the hunt may be switched on.
+    if (config.dishPriority.isEmpty) return true;
+
+    final accountId = widget.state.activeHuntAccount;
+    if (accountId == null) return true;
+
+    final rule = config.toRule(id: 'hunt-$accountId', account: accountId);
+    final verdict = await widget.services.engine.preflight(rule, hunt: config);
+
+    // The answer arrived after the screen went away: there is nobody to tell,
+    // and blocking the store would leave the app in a state the student cannot
+    // see. The Start button's pre-flight re-checks on the way in.
+    if (!mounted) return true;
+
+    if (verdict.passed) {
+      _enableNeedsTopUp = false;
+      return true;
+    }
+
+    widget.state.setHuntEnableRefusal(
+      describePreflightFailures(verdict.failures),
+    );
+    _enableNeedsTopUp =
+        verdict.failures.contains(PreflightFailure.insufficientFunds);
+    return false;
+  }
+
+  /// Why a schedule cannot be switched on, or null when it can.
+  String? _windowRefusalFor(HuntScheduleStatus status) {
+    switch (status) {
+      case HuntScheduleStatus.windowPassed:
+        return 'بازه زمانی این شکار گذشته است. برای فعال‌سازی، تاریخ یا بازه '
+            'زمانی را تغییر دهید.';
+      case HuntScheduleStatus.mealNotServed:
+        return 'این وعده در این تاریخ ارائه نمی‌شود، پس شکاری برای آن معنا '
+            'ندارد. برای فعال‌سازی، تاریخ یا وعده را تغییر دهید.';
+      case HuntScheduleStatus.noTargetDate:
+        return 'برای فعال‌سازی خودکار، ابتدا تاریخ این وعده را انتخاب کنید.';
+      case HuntScheduleStatus.windowInvalid:
+        return 'بازه زمانی معتبر نیست: ساعت پایان باید پس از ساعت شروع باشد.';
+      case HuntScheduleStatus.windowOpen:
+      case HuntScheduleStatus.scheduled:
+      case HuntScheduleStatus.disabled:
+      case HuntScheduleStatus.clockUnsynced:
+        // An open window starts at once — that is the student's own action, so
+        // it is allowed. An unsynced clock is not a reason to refuse the
+        // switch: the alarm falls back to the device clock and the screen says
+        // the schedule is not yet known. Refusing here would make the hunt
+        // hard to switch on before the first sync.
+        return null;
+    }
+  }
+
+  /// Whether the refusal that stopped the switch was about money.
+  bool _enableNeedsTopUp = false;
+
+  /// Whether the enable refusal currently shown is the money one.
+  ///
+  /// True only while an insufficient-funds refusal is the one on screen, so the
+  /// screen offers "افزایش اعتبار" exactly when a top-up is what would fix it.
+  bool get _refusalNeedsTopUp =>
+      _enableNeedsTopUp && widget.state.huntEnableRefusal != null;
+
+  /// Starts a top-up for [accountId], from the hunt screen's refusal.
+  ///
+  /// The account is looked up rather than assumed: the top-up flow needs the
+  /// saved account, and the hunt screen's active account is an id.
+  Future<void> _startTopUpFor(AccountId accountId) async {
+    final account = widget.state.accounts
+        .where((a) => a.id == accountId)
+        .cast<SavedAccount?>()
+        .firstWhere((_) => true, orElse: () => null);
+    if (account == null) return;
+    await _startTopUp(account);
   }
 
   /// Redraws the dish and hall lists from a menu.
@@ -1157,7 +1422,20 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   /// Starts a hunt, after the pre-flight passes.
-  Future<void> _startHunt(AccountId accountId, HuntConfig config) async {
+  ///
+  /// ## Why this returns whether the hunt started
+  ///
+  /// On the **platform's** path the foreground service is already running
+  /// before this is called: the alarm receiver starts it and *then* asks the
+  /// Dart side. So an early return here — a declined risk acknowledgement, a
+  /// failed pre-flight — used to leave the service up, posting
+  /// «پایش سبد غذا» over a hunt that never ran. The device showed it: the
+  /// notification from an 18:11 wake-up was still standing at 18:23, with
+  /// nothing behind it.
+  ///
+  /// The caller that knows a service is standing is the one that can release
+  /// it, so the outcome is reported rather than swallowed.
+  Future<bool> _startHunt(AccountId accountId, HuntConfig config) async {
     final engine = widget.services.engine;
     final hunts = widget.services.hunts;
 
@@ -1169,20 +1447,23 @@ class _HomeShellState extends State<HomeShell> {
         interval: config.rate.peakInterval,
         projectedRequests: config.projectedRequests(),
       );
-      if (!accepted) return;
+      if (!accepted) return false;
       await widget.state.saveHuntConfig(config.copyWith(riskAcknowledged: true));
     }
 
     final rule = config.toRule(id: 'hunt-$accountId', account: accountId);
 
     final verdict = await engine.preflight(rule, hunt: config);
-    if (!mounted) return;
+
+    // The screen went away before the answer arrived. Nothing is started, and
+    // the caller must release any service the platform started.
+    if (!mounted) return false;
 
     if (!verdict.passed) {
       widget.state.setHuntPreflight(
         refusal: _describeFailures(verdict.failures),
       );
-      return;
+      return false;
     }
 
     widget.state.setHuntPreflight(summary: _describeReady(config));
@@ -1194,6 +1475,20 @@ class _HomeShellState extends State<HomeShell> {
     engine.listener = HuntNotifier(service: hunts, accountId: accountId);
 
     await hunts.start(accountId: accountId, config: config);
+    return true;
+  }
+
+  /// Stops the hunt's foreground service, if one is running.
+  ///
+  /// Used on the paths where the platform started the service but the hunt
+  /// could not run. A foreground service with no hunt behind it is a battery
+  /// drain and a notification the student cannot clear.
+  Future<void> _releaseHuntService() async {
+    try {
+      await widget.services.bridge.stopHuntService();
+    } catch (_) {
+      // The service releases itself when the process ends anyway.
+    }
   }
 
   /// Stops a running hunt.
@@ -1203,34 +1498,13 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   /// The Persian text for a pre-flight refusal.
-  String _describeFailures(List<PreflightFailure> failures) {
-    if (failures.contains(PreflightFailure.ruleDisabled)) {
-      return 'این شکار خاموش است. برای اجرای خودکار، آن را روشن کنید.';
-    }
-    if (failures.contains(PreflightFailure.alreadyBooked)) {
-      return 'برای این تاریخ و وعده، غذای دیگری در حساب شما ثبت شده است. '
-          'شکار متوقف شد تا غذای تکراری نخرید.';
-    }
-    if (failures.contains(PreflightFailure.insufficientFunds)) {
-      return 'موجودی حساب برای خرید همه غذاهای فهرست اولویت کافی نیست.';
-    }
-    if (failures.contains(PreflightFailure.holdingsUnreadable)) {
-      return 'وضعیت رزروهای فعلی خوانده نشد، پس شکار شروع نشد.';
-    }
-    if (failures.contains(PreflightFailure.balanceUnreadable)) {
-      return 'موجودی حساب خوانده نشد، پس شکار شروع نشد.';
-    }
-    if (failures.contains(PreflightFailure.clockUnsynced)) {
-      return 'ساعت سرور همگام نشده است، پس شکار شروع نشد.';
-    }
-    if (failures.contains(PreflightFailure.noSession)) {
-      return 'ورود به سامانه ممکن نشد، پس شکار شروع نشد.';
-    }
-    if (failures.contains(PreflightFailure.noPreferences)) {
-      return 'هیچ غذایی انتخاب نشده است.';
-    }
-    return 'پیش‌نیازها برقرار نبود.';
-  }
+  ///
+  /// The text itself lives in `lib/core/preflight.dart`, because the same
+  /// refusal is shown here and in a notification when the hunt ran headless —
+  /// and two copies of it would drift, with the copy nobody is looking at
+  /// being the one that matters most when the app is closed.
+  String _describeFailures(List<PreflightFailure> failures) =>
+      describePreflightFailures(failures);
 
   /// The Persian summary of a ready hunt.
   String _describeReady(HuntConfig config) {

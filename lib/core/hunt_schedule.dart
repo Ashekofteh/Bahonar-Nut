@@ -116,16 +116,32 @@ abstract final class HuntSchedules {
   ///  * [HuntScheduleStatus.noTargetDate] — the hunt has no date, so there is
   ///    nothing to aim at;
   ///  * [HuntScheduleStatus.mealNotServed] — the meal does not exist on that
-  ///    date (a breakfast whose collection evening serves no dinner);
+  ///    date (a breakfast whose collection evening serves no dinner, a dinner
+  ///    on a Thursday, anything at all on a Friday);
+  ///  * [HuntScheduleStatus.windowOpen] — the window has already **opened**,
+  ///    so the wake instant is in the past and the hunt starts at once;
   ///  * [HuntScheduleStatus.windowPassed] — the window has already closed, so
   ///    the hunt has missed its moment and there is nothing left to wait for;
   ///  * [HuntScheduleStatus.windowInvalid] — the window ends before it starts,
   ///    so it can never open.
   ///
-  /// The last two are not the same, and neither is the first: a hunt that
-  /// missed its window needs a new target, while a hunt that was never
-  /// scheduled needs one too — but the student has to be told which, because
-  /// "your hunt will not run" with no reason is a dead end.
+  /// The last three are not the same, and none of them is the first of them:
+  /// a hunt whose window has closed needs a new target, a hunt whose window is
+  /// open **right now** starts immediately rather than at a time already gone,
+  /// and a hunt that was never scheduled needs a target too — but the student
+  /// has to be told which, because "your hunt will not run" with no reason is a
+  /// dead end.
+  ///
+  /// ## Why an opened window is its own status, and not `scheduled`
+  ///
+  /// A hunt armed for an instant that has already passed is not a schedule, it
+  /// is an alarm that fires the moment it is set. Reporting it as `scheduled`
+  /// with a start time in the past is what let the screen claim «در ساعت ۱۶:۳۰
+  /// شروع میشود» at 18:11 — a claim the student could check and find false.
+  /// So an opened window is reported as [HuntScheduleStatus.windowOpen], the
+  /// screen says the hunt starts *now*, and the caller decides whether an
+  /// immediate start is what it wants (a first arm: yes; a re-arm: no — see
+  /// [rearmFor]).
   ///
   /// ## The unsynced clock
   ///
@@ -158,6 +174,23 @@ abstract final class HuntSchedules {
     if (targetDate == null) {
       return const HuntScheduleResult(
         status: HuntScheduleStatus.noTargetDate,
+      );
+    }
+
+    // A meal the halls do not serve on that date does not exist, whatever its
+    // collection day would be. The breakfast rule below is the one case where
+    // the collection day *differs* from the target; this is the case where the
+    // meal is simply not on. A dinner on a Thursday, or anything at all on a
+    // Friday, is a hunt for a listing the portal will never publish — so it is
+    // refused here rather than armed, fired, and refused again by the engine.
+    final targetDay = DateTime.utc(
+      targetDate.year,
+      targetDate.month,
+      targetDate.day,
+    );
+    if (!calendar.isServedOn(targetDay, slot)) {
+      return const HuntScheduleResult(
+        status: HuntScheduleStatus.mealNotServed,
       );
     }
 
@@ -194,6 +227,34 @@ abstract final class HuntSchedules {
       );
     }
 
+    // The window has **opened** but not yet closed: the wake instant is in the
+    // past, so there is no future moment to arm for.
+    //
+    // This is a distinct outcome, not a schedule with a past instant. An alarm
+    // set for an instant already gone fires at once, so reporting this as
+    // `scheduled` armed an immediate wake-up while the screen claimed a start
+    // time that had already passed (found on the device: 16:30 claimed at
+    // 18:11). The caller decides what an immediate start means — a first arm
+    // honours it, a re-arm refuses it — so the status carries the fact and the
+    // policy stays with the caller.
+    //
+    // The schedule rides along even though [HuntScheduleResult.isScheduled] is
+    // false, because the first arm needs the instant: an alarm for a moment
+    // already gone fires at once, which is exactly the "start hunting now" the
+    // student asked for by switching it on inside the window. The instant is
+    // still the window's *start*, so the caller has the window's true bounds
+    // and can tell "open" from "closing".
+    if (clockIsSynced && !wakeAt.isAfter(nowUtc)) {
+      return HuntScheduleResult(
+        status: HuntScheduleStatus.windowOpen,
+        schedule: HuntSchedule(
+          collectionDate: collection,
+          wakeAtUtc: wakeAt,
+          windowEndUtc: windowEnds,
+        ),
+      );
+    }
+
     return HuntScheduleResult(
       status: HuntScheduleStatus.scheduled,
       schedule: HuntSchedule(
@@ -215,6 +276,67 @@ abstract final class HuntSchedules {
         time.hour,
         time.minute,
       ).subtract(ServerClock.portalUtcOffset);
+
+  /// The schedule for a **re-arm**: the same hunt, armed again after a run.
+  ///
+  /// ## Why this is not [scheduleFor]
+  ///
+  /// A hunt's window belongs to a collection date, and the hunt is armed to
+  /// wake up when that window **opens**. So a window that has already opened
+  /// is a window the hunt has had its chance at — and arming into it again
+  /// starts the hunt *immediately*.
+  ///
+  /// That is the difference between the two arms, and it matters in the
+  /// dangerous direction. The first arm is the student's own action: a window
+  /// that is open now is a window they mean to hunt in, so it fires at once.
+  /// A re-arm is automatic, and the run it follows has just ended — usually
+  /// because the hunt **refused** (no credit, no session) or ran out of its
+  /// request budget. Re-arming into the same open window would start the hunt
+  /// again immediately, and it would refuse again, and again: a tight loop of
+  /// wake-ups, each one a round of portal requests, for as long as the window
+  /// stayed open.
+  ///
+  /// That is exactly what the request budget exists to prevent, so a re-arm
+  /// asks only for a window that is still **ahead**. When the wake instant
+  /// has passed, the result is [HuntScheduleStatus.windowOpen]: the hunt is
+  /// over for this window, and the student chooses a new date.
+  ///
+  /// ## The clock must be synced
+  ///
+  /// The comparison is between the wake instant — a portal-derived instant —
+  /// and "now". So "now" has to be the portal's now, and an unsynced clock
+  /// cannot supply it. The caller checks that, because only the caller knows
+  /// whether the clock is trusted. Here the clock is declared synced, because
+  /// the caller would not have called a re-arm at all with a clock it does not
+  /// trust.
+  ///
+  /// ## How this differs from the first arm, mechanically
+  ///
+  /// Both derive the same [HuntScheduleResult] — the difference is entirely in
+  /// what the *caller* does with it. An opened window is
+  /// [HuntScheduleStatus.windowOpen], and [HuntScheduleResult.isScheduled] is
+  /// false for it, so a caller that arms only what `isScheduled` is true arms
+  /// nothing. The first arm deliberately arms it anyway (see
+  /// `HuntScheduleService.arm`): an alarm set for an instant already gone fires
+  /// at once, which is the immediate start the student asked for by switching
+  /// the hunt on inside its window.
+  static HuntScheduleResult rearmFor({
+    required DateTime? targetDate,
+    required MealSlot slot,
+    required ClockTime windowStart,
+    required ClockTime windowEnd,
+    required DateTime nowUtc,
+    ServiceCalendar calendar = const ServiceCalendar(),
+  }) =>
+      scheduleFor(
+        targetDate: targetDate,
+        slot: slot,
+        windowStart: windowStart,
+        windowEnd: windowEnd,
+        nowUtc: nowUtc,
+        clockIsSynced: true,
+        calendar: calendar,
+      );
 }
 
 /// Why a hunt is or is not scheduled.
@@ -237,8 +359,47 @@ enum HuntScheduleStatus {
   /// The window has already closed. The hunt has missed its moment.
   windowPassed,
 
+  /// The window has already **opened**: the wake instant is in the past.
+  ///
+  /// Distinct from [windowPassed] because the two call for different things: a
+  /// window that has closed is over and cannot be hunted at all, while a window
+  /// that is open right now is one the hunt can still use. It is also distinct
+  /// from [scheduled], and this is the distinction the device got wrong: a
+  /// result that carries a start time **in the past** is not a schedule, and
+  /// reporting it as one produced a card claiming «در ساعت ۱۶:۳۰ شروع میشود»
+  /// at 18:11.
+  ///
+  /// ## What each arm does with it
+  ///
+  ///  * the **first arm** (the student's own switch) treats it as "start now":
+  ///    it arms the instant, which is in the past, so the alarm fires at once.
+  ///    That is what switching a hunt on inside its window means.
+  ///  * the **re-arm** (automatic, after a run) refuses it. Arming into an open
+  ///    window would restart the hunt the instant it ended — and it ended
+  ///    usually because it refused, so the loop repeats for as long as the
+  ///    window stays open.
+  ///
+  /// [HuntScheduleResult.schedule] is present for this status, because the first
+  /// arm needs the instant to arm; [HuntScheduleResult.isScheduled] is false,
+  /// because "will it start by itself at a named future time" is not what this
+  /// means.
+  windowOpen,
+
   /// The window ends before it starts, so it can never open.
   windowInvalid,
+
+  /// The portal's time is unknown, so the window's instant is unknown.
+  ///
+  /// A schedule is a comparison between "when the window opens" and "now",
+  /// and both have to be in the portal's frame. Without a synced clock the
+  /// second one is only the device's idea of the time, which may be anything
+  /// at all — and a hunt armed against it can fire at once.
+  ///
+  /// So an unsynced clock produces no schedule. It is a status rather than an
+  /// absence, because the screen has to say **why** the hunt will not start
+  /// and a student can act on "the clock is not synced" (open the app, let it
+  /// sync) but not on silence.
+  clockUnsynced,
 }
 
 /// The outcome of scheduling a hunt.
@@ -249,11 +410,28 @@ class HuntScheduleResult {
   final HuntScheduleStatus status;
 
   /// The schedule, when there is one.
+  ///
+  /// Present for [HuntScheduleStatus.scheduled] **and** for
+  /// [HuntScheduleStatus.windowOpen] — an open window still has a start and an
+  /// end, and the first arm needs the instant. Absent for every other status,
+  /// which describes a hunt that has no schedule at all.
   final HuntSchedule? schedule;
 
-  /// Whether the hunt will start by itself.
+  /// Whether the hunt will start by itself at a named, **future** instant.
+  ///
+  /// False for [HuntScheduleStatus.windowOpen] even though it carries a
+  /// schedule: a window that is already open does not "start later", it starts
+  /// the moment an alarm set for its (past) start instant fires. A caller that
+  /// arms only what is scheduled here therefore arms nothing for it — which is
+  /// the re-arm's correct behaviour.
   bool get isScheduled =>
       status == HuntScheduleStatus.scheduled && schedule != null;
+
+  /// Whether the hunt's window is open right now.
+  ///
+  /// The first arm arms it immediately; the re-arm refuses it. See
+  /// [HuntScheduleStatus.windowOpen].
+  bool get isOpenNow => status == HuntScheduleStatus.windowOpen;
 
   @override
   String toString() => 'HuntScheduleResult($status, $schedule)';
