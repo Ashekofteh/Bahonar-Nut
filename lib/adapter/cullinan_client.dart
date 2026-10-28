@@ -81,7 +81,10 @@ class _TopUpFields {
 ///
 /// The weekly menu is one page per week, and this is how the portal moves to
 /// the next one. It is a navigation, not a write.
+/// (The portal page also carries `ctl00$cphMain$imgbtnLastWeek` and
+/// `ctl00$cphMain$imgbtnCurrentWeek`).
 const _eventTargetNextWeek = r'ctl00$cphMain$imgbtnNextWeek';
+
 
 /// What a read-back page says about a meal.
 enum _ReadbackState {

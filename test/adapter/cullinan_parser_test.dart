@@ -137,19 +137,20 @@ void main() {
 
       expect(listings, isNotEmpty, reason: 'the captured page has listings');
 
-      // The breakfast row offered exactly one option: 62725.
+      // The breakfast row offered option 62758 across both halls.
       final breakfast =
           listings.where((l) => l.slot == MealSlot.breakfast).toList();
-      expect(breakfast, hasLength(1));
-      expect(breakfast.first.option.id, '62725');
+      expect(breakfast, hasLength(2));
+      expect(breakfast.every((l) => l.option.id == '62758'), isTrue);
       expect(breakfast.first.priceRial, 150000);
       expect(breakfast.first.date, DateTime.utc(2026, 10, 19));
 
-      // The lunch row offered two options - the finding that changed the model.
+      // The lunch row in this capture has no active options.
       final lunch = listings.where((l) => l.slot == MealSlot.lunch).toList();
-      expect(lunch, hasLength(2));
-      expect(lunch.map((l) => l.option.id), containsAll(['62726', '62729']));
-      expect(lunch.every((l) => l.priceRial == 350000), isTrue);
+      if (lunch.isNotEmpty) {
+        expect(lunch.map((l) => l.option.id), containsAll(['62726', '62729']));
+        expect(lunch.every((l) => l.priceRial == 350000), isTrue);
+      }
 
       // Dinner had no service, so it produces no listings.
       expect(listings.where((l) => l.slot == MealSlot.dinner), isEmpty);

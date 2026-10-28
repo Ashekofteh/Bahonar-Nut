@@ -567,7 +567,9 @@ void main() {
     test('keep every meal of a day, not just the first', () async {
       // A day serves three meals. A set keyed by the date alone keeps only
       // the first, and the other two vanish.
-      final clock = SyncedServerClock();
+      final clock = SyncedServerClock(
+        localNowUtc: () => DateTime.utc(2026, 10, 20, 12),
+      );
       clock.syncFrom(
         serverDateUtc: DateTime.utc(2026, 10, 20, 12),
         roundTrip: Duration.zero,

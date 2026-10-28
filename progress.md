@@ -1379,3 +1379,22 @@ and in the system's own tables (`dumpsys alarm`, `dumpsys activity services`,
 
 - 947 unit and widget tests pass (`home_shell_pending_test.dart`, `hunt_schedule_test.dart`, `captcha_fallback_test.dart`, `screens_test.dart`).
 
+
+## 2026-10-28 — Session 32: Test suite stabilization, time-independent clock pinning, and week navigation baseline
+
+### What was resolved
+
+1. **Fixed temporal clock drift in adapter test (`reservation_write_path_test.dart`):**
+   - Injected `localNowUtc: () => DateTime.utc(2026, 10, 20, 12)` into `SyncedServerClock`. Prevents tests from failing on future execution dates past the reservation cutoff.
+2. **Fixed live buy page parser assertion (`cullinan_parser_test.dart`):**
+   - Corrected test assertion to recognize composite listing per-hall distribution (`hasLength(2)` for option 62758 across central & technical halls), matching live recon fixture.
+3. **Stabilized week navigation on reservations table:**
+   - Unconstrained forward and backward week navigation (`_WeekNavigator`, `weekStartSaturday`, `weekEndFriday`, `filterRowsForWeek`) displaying localized Jalali date ranges and relative week titles.
+   - Quiet sync balance refresh in `home_shell.dart`.
+4. **Git hygiene:**
+   - Updated `.gitignore` to prevent committing emulator dumps (`uidump*.xml`) and test transcripts.
+
+### Testing approach
+
+- 964 unit, widget, and platform tests pass with 0 failures (`flutter test`).
+- Static analysis on `lib/` clean (0 warnings, 0 errors).

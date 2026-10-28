@@ -126,6 +126,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('حساب «${result.studentId}» ذخیره شد.')),
       );
+      widget.onRefresh?.call();
     } catch (e) {
       // A failed save must be visible. Silently dropping it would leave the
       // user believing the account is stored when it is not.

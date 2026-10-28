@@ -28,7 +28,7 @@ import 'reservations_table.dart';
 /// account's meals. So the screen names the account it is showing, and the
 /// student can switch. The picker is a row of chips, because the choice is
 /// between a handful of names and it must be visible at a glance.
-class ReservationsScreen extends StatelessWidget {
+class ReservationsScreen extends StatefulWidget {
   const ReservationsScreen({
     super.key,
     required this.state,
@@ -65,11 +65,50 @@ class ReservationsScreen extends StatelessWidget {
   final String? busyKey;
 
   @override
+  State<ReservationsScreen> createState() => _ReservationsScreenState();
+}
+
+class _ReservationsScreenState extends State<ReservationsScreen> {
+  /// Offset in weeks from the current week (0 = current week, 1 = next week, -1 = last week).
+  /// Navigation is unconstrained: tapping next week or previous week advances or rewinds freely.
+  int _weekOffset = 0;
+
+  DateTime _currentSaturday() {
+    final now = widget.clock != null && widget.clock!.isSynced
+        ? widget.clock!.portalTodayUtc
+        : DateTime.now().toUtc();
+    return weekStartSaturday(now);
+  }
+
+  DateTime _selectedSaturday() {
+    final currentSat = _currentSaturday();
+    return currentSat.add(Duration(days: _weekOffset * 7));
+  }
+
+  void _previousWeek() {
+    setState(() {
+      _weekOffset--;
+    });
+  }
+
+  void _nextWeek() {
+    setState(() {
+      _weekOffset++;
+    });
+  }
+
+  void _resetToCurrentWeek() {
+    setState(() {
+      _weekOffset = 0;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: state,
+      listenable: widget.state,
       builder: (context, _) {
-        final accounts = state.accounts;
+        final accounts = widget.state.accounts;
 
         if (accounts.isEmpty) {
           return Scaffold(
@@ -82,20 +121,23 @@ class ReservationsScreen extends StatelessWidget {
           );
         }
 
-        final accountId = state.activeHuntAccount ?? accounts.first.id;
-        final rows = buildMealRows(
-          menus: menus,
-          held: state.mealsFor(accountId),
-          clock: clock,
+        final accountId = widget.state.activeHuntAccount ?? accounts.first.id;
+        final allRows = buildMealRows(
+          menus: widget.menus,
+          held: widget.state.mealsFor(accountId),
+          clock: widget.clock,
         );
+
+        final selectedSat = _selectedSaturday();
+        final weekRows = filterRowsForWeek(allRows, selectedSat);
 
         return Scaffold(
           appBar: AppBar(
             title: const Text('رزروها'),
             actions: [
-              if (onRefresh != null)
+              if (widget.onRefresh != null)
                 IconButton(
-                  onPressed: onRefresh,
+                  onPressed: widget.onRefresh,
                   icon: const Icon(Icons.refresh),
                   tooltip: 'به‌روزرسانی از سامانه',
                 ),
@@ -107,15 +149,32 @@ class ReservationsScreen extends StatelessWidget {
                 _AccountPicker(
                   accounts: accounts,
                   activeId: accountId,
-                  onChanged: state.selectHuntAccount,
+                  onChanged: widget.state.selectHuntAccount,
                 ),
+              _WeekNavigator(
+                weekOffset: _weekOffset,
+                saturday: selectedSat,
+                onPrevious: _previousWeek,
+                onNext: _nextWeek,
+                onReset: _resetToCurrentWeek,
+              ),
               Expanded(
                 child: ReservationsTable(
-                  rows: rows,
-                  busy: busy,
-                  busyKey: busyKey,
-                  onBook: (date, slot) => onBook?.call(date, slot),
-                  onCancel: (date, slot) => onCancel?.call(date, slot),
+                  rows: weekRows,
+                  busy: widget.busy,
+                  busyKey: widget.busyKey,
+                  emptyTitle: _weekOffset < 0
+                      ? 'هیچ رزروی در این هفته ثبت نشده است'
+                      : (_weekOffset > 1
+                          ? 'برنامه غذایی این هفته هنوز ارائه نشده است'
+                          : 'هنوز وعده‌ای برای نمایش نیست'),
+                  emptyMessage: _weekOffset < 0
+                      ? 'در این هفته هیچ وعده رزروشده یا خریداری‌شده‌ای برای این حساب وجود ندارد.'
+                      : (_weekOffset > 1
+                          ? 'سامانه دانشگاه معمولاً برنامه غذایی را حداکثر تا یک هفته قبل ارائه می‌دهد.'
+                          : 'پس از دریافت برنامه غذایی یا رزرو، وعده‌ها اینجا نمایش داده می‌شوند.'),
+                  onBook: (date, slot) => widget.onBook?.call(date, slot),
+                  onCancel: (date, slot) => widget.onCancel?.call(date, slot),
                 ),
               ),
             ],
@@ -125,6 +184,117 @@ class ReservationsScreen extends StatelessWidget {
     );
   }
 }
+
+/// Navigation bar allowing unconstrained forward/backward week paging
+/// while showing the Persian week label and Jalali date range.
+class _WeekNavigator extends StatelessWidget {
+  const _WeekNavigator({
+    required this.weekOffset,
+    required this.saturday,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onReset,
+  });
+
+  final int weekOffset;
+  final DateTime saturday;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final weekTitle = formatWeekTitle(weekOffset);
+    final weekRange = formatWeekRange(saturday);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        border: Border(
+          bottom: BorderSide(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          // In Persian RTL: Next Week (future) progresses towards start/left.
+          // Arrow forward is Icons.arrow_back in RTL, or chevron.
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            tooltip: 'هفته قبل',
+            onPressed: onPrevious,
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: weekOffset != 0 ? onReset : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          weekTitle,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: weekOffset == 0
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        if (weekOffset != 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'بازگشت به امروز',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      weekRange,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            tooltip: 'هفته بعد',
+            onPressed: onNext,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 /// The row of chips that picks the account the table shows.
 class _AccountPicker extends StatelessWidget {

@@ -696,41 +696,44 @@ class _HomeShellState extends State<HomeShell> {
   /// The read is also what fills the **table**: the reservations screen shows
   /// every meal that can still be acted on, and the menu is what says which
   /// of those are bookable.
-  Future<void> _refreshTable() async {
+  Future<void> _refreshTable({bool quiet = false}) async {
     final accounts = widget.state.accounts;
     if (accounts.isEmpty) return;
 
     final accountId = widget.state.activeHuntAccount ?? accounts.first.id;
 
-    widget.state.setSyncing(true);
+    if (!quiet) widget.state.setSyncing(true);
     BookableMenus read = const BookableMenus(dates: [], menus: []);
     Object? failure;
     try {
-      // The read carries its own clock sync, and the days it returns are
-      // counted from the **portal's** today. The device's clock is not
-      // trusted for anything the portal decides, and the days that can still
-      // be booked cannot even be named until the time is known.
       read = await widget.services.sessions.withSession(
         accountId,
         (session) => widget.services.client.fetchBookableMenus(session),
       );
     } catch (error) {
       failure = error;
-    } finally {
-      if (mounted) widget.state.setSyncing(false);
     }
+
+    try {
+      final syncResult = quiet
+          ? await _sync.sync(accountId)
+          : await _readAccount(accountId);
+      if (syncResult.ok) {
+        widget.state.setBalance(accountId, syncResult.balanceRial ?? 0);
+        widget.state.setTransactions(syncResult.transactions);
+      }
+    } catch (_) {}
+
+    if (mounted && !quiet) widget.state.setSyncing(false);
     if (!mounted) return;
 
-    if (failure != null || read.menus.isEmpty) {
-      // The failure is reported **here**, on the screen the student acted on.
-      //
-      // The three reasons are kept apart, because they call for different
-      // things from the student. "No dates left" is a fact about the portal;
-      // "the server clock did not sync" means the app could not reach the
-      // portal; and a failed read is the portal being unreachable. Telling
-      // the student that no dates are left when the truth is that the app
-      // never reached the portal would send them looking for a deadline that
-      // does not exist.
+    if (read.menus.isNotEmpty) {
+      setState(() {
+        _tableMenus = read.menus;
+      });
+    }
+
+    if (!quiet && (failure != null || read.menus.isEmpty)) {
       if (failure != null) {
         _showBookingProblem(
           'ارتباط با سامانه برقرار نشد. اتصال را بررسی کنید و دوباره تلاش '
@@ -744,12 +747,7 @@ class _HomeShellState extends State<HomeShell> {
       } else {
         _showBookingProblem('هنوز تاریخی برای رزرو در دسترس نیست.');
       }
-      return;
     }
-
-    setState(() {
-      _tableMenus = read.menus;
-    });
   }
 
   /// The menu the reservations table is drawn from.

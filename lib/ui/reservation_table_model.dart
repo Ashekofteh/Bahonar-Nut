@@ -220,3 +220,54 @@ String _key(DateTime date, MealSlot slot) =>
 
 /// The Persian name of a date, for the table's day headers.
 String formatRowDate(DateTime date) => formatPersianDateWithYear(date);
+
+/// The Saturday that begins the Iranian university dining week containing [date].
+///
+/// In the Iranian academic calendar, the dining week runs Saturday (شنبه) through
+/// Friday (جمعه). Hours, minutes, and seconds are normalized to 00:00:00 UTC.
+DateTime weekStartSaturday(DateTime date) {
+  final utc = DateTime.utc(date.year, date.month, date.day);
+  final daysSinceSaturday = (utc.weekday % 7); // Sat: 6 % 7 = 6, Sun: 7 % 7 = 0, Mon: 1, ..., Fri: 5
+  final diff = (utc.weekday == DateTime.saturday) ? 0 : (daysSinceSaturday + 1);
+  return utc.subtract(Duration(days: diff));
+}
+
+/// The Friday that ends the Iranian dining week starting at [saturday].
+DateTime weekEndFriday(DateTime saturday) =>
+    DateTime.utc(saturday.year, saturday.month, saturday.day + 6);
+
+/// Filters rows down to those falling strictly within the week `[saturday, saturday + 6 days]`.
+List<MealRow> filterRowsForWeek(List<MealRow> rows, DateTime saturday) {
+  final start = DateTime.utc(saturday.year, saturday.month, saturday.day);
+  final end = DateTime.utc(saturday.year, saturday.month, saturday.day + 6);
+  return rows.where((row) {
+    final d = DateTime.utc(row.date.year, row.date.month, row.date.day);
+    return !d.isBefore(start) && !d.isAfter(end);
+  }).toList();
+}
+
+/// Persian title for a relative week offset from current week (0 = current).
+String formatWeekTitle(int weekOffset) {
+  if (weekOffset == 0) return 'هفته جاری';
+  if (weekOffset == 1) return 'هفته بعد';
+  if (weekOffset == -1) return 'هفته قبل';
+  if (weekOffset > 1) return '${toPersianDigits(weekOffset)} هفته بعد';
+  return '${toPersianDigits(weekOffset.abs())} هفته قبل';
+}
+
+/// Formats the Jalali date range for the week starting on [saturday],
+/// e.g. `۲۵ مهر الی ۱ آبان ۱۴۰۵`.
+String formatWeekRange(DateTime saturday) {
+  final friday = weekEndFriday(saturday);
+  final jSat = toJalali(saturday);
+  final jFri = toJalali(friday);
+
+  if (jSat.year == jFri.year) {
+    if (jSat.month == jFri.month) {
+      return '${toPersianDigits(jSat.day)} الی ${toPersianDigits(jFri.day)} ${jSat.monthName} ${toPersianDigits(jSat.year)}';
+    }
+    return '${toPersianDigits(jSat.day)} ${jSat.monthName} الی ${toPersianDigits(jFri.day)} ${jFri.monthName} ${toPersianDigits(jSat.year)}';
+  }
+  return '${toPersianDigits(jSat.day)} ${jSat.monthName} ${toPersianDigits(jSat.year)} الی ${toPersianDigits(jFri.day)} ${jFri.monthName} ${toPersianDigits(jFri.year)}';
+}
+

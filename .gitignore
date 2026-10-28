@@ -48,3 +48,9 @@ Desktop.ini
 .gradle-build/
 android/.kotlin/
 *.log
+
+analyzer.txt
+testout.txt
+test_pending.txt
+buildout.txt
+uidump*.xml

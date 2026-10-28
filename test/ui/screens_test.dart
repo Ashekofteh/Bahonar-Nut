@@ -4,6 +4,7 @@ import 'package:bahonar_nut/core/meal_invariant.dart';
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/portal.dart';
 import 'package:bahonar_nut/core/session.dart';
+import 'package:bahonar_nut/core/time.dart';
 import 'package:bahonar_nut/ui/app_state.dart';
 import '../helpers/memory_stores.dart';
 import 'package:bahonar_nut/ui/screens/accounts_screen.dart';
@@ -334,7 +335,10 @@ void main() {
         priceRial: 500000,
       ));
 
-      await tester.pumpWidget(wrap(state, ReservationsScreen(state: state)));
+      final clock = FixedServerClock.now(DateTime.utc(2026, 10, 19, 12));
+      await tester.pumpWidget(
+        wrap(state, ReservationsScreen(state: state, clock: clock)),
+      );
 
       expect(find.text('چلو اکبرجوجه,دوغ'), findsOneWidget);
       expect(find.textContaining('مرکزی برادران'), findsOneWidget);
