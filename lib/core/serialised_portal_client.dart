@@ -202,6 +202,17 @@ class SerialisedPortalClient implements PortalClient {
   Future<CancelOutcome> cancel(Session session, MealRef ref) =>
       _exclusive(session.account, () => _inner.cancel(session, ref));
 
+  @override
+  Future<SaleListingResult> listMealForSale(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+  }) =>
+      _exclusive(
+        session.account,
+        () => _inner.listMealForSale(session, date: date, slot: slot),
+      );
+
   // --- Top-up ---
 
   @override

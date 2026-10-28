@@ -437,6 +437,32 @@ abstract final class CullinanParser {
     return body;
   }
 
+  /// The form fields for listing a meal for sale on `FoodBasketSale.aspx`.
+  static Map<String, String> saleFormBody(
+    String html, {
+    required String jalaliDate,
+    required MealSlot slot,
+  }) =>
+      <String, String>{
+        '__VIEWSTATE': hiddenFieldValue(html, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR': hiddenFieldValue(html, '__VIEWSTATEGENERATOR'),
+        '__VIEWSTATEENCRYPTED': '',
+        '__EVENTTARGET': '',
+        '__EVENTARGUMENT': '',
+        r'ctl00$cphMain$txtDate': jalaliDate,
+        r'ctl00$cphMain$drpReserveType': '0',
+        r'ctl00$cphMain$drpFoodType': switch (slot) {
+          MealSlot.breakfast => '1',
+          MealSlot.lunch => '2',
+          MealSlot.dinner => '3',
+        },
+        r'ctl00$cphMain$btnFoodReload': 'بارگذاری غذا',
+      };
+
+  /// The alert message shown on the sale page, if any.
+  static String? parseSaleAlert(String html) =>
+      labelText(html, 'cphMain_alertBoxValue');
+
   /// Whether the buy page shows [optionId] as **held**: checked and charged.
   ///
   /// This is the only reliable success signal. Verified live 2026-10-20 against

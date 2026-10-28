@@ -34,6 +34,7 @@ class ReservationsScreen extends StatefulWidget {
     required this.state,
     this.onBook,
     this.onCancel,
+    this.onSell,
     this.onRefresh,
     this.menus = const [],
     this.clock,
@@ -48,6 +49,9 @@ class ReservationsScreen extends StatefulWidget {
 
   /// Cancels a held meal.
   final void Function(DateTime date, MealSlot slot)? onCancel;
+
+  /// Lists a held meal for sale in the Food Basket.
+  final void Function(DateTime date, MealSlot slot)? onSell;
 
   /// Re-reads the portal.
   final VoidCallback? onRefresh;
@@ -175,6 +179,7 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                           : 'پس از دریافت برنامه غذایی یا رزرو، وعده‌ها اینجا نمایش داده می‌شوند.'),
                   onBook: (date, slot) => widget.onBook?.call(date, slot),
                   onCancel: (date, slot) => widget.onCancel?.call(date, slot),
+                  onSell: widget.onSell != null ? (date, slot) => widget.onSell!(date, slot) : null,
                 ),
               ),
             ],

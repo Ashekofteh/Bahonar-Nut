@@ -32,6 +32,7 @@ class ReservationsTable extends StatelessWidget {
     required this.rows,
     required this.onBook,
     required this.onCancel,
+    this.onSell,
     this.busy = false,
     this.busyKey,
     this.emptyTitle = 'هنوز وعده‌ای برای نمایش نیست',
@@ -46,6 +47,9 @@ class ReservationsTable extends StatelessWidget {
 
   /// Cancels a held meal.
   final void Function(DateTime date, MealSlot slot) onCancel;
+
+  /// Lists a held meal for sale in the secondary Food Basket.
+  final void Function(DateTime date, MealSlot slot)? onSell;
 
   /// Whether an action is in flight.
   final bool busy;
@@ -93,6 +97,7 @@ class ReservationsTable extends StatelessWidget {
                       busy: busy && busyKey == _keyOf(row),
                       onBook: () => onBook(row.date, row.slot),
                       onCancel: () => onCancel(row.date, row.slot),
+                      onSell: onSell != null ? () => onSell!(row.date, row.slot) : null,
                     ),
                     if (row != days[date]!.last) const Divider(height: 1),
                   ],
@@ -189,12 +194,14 @@ class _MealRowTile extends StatelessWidget {
     required this.busy,
     required this.onBook,
     required this.onCancel,
+    this.onSell,
   });
 
   final MealRow row;
   final bool busy;
   final VoidCallback onBook;
   final VoidCallback onCancel;
+  final VoidCallback? onSell;
 
   @override
   Widget build(BuildContext context) {
@@ -250,6 +257,7 @@ class _MealRowTile extends StatelessWidget {
             busy: busy,
             onBook: onBook,
             onCancel: onCancel,
+            onSell: onSell,
           ),
         ],
       ),
@@ -349,12 +357,14 @@ class _Action extends StatelessWidget {
     required this.busy,
     required this.onBook,
     required this.onCancel,
+    this.onSell,
   });
 
   final MealRow row;
   final bool busy;
   final VoidCallback onBook;
   final VoidCallback onCancel;
+  final VoidCallback? onSell;
 
   @override
   Widget build(BuildContext context) {
@@ -385,9 +395,20 @@ class _Action extends StatelessWidget {
 
       case MealRowStatus.heldLocked:
         // The meal is the student's, but its date has locked, so the portal
-        // will not give it back (F14). A cancel button here would offer a
-        // cancellation that silently does nothing (F63) — so the truth is
-        // shown instead.
+        // will not give it back (F14). It can, however, be offered for sale
+        // in the secondary Food Basket to avoid the unconsumed meal penalty.
+        if (onSell != null) {
+          return IconButton(
+            onPressed: busy ? null : onSell,
+            icon: const Icon(Icons.storefront_outlined),
+            tooltip: 'فروش در سبد غذایی',
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(
+              foregroundColor: theme.colorScheme.primary,
+              disabledForegroundColor: theme.colorScheme.outline,
+            ),
+          );
+        }
         return Icon(
           Icons.lock_clock_outlined,
           size: 18,

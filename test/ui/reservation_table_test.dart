@@ -113,6 +113,7 @@ void main() {
       expect(row.cancellable, isTrue,
           reason: 'a weekly reservation can be given back while its date is '
               'editable');
+      expect(row.sellable, isFalse);
     });
 
     test('a basket purchase is held, and cannot be cancelled', () {
@@ -137,6 +138,7 @@ void main() {
       expect(row.cancellable, isFalse,
           reason: 'a basket purchase is irreversible — offering a cancel '
               'would be a lie');
+      expect(row.sellable, isFalse);
     });
 
     test('a meal the student holds appears even when the portal serves none',
@@ -231,6 +233,7 @@ void main() {
       final row = rows.single;
       expect(row.status, MealRowStatus.heldLocked);
       expect(row.cancellable, isFalse);
+      expect(row.sellable, isTrue);
       expect(row.dishName, 'زرشک پلو با مرغ',
           reason: 'the meal is still the student\'s, so it is still shown');
     });

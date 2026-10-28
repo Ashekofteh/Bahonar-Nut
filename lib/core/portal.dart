@@ -201,6 +201,38 @@ class CancelAmbiguous extends CancelOutcome {
   final String diagnostic;
 }
 
+/// The outcome of attempting to list a meal for sale in the Food Basket.
+///
+/// Sealed on purpose for the same reason [CancelOutcome] and [ClaimResult]
+/// are: a listing that timed out or was refused must never be confused with
+/// one that succeeded.
+sealed class SaleListingResult {
+  const SaleListingResult();
+}
+
+/// The meal was successfully listed for sale in the Food Basket.
+class SaleListingSucceeded extends SaleListingResult {
+  const SaleListingSucceeded([this.message]);
+
+  /// Optional confirmation or feedback message from the portal.
+  final String? message;
+}
+
+/// The listing was refused by the portal.
+class SaleListingRefused extends SaleListingResult {
+  const SaleListingRefused(this.reason);
+
+  /// Why it was refused, in words for the student.
+  final String reason;
+}
+
+/// We do not know whether the listing landed.
+class SaleListingAmbiguous extends SaleListingResult {
+  const SaleListingAmbiguous(this.diagnostic);
+
+  final String diagnostic;
+}
+
 /// What went wrong during login, when it goes wrong.
 class LoginFailure {
   const LoginFailure(this.reason, {this.retryable = false});
@@ -424,6 +456,14 @@ abstract class PortalClient {
   /// slot** without anyone noticing (F65), so the pair is carried as values
   /// now.
   Future<CancelOutcome> cancel(Session session, MealRef ref);
+
+  /// Lists the meal held for (date, slot) for sale on the secondary Food Basket
+  /// (FoodBasketSale.aspx).
+  Future<SaleListingResult> listMealForSale(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+  });
 
   // --- Top-up ---
 

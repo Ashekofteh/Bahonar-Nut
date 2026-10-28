@@ -48,6 +48,7 @@ class _Paths {
   static const login = '/';
   static const reservation = '/Reservation/Reservation.aspx';
   static const basketBuy = '/FoodBasket/FoodBasketBuy.aspx';
+  static const basketSale = '/FoodBasket/FoodBasketSale.aspx';
   static const transactions = '/MyCullinan/MyTransaction.aspx';
   static const captcha = '/UserControls/Captcha.ashx';
   static const topUp = '/ePay/ePay_Payment.aspx';
@@ -820,6 +821,50 @@ class CullinanPortalClient implements PortalClient {
         return const CancelAmbiguous(
           'وضعیت رزرو در سایت تایید نشد.',
         );
+    }
+  }
+
+  @override
+  Future<SaleListingResult> listMealForSale(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+  }) async {
+    try {
+      final page = await transport.get(session.account, _Paths.basketSale);
+      if (page.looksLikeLoginPage) {
+        return const SaleListingRefused('نشست منقضی شده است.');
+      }
+
+      final body = CullinanParser.saleFormBody(
+        page.body,
+        jalaliDate: _jalaliOf(date),
+        slot: slot,
+      );
+
+      final response = await transport.post(
+        session.account,
+        _Paths.basketSale,
+        body: body,
+      );
+
+      if (response.looksLikeLoginPage) {
+        return const SaleListingRefused('نشست منقضی شده است.');
+      }
+
+      final alert = CullinanParser.parseSaleAlert(response.body);
+      if (alert != null) {
+        if (alert.contains('موفق')) {
+          return SaleListingSucceeded(alert);
+        }
+        return SaleListingRefused(alert);
+      }
+
+      return const SaleListingSucceeded();
+    } on TransportException catch (e) {
+      return SaleListingAmbiguous(e.message);
+    } catch (e) {
+      return SaleListingAmbiguous(e.toString());
     }
   }
 

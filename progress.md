@@ -1398,3 +1398,33 @@ and in the system's own tables (`dumpsys alarm`, `dumpsys activity services`,
 
 - 964 unit, widget, and platform tests pass with 0 failures (`flutter test`).
 - Static analysis on `lib/` clean (0 warnings, 0 errors).
+
+## 2026-10-29 — Session 33: Food Basket Seller Module (`FoodBasketSale.aspx`) & UI Integration
+
+### What was built
+
+1. **Domain Contract (`lib/core/portal.dart`):**
+   - Introduced `sealed class SaleListingResult` with subclasses `SaleListingSucceeded`, `SaleListingRefused`, and `SaleListingAmbiguous` to enforce compile-time exhaustive outcome handling.
+   - Added `Future<SaleListingResult> listMealForSale(Session session, {required DateTime date, required MealSlot slot})` to `PortalClient`.
+2. **Adapter Layer (`lib/adapter/cullinan_client.dart` & `lib/adapter/cullinan_parser.dart`):**
+   - Added `/FoodBasket/FoodBasketSale.aspx` path in `_Paths`.
+   - Implemented `CullinanParser.saleFormBody` to construct WebForms post payloads with `ctl00$cphMain$txtDate` (Jalali), `ctl00$cphMain$drpReserveType` ('0' for weekly reservation), `ctl00$cphMain$drpFoodType` (1=breakfast, 2=lunch, 3=dinner), and `ctl00$cphMain$btnFoodReload` ('بارگذاری غذا').
+   - Implemented `CullinanParser.parseSaleAlert` to extract feedback messages from `<label id="cphMain_alertBoxValue">`.
+   - Implemented `listMealForSale` in `CullinanPortalClient` with session expiration checks, alert analysis, and transport ambiguity guarantees.
+3. **Queue Serialization & Platform Service (`lib/core/serialised_portal_client.dart` & `lib/platform/reservation_service.dart`):**
+   - Serialized `listMealForSale` execution per-account to prevent viewstate collisions.
+   - Added `listForSale({required AccountId accountId, required DateTime date, required MealSlot slot})` in `ReservationService`.
+4. **UI Integration (`lib/ui/`):**
+   - Added `sellable` getter to `MealRow` in `reservation_table_model.dart` (true for `MealRowStatus.heldLocked`).
+   - Wired `onSell` callback in `ReservationsTable` and `ReservationsScreen`.
+   - Rendered primary `Icons.storefront_outlined` button with tooltip «فروش در سبد غذایی» on `MealRowStatus.heldLocked` rows when `onSell` is provided, retaining lock icon when null.
+   - Added `_sellMeal` in `home_shell.dart` with Persian confirmation dialog outlining Regulation 2090 rules, progress busy state, and snackbar outcome notifications.
+5. **Testing & Verification:**
+   - Added `test/adapter/basket_sale_test.dart` (8 unit tests covering payload construction, slot mapping, alert parsing, success/refusal postbacks, session expiration, and network errors).
+   - Added `test/ui/reservations_table_sale_test.dart` (4 widget tests covering storefront button rendering, callback invocation, busy state disabling, null callback fallback, and bought row immunity).
+   - Added `MealRow.sellable` assertions to `test/ui/reservation_table_test.dart`.
+
+### Testing approach
+
+- 976 unit, widget, and platform tests pass with 0 failures (`flutter test`).
+- Static analysis clean: 0 errors, 0 warnings on `lib/` and new test suites (`flutter analyze`).

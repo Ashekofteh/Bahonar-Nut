@@ -134,6 +134,14 @@ class FakePortalClient implements PortalClient {
   Future<CancelOutcome> cancel(Session session, MealRef ref) async =>
       const CancelSucceeded();
 
+  @override
+  Future<SaleListingResult> listMealForSale(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+  }) async =>
+      const SaleListingSucceeded();
+
   // --- Top-up ---
 
   @override

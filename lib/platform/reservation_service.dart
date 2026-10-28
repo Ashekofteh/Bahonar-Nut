@@ -234,6 +234,30 @@ class ReservationService {
     return outcome;
   }
 
+  /// Lists the meal held for (date, slot) for sale on the secondary Food Basket
+  /// (`FoodBasketSale.aspx`).
+  Future<SaleListingResult> listForSale({
+    required AccountId accountId,
+    required DateTime date,
+    required MealSlot slot,
+  }) async {
+    final SaleListingResult outcome;
+    try {
+      outcome = await sessions.withSession(
+        accountId,
+        (session) => client.listMealForSale(
+          session,
+          date: date,
+          slot: slot,
+        ),
+      );
+    } catch (e) {
+      return SaleListingAmbiguous('ارتباط با سامانه برقرار نشد: $e');
+    }
+
+    return outcome;
+  }
+
   Future<Balance?> _readBalance(AccountId accountId) async {
     try {
       return await sessions.withSession(

@@ -107,6 +107,13 @@ class MealRow {
   /// can only be cancelled while its date is still editable (F14).
   bool get cancellable => status == MealRowStatus.held;
 
+  /// Whether the student can list this meal for sale in the Food Basket.
+  ///
+  /// A basket purchase cannot be resold (F16). A held meal whose date has
+  /// locked can be offered for sale in the secondary Food Basket to avoid the
+  /// unconsumed meal penalty (Announcement 2090).
+  bool get sellable => status == MealRowStatus.heldLocked;
+
   /// The status, in words.
   String get statusLabel => switch (status) {
         MealRowStatus.held => 'رزرو شده',

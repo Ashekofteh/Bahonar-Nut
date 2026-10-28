@@ -1012,6 +1012,68 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  Future<void> _sellMeal(DateTime date, MealSlot slot) async {
+    final accounts = widget.state.accounts;
+    if (accounts.isEmpty) return;
+
+    final accountId =
+        widget.state.activeHuntAccount ?? accounts.first.id;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('فروش در سبد غذایی'),
+        content: const Text(
+          'آیا مایلید این وعده را در سبد غذایی برای فروش بگذارید؟\n\n'
+          'توجه: طبق مقررات کالینان، در صورت فروش نرفتن غذا تا موعد توزیع، '
+          'جریمه عدم مصرف اعمال خواهد شد و پس از ثبت، امکان پس گرفتن وجود ندارد.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('انصراف'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('فروش در سبد'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _busyKey = '${date.year}-${date.month}-${date.day}|${slot.name}';
+    });
+
+    final outcome = await widget.services.reservations.listForSale(
+      accountId: accountId,
+      date: date,
+      slot: slot,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _busyKey = null;
+    });
+
+    switch (outcome) {
+      case SaleListingSucceeded(message: final message):
+        _showBookingProblem(
+          message ?? 'غذا با موفقیت در سبد غذایی برای فروش قرار گرفت.',
+        );
+        _refreshTable();
+      case SaleListingRefused(reason: final reason):
+        _showBookingProblem(reason);
+      case SaleListingAmbiguous():
+        _showBookingProblem(
+          'ثبت در سبد انجام شد ولی تایید نشد. وضعیت را در سایت بررسی کنید.',
+        );
+    }
+  }
+
   /// Says why a booking could not be started, on the screen the student is on.
   void _showBookingProblem(String message) {
     if (!mounted) return;
@@ -1036,6 +1098,7 @@ class _HomeShellState extends State<HomeShell> {
         busyKey: _busyKey,
         onBook: _bookMeal,
         onCancel: _cancelMeal,
+        onSell: _sellMeal,
         onRefresh: _refreshTable,
       ),
       DashboardScreen(state: widget.state),
