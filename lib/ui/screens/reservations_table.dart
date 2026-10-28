@@ -33,6 +33,9 @@ class ReservationsTable extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.selectionMode = false,
+    this.selectedKeys = const {},
+    this.onToggleSelect,
     this.busy = false,
     this.busyKey,
     this.emptyTitle = 'هنوز وعده‌ای برای نمایش نیست',
@@ -50,6 +53,15 @@ class ReservationsTable extends StatelessWidget {
 
   /// Lists a held meal for sale in the secondary Food Basket.
   final void Function(DateTime date, MealSlot slot)? onSell;
+
+  /// Whether multi-selection mode is active.
+  final bool selectionMode;
+
+  /// The keys of the selected rows in multi-selection mode.
+  final Set<String> selectedKeys;
+
+  /// Toggles selection of a row in multi-selection mode.
+  final void Function(MealRow row)? onToggleSelect;
 
   /// Whether an action is in flight.
   final bool busy;
@@ -98,6 +110,9 @@ class ReservationsTable extends StatelessWidget {
                       onBook: () => onBook(row.date, row.slot),
                       onCancel: () => onCancel(row.date, row.slot),
                       onSell: onSell != null ? () => onSell!(row.date, row.slot) : null,
+                      selectionMode: selectionMode,
+                      isSelected: selectedKeys.contains(_keyOf(row)),
+                      onToggleSelect: onToggleSelect != null ? () => onToggleSelect!(row) : null,
                     ),
                     if (row != days[date]!.last) const Divider(height: 1),
                   ],
@@ -195,6 +210,9 @@ class _MealRowTile extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.selectionMode = false,
+    this.isSelected = false,
+    this.onToggleSelect,
   });
 
   final MealRow row;
@@ -202,6 +220,9 @@ class _MealRowTile extends StatelessWidget {
   final VoidCallback onBook;
   final VoidCallback onCancel;
   final VoidCallback? onSell;
+  final bool selectionMode;
+  final bool isSelected;
+  final VoidCallback? onToggleSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -258,6 +279,9 @@ class _MealRowTile extends StatelessWidget {
             onBook: onBook,
             onCancel: onCancel,
             onSell: onSell,
+            selectionMode: selectionMode,
+            isSelected: isSelected,
+            onToggleSelect: onToggleSelect,
           ),
         ],
       ),
@@ -358,6 +382,9 @@ class _Action extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.selectionMode = false,
+    this.isSelected = false,
+    this.onToggleSelect,
   });
 
   final MealRow row;
@@ -365,6 +392,9 @@ class _Action extends StatelessWidget {
   final VoidCallback onBook;
   final VoidCallback onCancel;
   final VoidCallback? onSell;
+  final bool selectionMode;
+  final bool isSelected;
+  final VoidCallback? onToggleSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -416,6 +446,12 @@ class _Action extends StatelessWidget {
         );
 
       case MealRowStatus.bookable:
+        if (selectionMode && onToggleSelect != null) {
+          return Checkbox(
+            value: isSelected,
+            onChanged: busy ? null : (_) => onToggleSelect!(),
+          );
+        }
         return IconButton.filledTonal(
           onPressed: busy ? null : onBook,
           icon: busy

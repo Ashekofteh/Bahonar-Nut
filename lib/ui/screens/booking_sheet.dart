@@ -33,6 +33,8 @@ class BookingSheet extends StatefulWidget {
     super.key,
     required this.menu,
     required this.onBook,
+    this.currentBalanceRial,
+    this.onTopUp,
     this.busy = false,
     this.error,
   });
@@ -42,6 +44,12 @@ class BookingSheet extends StatefulWidget {
 
   /// Books the chosen offering. Returns the message to show, or null.
   final Future<String?> Function(MealOffering offering) onBook;
+
+  /// The account's current balance in Rial, for deficit detection.
+  final int? currentBalanceRial;
+
+  /// Directs the student to increase balance when deficit is detected.
+  final void Function(int deficitRial)? onTopUp;
 
   /// Whether a booking is in flight.
   final bool busy;
@@ -54,13 +62,20 @@ class BookingSheet extends StatefulWidget {
     BuildContext context, {
     required MealMenu menu,
     required Future<String?> Function(MealOffering offering) onBook,
+    int? currentBalanceRial,
+    void Function(int deficitRial)? onTopUp,
   }) {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (_) => BookingSheet(menu: menu, onBook: onBook),
+      builder: (_) => BookingSheet(
+        menu: menu,
+        onBook: onBook,
+        currentBalanceRial: currentBalanceRial,
+        onTopUp: onTopUp,
+      ),
     );
   }
 
@@ -73,6 +88,16 @@ class _BookingSheetState extends State<BookingSheet> {
   HallId? _hall;
   bool _busy = false;
   String? _error;
+
+  int? get _deficitRial {
+    if (widget.currentBalanceRial == null || _dish == null) return null;
+    final dish = widget.menu.dishes.firstWhere(
+      (d) => d.id == _dish,
+      orElse: () => widget.menu.dishes.first,
+    );
+    final deficit = dish.priceRial - widget.currentBalanceRial!;
+    return deficit > 0 ? deficit : null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -132,6 +157,42 @@ class _BookingSheetState extends State<BookingSheet> {
                   onChanged: (id) => setState(() => _dish = id),
                 ),
 
+                if (_deficitRial != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.errorContainer.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.account_balance_wallet_outlined,
+                            size: 20, color: theme.colorScheme.error),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'کسری موجودی: ${formatTomanPersian(_deficitRial!)}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onErrorContainer,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (widget.onTopUp != null)
+                          TextButton(
+                            onPressed: () {
+                              final deficit = _deficitRial!;
+                              Navigator.of(context).pop();
+                              widget.onTopUp!(deficit);
+                            },
+                            child: const Text('افزایش موجودی'),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+
                 if (menu.halls.length > 1) ...[
                   const SizedBox(height: 20),
                   _Halls(
@@ -163,6 +224,37 @@ class _BookingSheetState extends State<BookingSheet> {
     final menu = widget.menu;
     final dishId = _dish;
     if (dishId == null) return;
+
+    final deficit = _deficitRial;
+    if (deficit != null && widget.onTopUp != null) {
+      final goToTopUp = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('کمبود موجودی حساب'),
+          content: Text(
+            'موجودی حساب برای رزرو این غذا کافی نیست.\n'
+            'کسری موجودی: ${formatTomanPersian(deficit)}\n\n'
+            'آیا مایلید برای افزایش اعتبار به صفحه پرداخت هدایت شوید؟',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('انصراف'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('افزایش موجودی'),
+            ),
+          ],
+        ),
+      );
+
+      if (goToTopUp == true && mounted) {
+        Navigator.of(context).pop();
+        widget.onTopUp!(deficit);
+        return;
+      }
+    }
 
     final dish = menu.dishes.firstWhere(
       (d) => d.id == dishId,

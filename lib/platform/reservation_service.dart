@@ -44,9 +44,14 @@ enum ReservationFailure {
 class ReservationOutcome {
   const ReservationOutcome.reserved(this.reservation)
       : failure = null,
-        message = null;
+        message = null,
+        deficitRial = null;
 
-  const ReservationOutcome.failed(this.failure, this.message) : reservation = null;
+  const ReservationOutcome.failed(
+    this.failure,
+    this.message, {
+    this.deficitRial,
+  }) : reservation = null;
 
   /// The reservation the account now holds, when it succeeded.
   final Reservation? reservation;
@@ -56,6 +61,10 @@ class ReservationOutcome {
 
   /// The message to show the user.
   final String? message;
+
+  /// When [failure] is [ReservationFailure.insufficientFunds], the missing
+  /// amount in Rial.
+  final int? deficitRial;
 
   bool get succeeded => reservation != null;
 
@@ -142,9 +151,11 @@ class ReservationService {
       );
     }
     if (balance.amountRial < offering.option.priceRial) {
-      return const ReservationOutcome.failed(
+      final deficit = offering.option.priceRial - balance.amountRial;
+      return ReservationOutcome.failed(
         ReservationFailure.insufficientFunds,
         'موجودی حساب برای این وعده کافی نیست.',
+        deficitRial: deficit,
       );
     }
 

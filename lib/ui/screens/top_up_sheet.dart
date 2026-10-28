@@ -37,6 +37,7 @@ class TopUpSheet extends StatefulWidget {
     required this.banks,
     required this.onSubmit,
     this.suggestedAmounts = const [],
+    this.initialAmountRial,
   });
 
   /// The account's balance now, in Rial.
@@ -51,6 +52,9 @@ class TopUpSheet extends StatefulWidget {
   /// Amounts offered as one-tap chips, in Rial.
   final List<int> suggestedAmounts;
 
+  /// Optional initial amount to pre-fill in Rial (e.g. from deficit calculation).
+  final int? initialAmountRial;
+
   /// Shows the sheet.
   static Future<void> show(
     BuildContext context, {
@@ -58,6 +62,7 @@ class TopUpSheet extends StatefulWidget {
     required List<TopUpBank> banks,
     required Future<String?> Function(int amountRial, TopUpBank bank) onSubmit,
     List<int> suggestedAmounts = const [],
+    int? initialAmountRial,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -69,6 +74,7 @@ class TopUpSheet extends StatefulWidget {
         banks: banks,
         onSubmit: onSubmit,
         suggestedAmounts: suggestedAmounts,
+        initialAmountRial: initialAmountRial,
       ),
     );
   }
@@ -88,6 +94,10 @@ class _TopUpSheetState extends State<TopUpSheet> {
   void initState() {
     super.initState();
     _amount.addListener(_onAmountChanged);
+    if (widget.initialAmountRial != null && widget.initialAmountRial! > 0) {
+      final toman = (widget.initialAmountRial! / 10).round();
+      _amount.text = toman.toString();
+    }
     if (widget.banks.isNotEmpty) {
       _bank = widget.banks.first;
     }

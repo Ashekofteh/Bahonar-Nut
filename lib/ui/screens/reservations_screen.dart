@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/account.dart';
 import '../../core/models.dart';
+import '../../core/persian.dart';
 import '../../core/time.dart';
 import '../app_state.dart';
 import '../reservation_table_model.dart';
@@ -35,6 +36,7 @@ class ReservationsScreen extends StatefulWidget {
     this.onBook,
     this.onCancel,
     this.onSell,
+    this.onTopUp,
     this.onRefresh,
     this.menus = const [],
     this.clock,
@@ -52,6 +54,9 @@ class ReservationsScreen extends StatefulWidget {
 
   /// Lists a held meal for sale in the Food Basket.
   final void Function(DateTime date, MealSlot slot)? onSell;
+
+  /// Directs student to increase balance when deficit is detected.
+  final void Function(int deficitRial)? onTopUp;
 
   /// Re-reads the portal.
   final VoidCallback? onRefresh;
@@ -76,6 +81,22 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
   /// Offset in weeks from the current week (0 = current week, 1 = next week, -1 = last week).
   /// Navigation is unconstrained: tapping next week or previous week advances or rewinds freely.
   int _weekOffset = 0;
+  bool _selectionMode = false;
+  final Set<String> _selectedKeys = {};
+  final Map<String, MealRow> _selectedRows = {};
+
+  void _toggleSelect(MealRow row) {
+    final key = '${row.date.year}-${row.date.month}-${row.date.day}|${row.slot.name}';
+    setState(() {
+      if (_selectedKeys.contains(key)) {
+        _selectedKeys.remove(key);
+        _selectedRows.remove(key);
+      } else {
+        _selectedKeys.add(key);
+        _selectedRows[key] = row;
+      }
+    });
+  }
 
   DateTime _currentSaturday() {
     final now = widget.clock != null && widget.clock!.isSynced
@@ -139,6 +160,18 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
           appBar: AppBar(
             title: const Text('رزروها'),
             actions: [
+              if (weekRows.any((r) => r.status == MealRowStatus.bookable))
+                IconButton(
+                  icon: Icon(_selectionMode ? Icons.close : Icons.checklist_rtl),
+                  tooltip: _selectionMode ? 'انصراف از انتخاب چندگانه' : 'انتخاب چند وعده',
+                  onPressed: () {
+                    setState(() {
+                      _selectionMode = !_selectionMode;
+                      _selectedKeys.clear();
+                      _selectedRows.clear();
+                    });
+                  },
+                ),
               if (widget.onRefresh != null)
                 IconButton(
                   onPressed: widget.onRefresh,
@@ -180,8 +213,28 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                   onBook: (date, slot) => widget.onBook?.call(date, slot),
                   onCancel: (date, slot) => widget.onCancel?.call(date, slot),
                   onSell: widget.onSell != null ? (date, slot) => widget.onSell!(date, slot) : null,
+                  selectionMode: _selectionMode,
+                  selectedKeys: _selectedKeys,
+                  onToggleSelect: _toggleSelect,
                 ),
               ),
+              if (_selectionMode && _selectedRows.isNotEmpty)
+                _MultiSelectSummaryBar(
+                  selectedCount: _selectedRows.length,
+                  totalPriceRial: _selectedRows.values.fold<int>(0, (sum, r) => sum + (r.priceRial ?? 0)),
+                  balanceRial: widget.state.balanceFor(accountId) ?? 0,
+                  onTopUp: (deficit) => widget.onTopUp?.call(deficit),
+                  onConfirmReserve: () {
+                    for (final row in _selectedRows.values) {
+                      widget.onBook?.call(row.date, row.slot);
+                    }
+                    setState(() {
+                      _selectionMode = false;
+                      _selectedKeys.clear();
+                      _selectedRows.clear();
+                    });
+                  },
+                ),
             ],
           ),
         );
@@ -344,6 +397,125 @@ class _AccountPicker extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+/// Persistent bottom summary when multiple meals are selected for reservation.
+class _MultiSelectSummaryBar extends StatelessWidget {
+  const _MultiSelectSummaryBar({
+    required this.selectedCount,
+    required this.totalPriceRial,
+    required this.balanceRial,
+    required this.onTopUp,
+    required this.onConfirmReserve,
+  });
+
+  final int selectedCount;
+  final int totalPriceRial;
+  final int balanceRial;
+  final void Function(int deficitRial) onTopUp;
+  final VoidCallback onConfirmReserve;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final deficitRial = totalPriceRial - balanceRial;
+    final hasDeficit = deficitRial > 0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            offset: const Offset(0, -2),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${toPersianDigits(selectedCount)} وعده انتخاب شده',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  'مجموع: ${formatTomanPersian(totalPriceRial)}',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'موجودی حساب:',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                Text(
+                  formatTomanPersian(balanceRial),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+            if (hasDeficit) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 18, color: theme.colorScheme.error),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'کسری موجودی: ${formatTomanPersian(deficitRial)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onErrorContainer,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () => onTopUp(deficitRial),
+                icon: const Icon(Icons.account_balance_wallet_outlined),
+                label: Text('افزایش موجودی (${formatTomanPersian(deficitRial)})'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: theme.colorScheme.primary,
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: onConfirmReserve,
+                icon: const Icon(Icons.check),
+                label: const Text('ثبت رزرو وعده‌های انتخابی'),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

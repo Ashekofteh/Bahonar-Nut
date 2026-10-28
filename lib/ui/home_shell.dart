@@ -19,6 +19,7 @@ import '../platform/platform_services.dart';
 import '../platform/portal_sync.dart';
 import '../platform/reminder_delivery.dart';
 import '../platform/reminder_service.dart';
+import '../platform/reservation_service.dart' show ReservationFailure;
 import 'app_state.dart';
 import 'screens/accounts_screen.dart';
 import 'screens/booking_sheet.dart';
@@ -773,9 +774,13 @@ class _HomeShellState extends State<HomeShell> {
             : widget.state.accounts.first.id);
     if (accountId == null) return;
 
+    final currentBalance = widget.state.balanceFor(accountId);
+
     await BookingSheet.show(
       context,
       menu: menu,
+      currentBalanceRial: currentBalance,
+      onTopUp: (deficit) => _startTopUpFor(accountId, suggestedAmountRial: deficit),
       onBook: (offering) => _book(accountId, offering),
     );
   }
@@ -805,6 +810,38 @@ class _HomeShellState extends State<HomeShell> {
     await widget.services.mealStore.persist();
     widget.state.mealsChanged();
 
+    if (!mounted) return outcome.message;
+
+    if (outcome.failure == ReservationFailure.insufficientFunds) {
+      final deficit = outcome.deficitRial ?? offering.option.priceRial;
+      final goToTopUp = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('کمبود موجودی حساب'),
+          content: Text(
+            'موجودی حساب شما برای رزرو این غذا کافی نیست.\n'
+            'کسری موجودی: ${formatTomanPersian(deficit)}\n\n'
+            'آیا مایلید برای افزایش اعتبار به صفحه پرداخت هدایت شوید؟',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('انصراف'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('افزایش موجودی'),
+            ),
+          ],
+        ),
+      );
+
+      if (goToTopUp == true && mounted) {
+        await _startTopUpFor(accountId, suggestedAmountRial: deficit);
+      }
+      return outcome.message;
+    }
+
     if (!outcome.succeeded) {
       _showBookingProblem(outcome.message ?? 'رزرو انجام نشد.');
     }
@@ -823,7 +860,7 @@ class _HomeShellState extends State<HomeShell> {
   /// 3. Mint the gateway token and open the bank's page in a WebView.
   /// 4. When the gateway returns to the portal, re-read the payment list and
   ///    the balance, and say what happened.
-  Future<void> _startTopUp(SavedAccount account) async {
+  Future<void> _startTopUp(SavedAccount account, {int? suggestedAmountRial}) async {
     final page = await widget.services.topUp.page(account.id);
 
     if (!mounted) return;
@@ -857,6 +894,7 @@ class _HomeShellState extends State<HomeShell> {
       balanceRial: page.balanceRial,
       banks: banks,
       suggestedAmounts: _topUpSuggestions(),
+      initialAmountRial: suggestedAmountRial,
       onSubmit: (amount, bank) async {
         amountRial = amount;
         return _beginTopUp(account, amount, bank);
@@ -1099,6 +1137,10 @@ class _HomeShellState extends State<HomeShell> {
         onBook: _bookMeal,
         onCancel: _cancelMeal,
         onSell: _sellMeal,
+        onTopUp: (deficit) => _startTopUpFor(
+          widget.state.activeHuntAccount ?? widget.state.accounts.first.id,
+          suggestedAmountRial: deficit,
+        ),
         onRefresh: _refreshTable,
       ),
       DashboardScreen(state: widget.state),
@@ -1421,13 +1463,13 @@ class _HomeShellState extends State<HomeShell> {
   ///
   /// The account is looked up rather than assumed: the top-up flow needs the
   /// saved account, and the hunt screen's active account is an id.
-  Future<void> _startTopUpFor(AccountId accountId) async {
+  Future<void> _startTopUpFor(AccountId accountId, {int? suggestedAmountRial}) async {
     final account = widget.state.accounts
         .where((a) => a.id == accountId)
         .cast<SavedAccount?>()
         .firstWhere((_) => true, orElse: () => null);
     if (account == null) return;
-    await _startTopUp(account);
+    await _startTopUp(account, suggestedAmountRial: suggestedAmountRial);
   }
 
   /// Redraws the dish and hall lists from a menu.
