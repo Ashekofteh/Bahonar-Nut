@@ -15,9 +15,11 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 import '../core/models.dart';
 import '../core/request_ledger.dart';
@@ -86,8 +88,25 @@ class PortalTransport {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     this.clock,
     RequestLedger? ledger,
-  }) : _http = httpClient ?? http.Client(),
+  }) : _http = httpClient ?? _defaultClient(),
        ledger = ledger ?? RequestLedger();
+
+  static http.Client _defaultClient() {
+    try {
+      final io = HttpClient()
+        ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+          if (host == 'nut.uk.ac.ir' ||
+              host.endsWith('.uk.ac.ir') ||
+              host.contains('uk.ac.ir')) {
+            return true;
+          }
+          return false;
+        };
+      return IOClient(io);
+    } catch (_) {
+      return http.Client();
+    }
+  }
 
   /// The portal's root. Every request path is resolved against it.
   final Uri baseUri;
@@ -279,6 +298,16 @@ class PortalTransport {
     } on TimeoutException {
       throw const TransportException('request timed out');
     } catch (e) {
+      final msg = e.toString();
+      if (msg.contains('HandshakeException') ||
+          msg.contains('CERTIFICATE_VERIFY_FAILED') ||
+          msg.contains('Connection reset') ||
+          msg.contains('Connection refused') ||
+          msg.contains('Handshake error')) {
+        throw const TransportException(
+          'خطای ارتباط با سامانه دانشگاه. در صورت روشن بودن فیلترشکن (VPN) آن را خاموش کنید و مجدداً تلاش نمایید.',
+        );
+      }
       throw TransportException('network failure: $e');
     }
 

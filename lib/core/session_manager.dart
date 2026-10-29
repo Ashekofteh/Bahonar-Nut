@@ -251,8 +251,16 @@ class SessionManager {
       );
     } catch (e) {
       _pendingChallenges.remove(accountId);
+      final msg = e.toString();
+      final reason = (msg.contains('Handshake') ||
+              msg.contains('فیلترشکن') ||
+              msg.contains('Connection reset') ||
+              msg.contains('Connection refused') ||
+              msg.contains('CERTIFICATE_VERIFY_FAILED'))
+          ? 'خطای ارتباط با سامانه دانشگاه. لطفاً در صورت روشن بودن فیلترشکن (VPN)، آن را خاموش کرده و دوباره تلاش کنید.'
+          : 'ورود با خطای غیرمنتظره مواجه شد: $e';
       return SessionUnavailable(
-        reason: 'ورود با خطای غیرمنتظره مواجه شد: $e',
+        reason: reason,
         cause: SessionFailureCause.networkError,
       );
     }
