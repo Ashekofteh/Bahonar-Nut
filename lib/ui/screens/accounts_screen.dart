@@ -120,6 +120,9 @@ class _AccountsScreenState extends State<AccountsScreen> {
             password: result.password!,
           ),
         );
+        if (widget.state.selectedReservationsAccountId == null) {
+          widget.state.selectReservationsAccount(account.id);
+        }
       }
 
       if (!context.mounted) return;

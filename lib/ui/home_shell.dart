@@ -579,6 +579,10 @@ class _HomeShellState extends State<HomeShell> {
       // the transactions the sync just read. Without them the chart was
       // permanently empty, whatever the portal said.
       widget.state.setTransactions(transactions);
+
+      // Always load the bookable menus as well so the reservations table is
+      // immediately populated with all available meals.
+      await _refreshTable(quiet: true);
     } finally {
       if (mounted) widget.state.setSyncing(false);
     }
@@ -1370,6 +1374,9 @@ class _HomeShellState extends State<HomeShell> {
         selectedIndex: _index,
         onDestinationSelected: (index) {
           setState(() => _index = index);
+          if (index == 1 && _tableMenus.isEmpty) {
+            _refreshTable(quiet: false);
+          }
           // The market is read when the hunt is opened, not on every rebuild:
           // every read is a request pattern, and the market changes slowly
           // compared with a hunt's window.

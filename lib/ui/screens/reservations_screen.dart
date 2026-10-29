@@ -95,6 +95,49 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
   int _weekOffset = 0;
   bool _selectionMode = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _checkInitialState();
+  }
+
+  @override
+  void didUpdateWidget(ReservationsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _checkInitialState();
+  }
+
+  void _checkInitialState() {
+    if (widget.menus.isEmpty && widget.state.accounts.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onRefresh?.call();
+      });
+    }
+
+    if (_weekOffset == 0 && widget.menus.isNotEmpty) {
+      final currentSat = _currentSaturday();
+      final accountId = widget.state.selectedReservationsAccountId ??
+          (widget.state.accounts.isNotEmpty ? widget.state.accounts.first.id : null);
+      if (accountId != null) {
+        final allRows = buildMealRows(
+          menus: widget.menus,
+          held: widget.state.mealsFor(accountId),
+          clock: widget.clock,
+        );
+        final currentWeekRows = filterRowsForWeek(allRows, currentSat);
+        final nextSat = currentSat.add(const Duration(days: 7));
+        final nextWeekRows = filterRowsForWeek(allRows, nextSat);
+
+        final currentBookableCount = currentWeekRows.where((r) => r.status == MealRowStatus.bookable).length;
+        final nextBookableCount = nextWeekRows.where((r) => r.status == MealRowStatus.bookable).length;
+
+        if (currentBookableCount == 0 && nextBookableCount > 0) {
+          _weekOffset = 1;
+        }
+      }
+    }
+  }
+
 
   final Set<String> _selectedKeys = {};
   final Map<String, MealRow> _selectedRows = {};
