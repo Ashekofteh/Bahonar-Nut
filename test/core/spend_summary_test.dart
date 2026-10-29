@@ -282,4 +282,107 @@ void main() {
       expect(t.isWithdrawal, isFalse);
     });
   });
+
+  group('period filter', () {
+    // 1405/07/28 is 2026-10-20 (Tuesday in week 1405/07/25 - 1405/08/01)
+    // 1405/08/03 is 2026-10-25 (Sunday in week 1405/08/02 - 1405/08/08)
+    final ref = DateTime.utc(2026, 10, 20); // 1405/07/28
+
+    final multiWeekTx = [
+      tx('a1', '1405/08/03', MealSlot.lunch, 500000), // Next week, Aban
+      tx('a1', '1405/07/28', MealSlot.lunch, 350000), // Current week, Mehr
+      tx('a1', '1405/07/20', MealSlot.lunch, 200000), // Previous week, Mehr
+    ];
+
+    test('all period includes all transactions', () {
+      final summary = summarise(
+        transactions: multiWeekTx,
+        filter: SpendFilter(periodType: SpendPeriodType.all, referenceDate: ref),
+      );
+      expect(summary.totalRial, 1050000);
+      expect(summary.totalMeals, 3);
+    });
+
+    test('week period with offset 0 covers only current week', () {
+      final summary = summarise(
+        transactions: multiWeekTx,
+        filter: SpendFilter(
+          periodType: SpendPeriodType.week,
+          weekOffset: 0,
+          referenceDate: ref,
+        ),
+      );
+      expect(summary.totalRial, 350000);
+      expect(summary.totalMeals, 1);
+      expect(summary.entries.first.amountRial, 350000);
+    });
+
+    test('week period with offset 1 covers next week', () {
+      final summary = summarise(
+        transactions: multiWeekTx,
+        filter: SpendFilter(
+          periodType: SpendPeriodType.week,
+          weekOffset: 1,
+          referenceDate: ref,
+        ),
+      );
+      expect(summary.totalRial, 500000);
+      expect(summary.totalMeals, 1);
+    });
+
+    test('week period with offset -1 covers previous week', () {
+      final summary = summarise(
+        transactions: multiWeekTx,
+        filter: SpendFilter(
+          periodType: SpendPeriodType.week,
+          weekOffset: -1,
+          referenceDate: ref,
+        ),
+      );
+      expect(summary.totalRial, 200000);
+      expect(summary.totalMeals, 1);
+    });
+
+    test('month period covers the entire Jalali month', () {
+      // Current month for ref (1405/07/28) is Mehr (month 7)
+      final summaryMehr = summarise(
+        transactions: multiWeekTx,
+        filter: SpendFilter(
+          periodType: SpendPeriodType.month,
+          monthOffset: 0,
+          referenceDate: ref,
+        ),
+      );
+      // Mehr has 350,000 + 200,000 = 550,000
+      expect(summaryMehr.totalRial, 550000);
+      expect(summaryMehr.totalMeals, 2);
+
+      // Next month is Aban (month 8, offset 1)
+      final summaryAban = summarise(
+        transactions: multiWeekTx,
+        filter: SpendFilter(
+          periodType: SpendPeriodType.month,
+          monthOffset: 1,
+          referenceDate: ref,
+        ),
+      );
+      expect(summaryAban.totalRial, 500000);
+      expect(summaryAban.totalMeals, 1);
+    });
+
+    test('period methods update filter correctly', () {
+      var filter = const SpendFilter();
+      expect(filter.isUnfiltered, isTrue);
+
+      filter = filter.withPeriod(SpendPeriodType.week);
+      expect(filter.periodType, SpendPeriodType.week);
+      expect(filter.isUnfiltered, isFalse);
+
+      filter = filter.withWeekOffset(2);
+      expect(filter.weekOffset, 2);
+
+      filter = filter.withMonthOffset(-1);
+      expect(filter.monthOffset, -1);
+    });
+  });
 }

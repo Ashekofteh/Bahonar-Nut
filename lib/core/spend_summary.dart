@@ -40,11 +40,30 @@ import 'models.dart';
 import 'persian.dart';
 import 'portal.dart';
 
-/// Which accounts and which meal slots a summary covers.
+/// The time period a summary covers.
+enum SpendPeriodType {
+  /// All recorded transactions without date restriction.
+  all('همه'),
+
+  /// A single Iranian dining week (Saturday to Friday).
+  week('هفته'),
+
+  /// A single Jalali calendar month (e.g. Aban).
+  month('ماه');
+
+  const SpendPeriodType(this.label);
+  final String label;
+}
+
+/// Which accounts, meal slots, and time period a summary covers.
 class SpendFilter {
   const SpendFilter({
     this.accountIds = const {},
     this.slots = const {},
+    this.periodType = SpendPeriodType.all,
+    this.weekOffset = 0,
+    this.monthOffset = 0,
+    this.referenceDate,
   });
 
   /// Accounts to include. **Empty means all accounts** — the natural default
@@ -54,6 +73,65 @@ class SpendFilter {
   /// Meal slots to include. **Empty means all slots.**
   final Set<MealSlot> slots;
 
+  /// The time period to cover. Defaults to [SpendPeriodType.all].
+  final SpendPeriodType periodType;
+
+  /// Relative week offset from current week (0 = current, -1 = last, +1 = next).
+  final int weekOffset;
+
+  /// Relative month offset from current month (0 = current, -1 = last, +1 = next).
+  final int monthOffset;
+
+  /// The reference date for calculating the current week and month.
+  /// When null, defaults to now in UTC.
+  final DateTime? referenceDate;
+
+  /// The effective reference date, falling back to UTC now.
+  DateTime get effectiveReferenceDate =>
+      referenceDate ?? DateTime.now().toUtc();
+
+  /// The Saturday starting the active week.
+  DateTime get targetSaturday {
+    final curSat = weekStartSaturday(effectiveReferenceDate);
+    return curSat.add(Duration(days: weekOffset * 7));
+  }
+
+  /// The Friday ending the active week.
+  DateTime get targetFriday => weekEndFriday(targetSaturday);
+
+  /// Target Jalali year and month for the month filter.
+  ({int year, int month}) get targetJalaliMonth {
+    final jRef = toJalali(effectiveReferenceDate);
+    var y = jRef.year;
+    var m = jRef.month + monthOffset;
+    while (m > 12) {
+      m -= 12;
+      y++;
+    }
+    while (m < 1) {
+      m += 12;
+      y--;
+    }
+    return (year: y, month: m);
+  }
+
+  /// Label describing the active period, suitable for subtitles and titles.
+  String get periodLabel {
+    switch (periodType) {
+      case SpendPeriodType.all:
+        return 'همه زمان‌ها';
+      case SpendPeriodType.week:
+        final title = formatWeekTitle(weekOffset);
+        final range = formatWeekRange(targetSaturday);
+        return ' ()';
+      case SpendPeriodType.month:
+        final title = formatMonthTitle(monthOffset);
+        final target = targetJalaliMonth;
+        final name = formatJalaliMonthName(target.year, target.month);
+        return ' ()';
+    }
+  }
+
   /// Whether [accountId] passes the account filter.
   bool includesAccount(AccountId accountId) =>
       accountIds.isEmpty || accountIds.contains(accountId);
@@ -61,26 +139,70 @@ class SpendFilter {
   /// Whether [slot] passes the slot filter.
   bool includesSlot(MealSlot slot) => slots.isEmpty || slots.contains(slot);
 
-  bool get isUnfiltered => accountIds.isEmpty && slots.isEmpty;
+  /// Whether [date] passes the date/period filter.
+  bool includesDate(DateTime date) {
+    switch (periodType) {
+      case SpendPeriodType.all:
+        return true;
+      case SpendPeriodType.week:
+        final d = DateTime.utc(date.year, date.month, date.day);
+        return !d.isBefore(targetSaturday) && !d.isAfter(targetFriday);
+      case SpendPeriodType.month:
+        final jDate = toJalali(date);
+        final target = targetJalaliMonth;
+        return jDate.year == target.year && jDate.month == target.month;
+    }
+  }
+
+  bool get isUnfiltered =>
+      accountIds.isEmpty && slots.isEmpty && periodType == SpendPeriodType.all;
+
+  SpendFilter copyWith({
+    Set<AccountId>? accountIds,
+    Set<MealSlot>? slots,
+    SpendPeriodType? periodType,
+    int? weekOffset,
+    int? monthOffset,
+    DateTime? referenceDate,
+  }) =>
+      SpendFilter(
+        accountIds: accountIds ?? this.accountIds,
+        slots: slots ?? this.slots,
+        periodType: periodType ?? this.periodType,
+        weekOffset: weekOffset ?? this.weekOffset,
+        monthOffset: monthOffset ?? this.monthOffset,
+        referenceDate: referenceDate ?? this.referenceDate,
+      );
 
   /// Toggles an account in the filter.
   SpendFilter toggleAccount(AccountId accountId) {
     final next = Set<AccountId>.from(accountIds);
     if (!next.remove(accountId)) next.add(accountId);
-    return SpendFilter(accountIds: next, slots: slots);
+    return copyWith(accountIds: next);
   }
 
   /// Toggles a meal slot in the filter.
   SpendFilter toggleSlot(MealSlot slot) {
     final next = Set<MealSlot>.from(slots);
     if (!next.remove(slot)) next.add(slot);
-    return SpendFilter(accountIds: accountIds, slots: next);
+    return copyWith(slots: next);
   }
 
-  @override
-  String toString() => 'SpendFilter(accounts: $accountIds, slots: $slots)';
-}
+  /// Changes the period type, resetting week and month offsets to 0.
+  SpendFilter withPeriod(SpendPeriodType type) =>
+      copyWith(periodType: type, weekOffset: 0, monthOffset: 0);
 
+  /// Changes the week offset.
+  SpendFilter withWeekOffset(int offset) => copyWith(weekOffset: offset);
+
+  /// Changes the month offset.
+  SpendFilter withMonthOffset(int offset) => copyWith(monthOffset: offset);
+
+  @override
+  String toString() =>
+      'SpendFilter(accounts: , slots: , period: , '
+      'week: , month: )';
+}
 /// A meal that is currently held, as counted by the summary.
 class SpendEntry {
   const SpendEntry({
@@ -173,6 +295,9 @@ SpendSummary summarise({
     if (slot == null) continue;
     if (!filter.includesSlot(slot)) continue;
     if (!filter.includesAccount(transaction.accountId)) continue;
+
+    final date = _parseJalali(transaction.date);
+    if (!filter.includesDate(date)) continue;
 
     final key = '${transaction.accountId}|${transaction.date}|${slot.name}';
     newest.putIfAbsent(key, () => transaction);

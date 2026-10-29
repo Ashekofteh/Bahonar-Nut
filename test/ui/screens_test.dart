@@ -2,6 +2,7 @@ import 'package:bahonar_nut/core/account_store.dart';
 import 'package:bahonar_nut/core/local_meal_store.dart';
 import 'package:bahonar_nut/core/meal_invariant.dart';
 import 'package:bahonar_nut/core/models.dart';
+import 'package:bahonar_nut/core/spend_summary.dart';
 import 'package:bahonar_nut/core/portal.dart';
 import 'package:bahonar_nut/core/session.dart';
 import 'package:bahonar_nut/core/time.dart';
@@ -257,6 +258,108 @@ void main() {
 
       expect(state.spendSummary.totalRial, 500000);
       expect(find.textContaining('۵۰٬۰۰۰'), findsWidgets);
+    });
+
+    testWidgets('selecting week period filters by week and enables week switching', (tester) async {
+      // 1405/07/28 (2026-10-20) in current week (ref)
+      // 1405/07/21 (2026-10-13) in previous week
+      final state = await buildState(transactions: [
+        const Transaction(
+          accountId: '400123456',
+          type: 'رزرو غذا',
+          foodName: 'چلو',
+          slot: MealSlot.lunch,
+          weekday: 'سه شنبه',
+          date: '1405/07/28',
+          count: 1,
+          amountRial: 500000,
+        ),
+        const Transaction(
+          accountId: '400123456',
+          type: 'رزرو غذا',
+          foodName: 'شیر',
+          slot: MealSlot.breakfast,
+          weekday: 'سه شنبه',
+          date: '1405/07/21',
+          count: 1,
+          amountRial: 150000,
+        ),
+      ]);
+      state.setSpendReferenceDate(DateTime.utc(2026, 10, 20));
+
+      await tester.pumpWidget(wrap(state, DashboardScreen(state: state)));
+      expect(state.spendSummary.totalRial, 650000);
+
+      // Select week filter
+      await tester.scrollUntilVisible(find.widgetWithText(ChoiceChip, 'هفته'), 300);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'هفته'));
+      await tester.pumpAndSettle();
+
+      expect(state.spendFilter.periodType, SpendPeriodType.week);
+      expect(state.spendSummary.totalRial, 500000);
+      expect(find.text('هفته جاری'), findsWidgets);
+
+      // Tap previous week chevron to switch weeks
+      await tester.tap(find.byTooltip('هفته قبل'));
+      await tester.pumpAndSettle();
+
+      expect(state.spendFilter.weekOffset, -1);
+      expect(state.spendSummary.totalRial, 150000);
+      expect(find.text('هفته قبل'), findsWidgets);
+
+      // Tap next week chevron to return to current week
+      await tester.tap(find.byTooltip('هفته بعد'));
+      await tester.pumpAndSettle();
+
+      expect(state.spendFilter.weekOffset, 0);
+      expect(state.spendSummary.totalRial, 500000);
+    });
+
+    testWidgets('selecting month period filters by month', (tester) async {
+      final state = await buildState(transactions: [
+        const Transaction(
+          accountId: '400123456',
+          type: 'رزرو غذا',
+          foodName: 'چلو',
+          slot: MealSlot.lunch,
+          weekday: 'یکشنبه',
+          date: '1405/08/03',
+          count: 1,
+          amountRial: 500000,
+        ),
+        const Transaction(
+          accountId: '400123456',
+          type: 'رزرو غذا',
+          foodName: 'شیر',
+          slot: MealSlot.breakfast,
+          weekday: 'سه شنبه',
+          date: '1405/07/28',
+          count: 1,
+          amountRial: 150000,
+        ),
+      ]);
+      // Ref date in Mehr (1405/07/28)
+      state.setSpendReferenceDate(DateTime.utc(2026, 10, 20));
+
+      await tester.pumpWidget(wrap(state, DashboardScreen(state: state)));
+      expect(state.spendSummary.totalRial, 650000);
+
+      // Select month filter
+      await tester.scrollUntilVisible(find.widgetWithText(ChoiceChip, 'ماه'), 300);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'ماه'));
+      await tester.pumpAndSettle();
+
+      expect(state.spendFilter.periodType, SpendPeriodType.month);
+      // Mehr total is 150,000
+      expect(state.spendSummary.totalRial, 150000);
+      expect(find.text('ماه جاری'), findsWidgets);
+
+      // Switch to next month (Aban)
+      await tester.tap(find.byTooltip('ماه بعد'));
+      await tester.pumpAndSettle();
+
+      expect(state.spendFilter.monthOffset, 1);
+      expect(state.spendSummary.totalRial, 500000);
     });
   });
 

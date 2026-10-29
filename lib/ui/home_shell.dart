@@ -1427,7 +1427,7 @@ class _HomeShellState extends State<HomeShell> {
         onRefresh: _refreshTable,
         onAccountChanged: (accountId) => _refreshTable(targetAccount: accountId),
       ),
-      DashboardScreen(state: widget.state),
+      DashboardScreen(state: widget.state, clock: widget.services.clock),
       RemindersScreen(state: widget.state, bridge: widget.services.bridge),
       _huntScreen(),
     ];

@@ -3,23 +3,25 @@ import 'package:flutter/material.dart';
 import '../../core/models.dart';
 import '../../core/persian.dart';
 import '../../core/spend_summary.dart';
+import '../../core/time.dart';
 import '../app_state.dart';
 import '../widgets.dart';
 
 /// The finance dashboard: what the meals cost, broken down.
 ///
-/// Two things make this screen honest:
-///
-///   * **The filters are multi-select on both dimensions.** Accounts and meal
-///     slots can be combined freely, and an empty selection means "everything"
-///     rather than "nothing".
-///   * **The figure is meals reserved, not money spent.** The ledger records
-///     reservations, not whether the meal was eaten, and an uneaten meal still
-///     incurs the portal's penalty. The label says so.
+/// Features:
+///   * **Period filters**: All time, by Week (with week switching), or by Month.
+///   * **Multi-select dimensions**: Accounts and meal slots can be combined freely.
+///   * **Reserved vs spent**: The figure is meals reserved, not bank money spent.
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key, required this.state});
+  const DashboardScreen({
+    super.key,
+    required this.state,
+    this.clock,
+  });
 
   final AppState state;
+  final ServerClock? clock;
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +52,7 @@ class DashboardScreen extends StatelessWidget {
                   children: [
                     _TotalsCard(summary: summary),
                     const SizedBox(height: 12),
-                    _FilterCard(state: state),
+                    _FilterCard(state: state, clock: clock),
                     const SizedBox(height: 12),
                     _BreakdownCard(summary: summary),
                     if (summary.entries.isNotEmpty) ...[
@@ -77,7 +79,7 @@ class _TotalsCard extends StatelessWidget {
 
     return SectionCard(
       title: 'مجموع',
-      subtitle: 'هزینه وعده‌های رزروشده (تومان)',
+      subtitle: 'هزینه وعده‌های رزروشده (تومان) • ${summary.filter.periodLabel}',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -156,11 +158,15 @@ class _MiniStat extends StatelessWidget {
   }
 }
 
-/// The multi-select filters.
+/// The filters card: Accounts, Slots, and Period (all, week, month).
 class _FilterCard extends StatelessWidget {
-  const _FilterCard({required this.state});
+  const _FilterCard({required this.state, this.clock});
 
   final AppState state;
+  final ServerClock? clock;
+
+  DateTime? get _referenceDate =>
+      clock?.isSynced == true ? clock!.portalTodayUtc : null;
 
   @override
   Widget build(BuildContext context) {
@@ -170,7 +176,7 @@ class _FilterCard extends StatelessWidget {
 
     return SectionCard(
       title: 'فیلتر',
-      subtitle: 'چند حساب و چند وعده را هم‌زمان انتخاب کنید',
+      subtitle: 'بازه زمانی، چند حساب و چند وعده را هم‌زمان انتخاب کنید',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -222,6 +228,51 @@ class _FilterCard extends StatelessWidget {
                 ),
             ],
           ),
+          const SizedBox(height: 16),
+          Text(
+            'بازه زمانی',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('همه'),
+                selected: filter.periodType == SpendPeriodType.all,
+                onSelected: (_) => state.setSpendPeriod(
+                  SpendPeriodType.all,
+                  referenceDate: _referenceDate,
+                ),
+              ),
+              ChoiceChip(
+                label: const Text('هفته'),
+                selected: filter.periodType == SpendPeriodType.week,
+                onSelected: (_) => state.setSpendPeriod(
+                  SpendPeriodType.week,
+                  referenceDate: _referenceDate,
+                ),
+              ),
+              ChoiceChip(
+                label: const Text('ماه'),
+                selected: filter.periodType == SpendPeriodType.month,
+                onSelected: (_) => state.setSpendPeriod(
+                  SpendPeriodType.month,
+                  referenceDate: _referenceDate,
+                ),
+              ),
+            ],
+          ),
+          if (filter.periodType == SpendPeriodType.week) ...[
+            const SizedBox(height: 12),
+            _WeekSwitcher(state: state, filter: filter),
+          ] else if (filter.periodType == SpendPeriodType.month) ...[
+            const SizedBox(height: 12),
+            _MonthSwitcher(state: state, filter: filter),
+          ],
           if (filter.isUnfiltered) ...[
             const SizedBox(height: 12),
             Text(
@@ -231,6 +282,201 @@ class _FilterCard extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Switcher for browsing between weeks.
+class _WeekSwitcher extends StatelessWidget {
+  const _WeekSwitcher({required this.state, required this.filter});
+
+  final AppState state;
+  final SpendFilter filter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final weekTitle = formatWeekTitle(filter.weekOffset);
+    final weekRange = formatWeekRange(filter.targetSaturday);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            tooltip: 'هفته قبل',
+            onPressed: () => state.setSpendWeekOffset(filter.weekOffset - 1),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: filter.weekOffset != 0
+                  ? () => state.setSpendWeekOffset(0)
+                  : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          weekTitle,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: filter.weekOffset == 0
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        if (filter.weekOffset != 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'هفته جاری',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      weekRange,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            tooltip: 'هفته بعد',
+            onPressed: () => state.setSpendWeekOffset(filter.weekOffset + 1),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Switcher for browsing between months.
+class _MonthSwitcher extends StatelessWidget {
+  const _MonthSwitcher({required this.state, required this.filter});
+
+  final AppState state;
+  final SpendFilter filter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final monthTitle = formatMonthTitle(filter.monthOffset);
+    final target = filter.targetJalaliMonth;
+    final monthName = formatJalaliMonthName(target.year, target.month);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            tooltip: 'ماه قبل',
+            onPressed: () => state.setSpendMonthOffset(filter.monthOffset - 1),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: filter.monthOffset != 0
+                  ? () => state.setSpendMonthOffset(0)
+                  : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          monthTitle,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: filter.monthOffset == 0
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        if (filter.monthOffset != 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'ماه جاری',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      monthName,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            tooltip: 'ماه بعد',
+            onPressed: () => state.setSpendMonthOffset(filter.monthOffset + 1),
+          ),
         ],
       ),
     );

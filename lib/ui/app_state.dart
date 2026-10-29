@@ -524,6 +524,46 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sets the dashboard's time period (all, week, month).
+  void setSpendPeriod(SpendPeriodType periodType, {DateTime? referenceDate}) {
+    if (_spendFilter.periodType == periodType &&
+        (referenceDate == null || _spendFilter.referenceDate == referenceDate)) {
+      return;
+    }
+    _spendFilter = _spendFilter.copyWith(
+      periodType: periodType,
+      weekOffset: 0,
+      monthOffset: 0,
+      referenceDate: referenceDate ?? _spendFilter.referenceDate,
+    );
+    _cachedSpendSummary = null;
+    notifyListeners();
+  }
+
+  /// Sets the week offset for the week filter.
+  void setSpendWeekOffset(int offset) {
+    if (_spendFilter.weekOffset == offset) return;
+    _spendFilter = _spendFilter.withWeekOffset(offset);
+    _cachedSpendSummary = null;
+    notifyListeners();
+  }
+
+  /// Sets the month offset for the month filter.
+  void setSpendMonthOffset(int offset) {
+    if (_spendFilter.monthOffset == offset) return;
+    _spendFilter = _spendFilter.withMonthOffset(offset);
+    _cachedSpendSummary = null;
+    notifyListeners();
+  }
+
+  /// Sets the reference anchor date for week/month calculations.
+  void setSpendReferenceDate(DateTime? date) {
+    if (_spendFilter.referenceDate == date) return;
+    _spendFilter = _spendFilter.copyWith(referenceDate: date);
+    _cachedSpendSummary = null;
+    notifyListeners();
+  }
+
   /// The balance last read for [accountId], in Rial.
   int? balanceFor(AccountId accountId) => _balances[accountId];
 
