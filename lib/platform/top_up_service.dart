@@ -164,6 +164,18 @@ class TopUpService {
     try {
       await sessions.withSession(accountId, (session) async {
         payments = await client.fetchTopUpPayments(session);
+
+        // If the newest payment for this amount is not yet recognized as paid,
+        // trigger an automatic bank verification (استعلام) on the portal.
+        var matched = matchTopUpPayment(payments, amountRial);
+        if (matched == null || !matched.status.isPaid) {
+          try {
+            payments = await client.verifyTopUpPayment(session);
+          } catch (_) {
+            // Best effort verification
+          }
+        }
+
         try {
           balance = (await client.fetchBalance(session)).amountRial;
         } catch (_) {

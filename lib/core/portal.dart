@@ -560,6 +560,9 @@ abstract class PortalClient {
   /// is applied asynchronously, after the portal re-queries the bank (F58).
   Future<List<TopUpPayment>> fetchTopUpPayments(Session session);
 
+  /// Queries the bank to verify a pending top-up payment, newest first.
+  Future<List<TopUpPayment>> verifyTopUpPayment(Session session);
+
   // --- Navigation ---
 
   /// The top-up URL, or null when the portal offers no constructible link (in

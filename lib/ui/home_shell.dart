@@ -986,6 +986,9 @@ class _HomeShellState extends State<HomeShell> {
       ),
     );
 
+    if (mounted) {
+      await _settleTopUp(account, amountRial);
+    }
     return null;
   }
 
@@ -1004,10 +1007,8 @@ class _HomeShellState extends State<HomeShell> {
 
     final matched = report.matched;
 
-    if (matched == null) {
-      _showBookingProblem(
-        'هنوز پرداخت شما تأیید نشده است. کمی بعد دوباره بررسی کنید.',
-      );
+    if (matched == null || !matched.status.isPaid) {
+      _showTopUpPendingDialog(account, amountRial);
       return;
     }
 
@@ -1084,6 +1085,35 @@ class _HomeShellState extends State<HomeShell> {
 
     _showBookingProblem(
       matched.message ?? 'پرداخت انجام نشد. دوباره تلاش کنید.',
+    );
+  }
+
+  void _showTopUpPendingDialog(SavedAccount account, int amountRial) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.info_outline, size: 36, color: Colors.orange),
+        title: const Text('وضعیت پرداخت اینترنتی'),
+        content: const Text(
+          'در صورتی که مبلغ از کارت شما کسر شده اما هنوز در سامانه دانشگاه ثبت نشده است، نگران نباشید:\n\n'
+          '۱. تأیید بانکی در سامانه دانشگاه ممکن است چند دقیقه طول بکشد. می‌توانید با دکمه «استعلام مجدد» وضعیت را دوباره بررسی کنید.\n\n'
+          '۲. طبق قوانین شبکه شاپرک، هرگونه مبلغ کسرشده‌ای که به دلیل اختلال شبکه در سامانه ثبت نگردد، حداکثر ظرف ۷۲ ساعت (معمولاً چند ساعت) به صورت خودکار به همان کارت بانکی بازگشت داده می‌شود.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('متوجه شدم'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _settleTopUp(account, amountRial);
+            },
+            icon: const Icon(Icons.refresh),
+            label: const Text('استعلام مجدد'),
+          ),
+        ],
+      ),
     );
   }
 

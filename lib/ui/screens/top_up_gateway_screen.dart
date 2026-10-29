@@ -79,6 +79,7 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
             final url = change.url;
             if (url != null) _onUrl(url);
           },
+          onPageFinished: (url) => _onUrl(url),
           onNavigationRequest: (request) => _onUrl(request.url),
           onWebResourceError: (error) {
             // A failed sub-resource must not close the page: the gateway
@@ -140,14 +141,22 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
 
     // The gateway returns to the portal when the payment is done — and only
     // then. This is the signal to re-read the payment list.
-    if (uri.host == widget.portalHost) {
-      _returned = true;
-      if (mounted) {
-        // The navigation is allowed: the portal's own page is the receipt,
-        // and the student should see it.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) widget.onReturned?.call();
-        });
+    if (uri.host == widget.portalHost ||
+        uri.host.contains('uk.ac.ir') ||
+        uri.path.contains('ePay') ||
+        uri.path.contains('MyePayList')) {
+      if (!_returned) {
+        _returned = true;
+        if (mounted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              widget.onReturned?.call();
+              Future.delayed(const Duration(milliseconds: 1500), () {
+                if (mounted) Navigator.of(context).maybePop();
+              });
+            }
+          });
+        }
       }
     }
 
@@ -167,6 +176,16 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('پرداخت اینترنتی'),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              widget.onReturned?.call();
+              Navigator.of(context).pop();
+            },
+            icon: const Icon(Icons.check_circle_outline),
+            label: const Text('تکمیل و بازگشت'),
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(3),
           child: LinearProgressIndicator(

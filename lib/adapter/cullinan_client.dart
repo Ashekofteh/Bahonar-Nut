@@ -1148,6 +1148,43 @@ class CullinanPortalClient implements PortalClient {
     return CullinanParser.parseTopUpPayments(page.body);
   }
 
+  @override
+  Future<List<TopUpPayment>> verifyTopUpPayment(Session session) async {
+    _applySession(session);
+    final first = await transport.get(session.account, _Paths.topUpList);
+    _rejectIfBounced(first);
+
+    // Find the per-row «استعلام» verify button in the table
+    final match = RegExp(
+      r'name="([^"]*grdContent\$ctl02\$imgbtnVerify)"',
+    ).firstMatch(first.body) ?? RegExp(
+      r'name="([^"]*imgbtnVerify)"',
+    ).firstMatch(first.body);
+
+    if (match == null) {
+      return CullinanParser.parseTopUpPayments(first.body);
+    }
+
+    final btnName = match.group(1)!;
+    final verified = await transport.post(
+      session.account,
+      _Paths.topUpList,
+      body: {
+        '__VIEWSTATE': hiddenFieldValue(first.body, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR':
+            hiddenFieldValue(first.body, '__VIEWSTATEGENERATOR'),
+        '__VIEWSTATEENCRYPTED':
+            hiddenFieldValue(first.body, '__VIEWSTATEENCRYPTED'),
+        '__EVENTTARGET': '',
+        '__EVENTARGUMENT': '',
+        '$btnName.x': '10',
+        '$btnName.y': '10',
+      },
+    );
+    _rejectIfBounced(verified);
+    return CullinanParser.parseTopUpPayments(verified.body);
+  }
+
   /// The ePay form's own state, with the fields that must travel with it.
   ///
   /// The `__VIEWSTATE` is the whole form state: a post without it is

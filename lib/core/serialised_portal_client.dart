@@ -251,6 +251,10 @@ class SerialisedPortalClient implements PortalClient {
   Future<List<TopUpPayment>> fetchTopUpPayments(Session session) =>
       _exclusive(session.account, () => _inner.fetchTopUpPayments(session));
 
+  @override
+  Future<List<TopUpPayment>> verifyTopUpPayment(Session session) =>
+      _exclusive(session.account, () => _inner.verifyTopUpPayment(session));
+
   // --- Navigation ---
 
   @override

@@ -186,6 +186,10 @@ class FakePortalClient implements PortalClient {
   Future<List<TopUpPayment>> fetchTopUpPayments(Session session) async =>
       topUpPayments;
 
+  @override
+  Future<List<TopUpPayment>> verifyTopUpPayment(Session session) async =>
+      topUpPayments;
+
   // --- Navigation ---
 
   @override
