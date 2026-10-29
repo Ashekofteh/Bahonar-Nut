@@ -103,8 +103,9 @@ class _BatchBookingSheetState extends State<BatchBookingSheet> {
       final menu = _findMenu(row);
       if (menu != null && menu.dishes.isNotEmpty) {
         _selectedOptions[key] = menu.dishes.first;
-        _selectedHalls[key] = _globalHall ??
-            (menu.halls.isNotEmpty
+        _selectedHalls[key] = (_globalHall != null && menu.halls.any((h) => h.id == _globalHall!.id))
+            ? _globalHall!
+            : (menu.halls.isNotEmpty
                 ? menu.halls.first
                 : const Hall(id: '1', name: 'مرکزی'));
       }
@@ -428,7 +429,9 @@ class _BatchBookingSheetState extends State<BatchBookingSheet> {
                                 ),
                                 const SizedBox(width: 8),
                                 DropdownButton<String>(
-                                  value: selectedHall?.id ?? halls.first.id,
+                                  value: (selectedHall != null && halls.any((h) => h.id == selectedHall.id))
+                                      ? selectedHall.id
+                                      : halls.first.id,
                                   isDense: true,
                                   underline: const SizedBox(),
                                   items: halls.map((h) {

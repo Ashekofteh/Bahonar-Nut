@@ -1813,7 +1813,10 @@ class _HomeShellState extends State<HomeShell> {
       for (final row in pendingRows) {
         MealMenu? matchingMenu;
         for (final m in _tableMenus) {
-          if (m.date == row.date && m.slot == row.slot) {
+          if (m.date.year == row.date.year &&
+              m.date.month == row.date.month &&
+              m.date.day == row.date.day &&
+              m.slot == row.slot) {
             matchingMenu = m;
             break;
           }

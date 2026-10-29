@@ -622,14 +622,14 @@ class _MultiSelectSummaryBar extends StatelessWidget {
     required this.selectedCount,
     required this.totalPriceRial,
     required this.balanceRial,
-    required this.onTopUp,
+    this.onTopUp,
     required this.onConfirmReserve,
   });
 
   final int selectedCount;
   final int totalPriceRial;
   final int balanceRial;
-  final void Function(int deficitRial) onTopUp;
+  final void Function(int deficitRial)? onTopUp;
   final VoidCallback onConfirmReserve;
 
   @override
@@ -714,15 +714,16 @@ class _MultiSelectSummaryBar extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton(
+                    child: OutlinedButton.icon(
                       onPressed: onConfirmReserve,
-                      child: const Text('ثبت رزرو'),
+                      icon: const Icon(Icons.tune, size: 16),
+                      label: const Text('انتخاب نوع غذا و سلف'),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: () => onTopUp(deficitRial),
+                      onPressed: onTopUp != null ? () => onTopUp!(deficitRial) : null,
                       icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
                       label: Text('شارژ حساب (${formatTomanPersian(deficitRial)})'),
                       style: FilledButton.styleFrom(
@@ -736,8 +737,8 @@ class _MultiSelectSummaryBar extends StatelessWidget {
               const SizedBox(height: 8),
               FilledButton.icon(
                 onPressed: onConfirmReserve,
-                icon: const Icon(Icons.check),
-                label: const Text('ثبت رزرو وعده‌های انتخابی'),
+                icon: const Icon(Icons.tune),
+                label: Text('انتخاب نوع غذا و سلف (${toPersianDigits(selectedCount)} وعده)'),
               ),
             ],
           ],
