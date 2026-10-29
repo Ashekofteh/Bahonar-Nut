@@ -626,9 +626,8 @@ abstract final class CullinanParser {
   ) {
     final out = <Transaction>[];
 
-    for (final row in RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true)
-        .allMatches(tableBody)) {
-      final cells = RegExp(r'<td[^>]*>(.*?)</td>', dotAll: true)
+    for (final row in _trPattern.allMatches(tableBody)) {
+      final cells = _tdPattern
           .allMatches(row.group(1)!)
           .map((m) => stripTags(m.group(1)!))
           .toList();
@@ -688,10 +687,9 @@ abstract final class CullinanParser {
 
     final out = <TopUpPayment>[];
 
-    for (final match in RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true)
-        .allMatches(table.group(1)!)) {
+    for (final match in _trPattern.allMatches(table.group(1)!)) {
       final raw = match.group(1)!;
-      final cells = RegExp(r'<td[^>]*>(.*?)</td>', dotAll: true)
+      final cells = _tdPattern
           .allMatches(raw)
           .map((m) => stripTags(m.group(1)!))
           .toList();
@@ -738,14 +736,14 @@ abstract final class CullinanParser {
   /// Extracts the student's name from a string like "کاربر: ابوالفضل شكفته - 401405035".
   static String? extractStudentName(String text) {
     var cleaned = text.trim();
-    cleaned = cleaned.replaceFirst(RegExp(r'^کاربر\s*:\s*'), '').trim();
+    cleaned = cleaned.replaceFirst(_userPrefixPattern, '').trim();
     if (cleaned.isEmpty) return null;
     final dashIndex = cleaned.lastIndexOf('-');
     if (dashIndex != -1) {
       final namePart = cleaned.substring(0, dashIndex).trim();
       if (namePart.isNotEmpty) return namePart;
     }
-    cleaned = cleaned.replaceAll(RegExp(r'\s*\d+\s*$'), '').trim();
+    cleaned = cleaned.replaceAll(_trailingDigitsPattern, '').trim();
     return cleaned.isNotEmpty ? cleaned : null;
   }
 
@@ -789,4 +787,9 @@ abstract final class CullinanParser {
 
   static String _dateKey(DateTime date) =>
       '${date.year}-${date.month}-${date.day}';
+
+  static final RegExp _trPattern = RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true);
+  static final RegExp _tdPattern = RegExp(r'<td[^>]*>(.*?)</td>', dotAll: true);
+  static final RegExp _userPrefixPattern = RegExp(r'^کاربر\s*:\s*');
+  static final RegExp _trailingDigitsPattern = RegExp(r'\s*\d+\s*$');
 }

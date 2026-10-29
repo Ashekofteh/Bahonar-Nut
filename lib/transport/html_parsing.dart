@@ -87,11 +87,34 @@ class RowStatus {
 ///
 /// Returns [RowStatus.none] when the row carries no status icon, which is
 /// what an ordinary, unbooked row looks like.
+final RegExp _imgStatusPattern = RegExp(
+  r'<img[^>]*id="[^"]*imgStaus[^"]*"[^>]*>',
+  dotAll: true,
+);
+
+final RegExp _selectPattern = RegExp(
+  r'<select([^>]*)>(.*?)</select>',
+  dotAll: true,
+);
+
+final RegExp _optionPattern = RegExp(
+  r'<option([^>]*)>(.*?)</option>',
+  dotAll: true,
+);
+
+final RegExp _trPattern = RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true);
+final RegExp _tdPattern = RegExp(r'<td[^>]*>(.*?)</td>', dotAll: true);
+final RegExp _inputPattern = RegExp(r'<input([^>]*)>', dotAll: true);
+
+final RegExp _htmlTagPattern = RegExp(r'<[^>]*>');
+final RegExp _whitespacePattern = RegExp(r'\s+');
+
+final RegExp _amountPattern = RegExp(r'([\d۰-۹][\d۰-۹\s٬,]*)\s*ریال');
+final RegExp _digitsPattern = RegExp(r'[\d۰-۹][\d۰-۹\s٬,]*');
+final RegExp _trailingPunctPattern = RegExp(r'[\s٬,]+$');
+
 RowStatus rowStatus(String rowHtml) {
-  final match = RegExp(
-    r'<img[^>]*id="[^"]*imgStaus[^"]*"[^>]*>',
-    dotAll: true,
-  ).firstMatch(rowHtml);
+  final match = _imgStatusPattern.firstMatch(rowHtml);
   if (match == null) return RowStatus.none;
 
   final tag = match.group(0)!;
@@ -171,19 +194,13 @@ String? elementText(String html, String id) {
 /// Every `<select>` in [html].
 List<ParsedSelect> selects(String html) {
   final out = <ParsedSelect>[];
-  for (final match in RegExp(
-    '<select([^>]*)>(.*?)</select>',
-    dotAll: true,
-  ).allMatches(html)) {
+  for (final match in _selectPattern.allMatches(html)) {
     final attributes = match.group(1)!;
     final name = _attribute(attributes, 'name') ?? '';
     final options = <ParsedOption>[];
     String? selected;
 
-    for (final optionMatch in RegExp(
-      '<option([^>]*)>(.*?)</option>',
-      dotAll: true,
-    ).allMatches(match.group(2)!)) {
+    for (final optionMatch in _optionPattern.allMatches(match.group(2)!)) {
       final optionAttributes = optionMatch.group(1)!;
       final value = _attribute(optionAttributes, 'value');
       final text = stripTags(optionMatch.group(2)!);
@@ -225,10 +242,9 @@ List<ParsedRow> tableRows(String html, String tableIdSuffix) {
   if (table == null) return const [];
 
   final rows = <ParsedRow>[];
-  for (final match in RegExp('<tr[^>]*>(.*?)</tr>', dotAll: true)
-      .allMatches(table.group(1)!)) {
+  for (final match in _trPattern.allMatches(table.group(1)!)) {
     final raw = match.group(1)!;
-    final cells = RegExp('<td[^>]*>(.*?)</td>', dotAll: true)
+    final cells = _tdPattern
         .allMatches(raw)
         .map((m) => stripTags(m.group(1)!))
         .toList();
@@ -240,7 +256,7 @@ List<ParsedRow> tableRows(String html, String tableIdSuffix) {
 /// The `<input>` elements inside [html].
 List<ParsedInput> inputs(String html) {
   final out = <ParsedInput>[];
-  for (final match in RegExp('<input([^>]*)>', dotAll: true).allMatches(html)) {
+  for (final match in _inputPattern.allMatches(html)) {
     final attributes = match.group(1)!;
     out.add(ParsedInput(
       name: _attribute(attributes, 'name') ?? '',
@@ -267,12 +283,12 @@ ParsedInput? inputBySuffix(String html, String suffix) {
 /// Handles the Persian text the portal serves, which is RTL and often padded
 /// with non-breaking spaces.
 String stripTags(String html) => html
-    .replaceAll(RegExp(r'<[^>]*>'), ' ')
+    .replaceAll(_htmlTagPattern, ' ')
     .replaceAll('&nbsp;', ' ')
     .replaceAll('&amp;', '&')
     .replaceAll('&quot;', '"')
     .replaceAll('&#39;', "'")
-    .replaceAll(RegExp(r'\s+'), ' ')
+    .replaceAll(_whitespacePattern, ' ')
     .trim();
 
 /// Reads an attribute from a raw tag's attribute string.
@@ -317,17 +333,14 @@ int? parseRial(String text) {
 /// The word the portal writes the price with is matched here, so the amount
 /// can be told apart from the digits in a dish's own name. That is parsing
 /// portal text, never displaying an amount.
-String? _amountIn(String text) {
-  final pattern = RegExp(r'([\d۰-۹][\d۰-۹\s٬,]*)\s*' 'ریال');
-  return pattern.firstMatch(text)?.group(1);
-}
+String? _amountIn(String text) => _amountPattern.firstMatch(text)?.group(1);
 
 /// The last run of digits in the string.
 String? _lastNumberIn(String text) {
-  final matches = RegExp(r'[\d۰-۹][\d۰-۹\s٬,]*').allMatches(text).toList();
+  final matches = _digitsPattern.allMatches(text).toList();
   if (matches.isEmpty) return null;
 
   final last = matches.last.group(0)!;
   // A trailing separator or space is not part of the number.
-  return last.trim().replaceFirst(RegExp(r'[\s٬,]+$'), '');
+  return last.trim().replaceFirst(_trailingPunctPattern, '');
 }
