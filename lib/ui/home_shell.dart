@@ -8,6 +8,7 @@ import '../core/persian.dart';
 import '../core/pending_request.dart';
 import '../core/portal.dart';
 import '../core/preflight.dart';
+import '../core/service_calendar.dart';
 import '../core/session.dart'
     show SessionNeedsCaptcha, SessionReady, SessionUnavailable;
 import '../core/session_manager.dart'
@@ -507,7 +508,7 @@ class _HomeShellState extends State<HomeShell> {
     if (accounts.isEmpty) return;
 
     final accountId = accounts.first.id;
-    final targetDate = date ?? _currentHuntConfig?.targetDate;
+    final targetDate = date ?? _currentHuntConfig?.targetDate ?? _defaultHuntTargetDate();
 
     // Remember what this read is for, so a later change of target knows the
     // list on screen is stale.
@@ -1497,15 +1498,16 @@ class _HomeShellState extends State<HomeShell> {
         }
 
         // A hunt with no stored target starts on the portal's today, not the
-        // device's. The device clock is not trusted for anything the portal
-        // decides, and the date it names is one of them.
-        final clock = widget.services.clock;
-        final config = state.activeHuntConfig ??
-            HuntConfig(
-              targetDate: clock.isSynced
-                  ? clock.portalTodayUtc
-                  : DateTime.now().toUtc(),
-            );
+        // The default date is the first servable date on or after today.
+        final targetDates = _targetDates();
+        final defaultDate = _defaultHuntTargetDate();
+
+        final activeConfig = state.activeHuntConfig;
+        final config = activeConfig == null
+            ? HuntConfig(targetDate: defaultDate)
+            : (activeConfig.targetDate == null
+                ? activeConfig.copyWith(targetDate: defaultDate)
+                : activeConfig);
 
         return HuntScreen(
           config: config,
@@ -1562,17 +1564,34 @@ class _HomeShellState extends State<HomeShell> {
 
   /// The dates the hunt may target.
   ///
-  /// Only the dates whose reservation cutoff has not passed, because a hunt
-  /// for a locked date could never buy anything.
+  /// Starts from today (in portal time, falling back to local date if unsynced),
+  /// covering 14 days, because the secondary market (Food Basket) allows purchasing
+  /// meals for today and upcoming days as other students release them.
   List<DateTime> _targetDates() {
     final clock = widget.services.clock;
-    if (!clock.isSynced) return const [];
+    final today = clock.isSynced ? clock.portalTodayUtc : DateTime.now().toUtc();
+    final todayUtc = DateTime.utc(today.year, today.month, today.day);
 
-    final first = clock.firstReservableDate();
     return List.generate(
-      7,
-      (i) => DateTime.utc(first.year, first.month, first.day + i),
+      14,
+      (i) => DateTime.utc(todayUtc.year, todayUtc.month, todayUtc.day + i),
     );
+  }
+
+  /// The first servable date for hunt, defaulting to today or the next servable day.
+  DateTime _defaultHuntTargetDate([MealSlot slot = MealSlot.dinner]) {
+    final clock = widget.services.clock;
+    final today = clock.isSynced ? clock.portalTodayUtc : DateTime.now().toUtc();
+    final todayUtc = DateTime.utc(today.year, today.month, today.day);
+
+    final dates = _targetDates();
+    if (dates.isNotEmpty) {
+      return ServiceCalendar()
+              .servableDates(dates, slot)
+              .firstOrNull ??
+          todayUtc;
+    }
+    return todayUtc;
   }
 
   /// Saves a changed hunt configuration, and re-reads the menu if the target

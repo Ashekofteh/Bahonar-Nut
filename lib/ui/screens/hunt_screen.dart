@@ -549,9 +549,16 @@ class _DateRow extends StatelessWidget {
         final last = dates.last;
         final servable = calendar.servableDates(dates, slot);
 
+        final initialDate = (date != null &&
+                !date!.isBefore(first) &&
+                !date!.isAfter(last) &&
+                calendar.isServedOn(date!, slot))
+            ? date!
+            : (servable.isNotEmpty ? servable.first : (date ?? first));
+
         final picked = await showJalaliDatePicker(
           context: context,
-          initial: date ?? first,
+          initial: initialDate,
           first: first,
           last: last,
           // A day the halls are closed for this meal has no listing, so it is

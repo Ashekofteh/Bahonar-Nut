@@ -186,6 +186,38 @@ void main() {
       expect(find.textContaining('۰۹:۰۰'), findsWidgets,
           reason: 'a lunch hunt peaks in the morning');
     });
+
+    testWidgets('tomorrow Saturday can be selected when today is Friday',
+        (tester) async {
+      HuntConfig? changed;
+      // Friday 2026-10-30 (8 Aban)
+      final targetDates = List.generate(
+        14,
+        (i) => DateTime.utc(2026, 10, 30 + i),
+      );
+
+      await tester.pumpWidget(wrap(HuntScreen(
+        config: HuntConfig(
+          targetSlot: MealSlot.lunch,
+          targetDate: DateTime.utc(2026, 10, 31),
+        ),
+        targetDates: targetDates,
+        dishes: dishes,
+        halls: const [central, technical],
+        onConfigChanged: (c) => changed = c,
+      )));
+
+      // Tap on the date picker row
+      await tester.tap(find.text('تاریخ'));
+      await tester.pumpAndSettle();
+
+      // In Aban 1405: Friday is 8, Saturday tomorrow is 9
+      await tester.tap(find.text('۹'));
+      await tester.pumpAndSettle();
+
+      expect(changed, isNotNull);
+      expect(changed!.targetDate, DateTime.utc(2026, 10, 31));
+    });
   });
 
   group('the screen', () {
