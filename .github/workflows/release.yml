@@ -1,4 +1,4 @@
-name: Build and Release Beta APK
+name: Build and Release Multi-Platform (Android, Windows, macOS)
 
 on:
   push:
@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build & Release Beta APK
+  build-android:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -52,13 +52,117 @@ jobs:
           mkdir -p release-output
           cp build/app/outputs/flutter-apk/app-release.apk release-output/selfiyar-beta.apk
 
-      - name: Upload APK as Workflow Artifact
+      - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: selfiyar-beta-apk
+          name: selfiyar-android-apk
           path: release-output/selfiyar-beta.apk
 
-      - name: Create or Update GitHub Beta Release
+  build-windows:
+    name: Build Windows Desktop (x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build Windows Release
+        run: flutter build windows --release
+
+      - name: Package Windows ZIP
+        shell: pwsh
+        run: |
+          $releaseDir = "build\windows\x64\runner\Release"
+          Copy-Item "$releaseDir\bahonar_nut.exe" "$releaseDir\Selfiyar.exe" -Force
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath "selfiyar-windows-x64.zip" -Force
+
+      - name: Upload Windows ZIP Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfiyar-windows-zip
+          path: selfiyar-windows-x64.zip
+
+  build-macos:
+    name: Build macOS Desktop
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build macOS Release
+        run: flutter build macos --release
+
+      - name: Package macOS Application Bundle
+        run: |
+          cd build/macos/Build/Products/Release
+          if [ -d "Selfiyar.app" ]; then
+            ditto -c -k --sequesterRsrc --keepParent Selfiyar.app ../../../../../selfiyar-macos.zip
+          elif [ -d "bahonar_nut.app" ]; then
+            ditto -c -k --sequesterRsrc --keepParent bahonar_nut.app ../../../../../selfiyar-macos.zip
+          fi
+          cd ../../../../..
+
+      - name: Upload macOS ZIP Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfiyar-macos-zip
+          path: selfiyar-macos.zip
+
+  publish-release:
+    name: Publish Multi-Platform Release
+    needs: [build-android, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: selfiyar-android-apk
+          path: release-assets
+
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: selfiyar-windows-zip
+          path: release-assets
+
+      - name: Download macOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: selfiyar-macos-zip
+          path: release-assets
+
+      - name: Publish or Update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -70,15 +174,22 @@ jobs:
           echo "Publishing release for tag: $RELEASE_TAG ..."
 
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists. Uploading artifact..."
-            gh release upload "$RELEASE_TAG" "release-output/selfiyar-beta.apk#selfiyar-beta.apk" --clobber
+            echo "Release $RELEASE_TAG already exists. Uploading all platform artifacts..."
+            gh release upload "$RELEASE_TAG" \
+              "release-assets/selfiyar-beta.apk#selfiyar-beta.apk" \
+              "release-assets/selfiyar-windows-x64.zip#selfiyar-windows-x64.zip" \
+              "release-assets/selfiyar-macos.zip#selfiyar-macos.zip" \
+              --clobber
             gh release edit "$RELEASE_TAG" \
               --title "سِلفیار نسخه آزمایشی بتا ($RELEASE_TAG)" \
               -F .github/RELEASE_NOTES_BETA.md \
               --prerelease
           else
             echo "Creating new release $RELEASE_TAG..."
-            gh release create "$RELEASE_TAG" "release-output/selfiyar-beta.apk#selfiyar-beta.apk" \
+            gh release create "$RELEASE_TAG" \
+              "release-assets/selfiyar-beta.apk#selfiyar-beta.apk" \
+              "release-assets/selfiyar-windows-x64.zip#selfiyar-windows-x64.zip" \
+              "release-assets/selfiyar-macos.zip#selfiyar-macos.zip" \
               --title "سِلفیار نسخه آزمایشی بتا ($RELEASE_TAG)" \
               -F .github/RELEASE_NOTES_BETA.md \
               --prerelease
