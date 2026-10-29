@@ -978,7 +978,7 @@ class _RateCard extends StatelessWidget {
             value: rate.peakInterval,
             min: HuntBounds.minPeakInterval,
             max: HuntBounds.maxPeakInterval,
-            accent: _accentFor(rate.peakInterval),
+            accent: _accentFor(rate.peakInterval, context),
             onChanged: (d) => onChanged(
               config.copyWith(rate: rate.copyWith(peakInterval: d)),
             ),
@@ -989,7 +989,7 @@ class _RateCard extends StatelessWidget {
             value: rate.offPeakInterval,
             min: HuntBounds.minOffPeakInterval,
             max: HuntBounds.maxOffPeakInterval,
-            accent: _accentFor(rate.offPeakInterval),
+            accent: _accentFor(rate.offPeakInterval, context),
             onChanged: (d) => onChanged(
               config.copyWith(rate: rate.copyWith(offPeakInterval: d)),
             ),
@@ -1024,12 +1024,15 @@ class _RateCard extends StatelessWidget {
 
   /// The band colour for an interval: green when safe, amber near the risk
   /// threshold, red at the aggressive extreme.
-  static Color _accentFor(Duration interval) {
+  static Color _accentFor(Duration interval, [BuildContext? context]) {
+    final isDark = context != null && Theme.of(context).brightness == Brightness.dark;
     if (interval < HuntBounds.riskAcknowledgementThreshold) {
-      return AppColors.released;
+      return isDark ? AppColors.releasedDark : AppColors.released;
     }
-    if (interval < const Duration(seconds: 20)) return AppColors.closing;
-    return AppColors.held;
+    if (interval < const Duration(seconds: 20)) {
+      return isDark ? AppColors.closingDark : AppColors.closing;
+    }
+    return isDark ? AppColors.heldDark : AppColors.held;
   }
 }
 

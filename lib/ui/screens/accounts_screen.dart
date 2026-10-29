@@ -49,6 +49,15 @@ class _AccountsScreenState extends State<AccountsScreen> {
           appBar: AppBar(
             title: const Text('حساب‌ها'),
             actions: [
+              IconButton(
+                onPressed: () => _chooseThemeMode(context),
+                icon: Icon(switch (widget.state.themeMode) {
+                  ThemeMode.system => Icons.brightness_auto_outlined,
+                  ThemeMode.light => Icons.light_mode_outlined,
+                  ThemeMode.dark => Icons.dark_mode_outlined,
+                }),
+                tooltip: 'حالت پوسته (روشن / تاریک / خودکار)',
+              ),
               if (widget.onRefresh != null)
                 IconButton(
                   onPressed: widget.state.isSyncing ? null : widget.onRefresh,
@@ -97,6 +106,61 @@ class _AccountsScreenState extends State<AccountsScreen> {
         );
       },
     );
+  }
+
+  Future<void> _chooseThemeMode(BuildContext context) async {
+    final currentMode = widget.state.themeMode;
+    final selected = await showDialog<ThemeMode>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.palette_outlined),
+            SizedBox(width: 8),
+            Text('حالت پوسته برنامه'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RadioListTile<ThemeMode>(
+              value: ThemeMode.system,
+              groupValue: currentMode,
+              title: const Text('پیرو سیستم (خودکار)'),
+              subtitle: const Text('هماهنگ با حالت روز یا شب گوشی'),
+              secondary: const Icon(Icons.brightness_auto),
+              onChanged: (mode) => Navigator.of(dialogCtx).pop(mode),
+            ),
+            RadioListTile<ThemeMode>(
+              value: ThemeMode.light,
+              groupValue: currentMode,
+              title: const Text('حالت روشن'),
+              subtitle: const Text('زمینه روشن مناسب برای روز'),
+              secondary: const Icon(Icons.light_mode),
+              onChanged: (mode) => Navigator.of(dialogCtx).pop(mode),
+            ),
+            RadioListTile<ThemeMode>(
+              value: ThemeMode.dark,
+              groupValue: currentMode,
+              title: const Text('حالت تاریک'),
+              subtitle: const Text('زمینه تیره برای کاهش خستگی چشم'),
+              secondary: const Icon(Icons.dark_mode),
+              onChanged: (mode) => Navigator.of(dialogCtx).pop(mode),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('انصراف'),
+          ),
+        ],
+      ),
+    );
+
+    if (selected != null && selected != currentMode) {
+      await widget.state.setThemeMode(selected);
+    }
   }
 
   Future<void> _addAccount(BuildContext context) async {

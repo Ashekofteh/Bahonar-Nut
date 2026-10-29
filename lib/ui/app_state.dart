@@ -7,7 +7,7 @@ library;
 /// than the problem needs. The domain logic lives in `lib/core` and is unit
 /// tested there; this class only holds the results and forwards intent.
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import '../core/bank_card.dart';
 import '../core/bank_card_store.dart';
 
@@ -32,9 +32,12 @@ class AppState extends ChangeNotifier {
     this.huntConfigStore,
     this.credentialStore,
     this.bankCardStore,
+    this.plainStore,
     LocalMealStore? mealStore,
     this._transactions = const [],
-  }) : mealStore = mealStore ?? LocalMealStore();
+    ThemeMode themeMode = ThemeMode.system,
+  })  : mealStore = mealStore ?? LocalMealStore(),
+        _themeMode = themeMode;
 
   /// Where saved accounts are persisted.
   final AccountStore accountStore;
@@ -52,6 +55,26 @@ class AppState extends ChangeNotifier {
   /// secure store — in tests, or before the platform layer is wired.
   final SecureCredentialStore? credentialStore;
   final BankCardStore? bankCardStore;
+  final PlainStore? plainStore;
+
+  ThemeMode _themeMode;
+  ThemeMode get themeMode => _themeMode;
+
+  /// Changes the application theme mode and persists it.
+  Future<void> setThemeMode(ThemeMode mode) async {
+    if (_themeMode == mode) return;
+    _themeMode = mode;
+    notifyListeners();
+    final store = plainStore;
+    if (store != null) {
+      final name = switch (mode) {
+        ThemeMode.system => 'system',
+        ThemeMode.light => 'light',
+        ThemeMode.dark => 'dark',
+      };
+      await store.writeString(StoreKeys.themeMode, name);
+    }
+  }
 
   /// The local mirror of what the student holds. The reminders read from here,
   /// so they work offline.
@@ -230,6 +253,17 @@ class AppState extends ChangeNotifier {
     await _loadHuntConfigs();
     if (bankCardStore != null) {
       _savedBankCards = await bankCardStore!.loadCards();
+    }
+    final store = plainStore;
+    if (store != null) {
+      final savedMode = await store.readString(StoreKeys.themeMode);
+      if (savedMode == 'dark') {
+        _themeMode = ThemeMode.dark;
+      } else if (savedMode == 'light') {
+        _themeMode = ThemeMode.light;
+      } else if (savedMode == 'system') {
+        _themeMode = ThemeMode.system;
+      }
     }
     _loaded = true;
     notifyListeners();

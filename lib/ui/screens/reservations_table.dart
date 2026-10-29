@@ -172,12 +172,12 @@ class _DayHeader extends StatelessWidget {
           const SizedBox(width: 8),
           _DayCount(
             label: '${toPersianDigits(held)} رزرو',
-            colour: AppColors.held,
+            colour: AppColors.heldOf(context),
           ),
           const SizedBox(width: 6),
           _DayCount(
             label: '${toPersianDigits(open)} باز',
-            colour: AppColors.secondary,
+            colour: theme.colorScheme.secondary,
           ),
         ],
       ),
@@ -354,7 +354,7 @@ class _SlotBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colour = switch (status) {
-      MealRowStatus.held || MealRowStatus.bought => AppColors.held,
+      MealRowStatus.held || MealRowStatus.bought => AppColors.heldOf(context),
       MealRowStatus.bookable => theme.colorScheme.secondary,
       MealRowStatus.locked || MealRowStatus.heldLocked =>
         theme.colorScheme.outline,
@@ -399,7 +399,7 @@ class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colour = switch (status) {
-      MealRowStatus.held || MealRowStatus.bought => AppColors.held,
+      MealRowStatus.held || MealRowStatus.bought => AppColors.heldOf(context),
       MealRowStatus.bookable => theme.colorScheme.secondary,
       MealRowStatus.locked || MealRowStatus.heldLocked =>
         theme.colorScheme.outline,

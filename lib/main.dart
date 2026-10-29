@@ -56,6 +56,7 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
       huntConfigStore: _services.huntConfigStore,
       credentialStore: _services.credentialStore,
       bankCardStore: _services.bankCardStore,
+      plainStore: _services.plainStore,
       // The **shared** mirror: the same store the portal sync writes, the
       // reservations screen reads, and the reminder service digests. A second
       // instance here would leave every one of them looking at an empty store.
@@ -82,22 +83,26 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'سِلفیار',
-      debugShowCheckedModeBanner: false,
-      theme: buildLightTheme(),
-      darkTheme: buildDarkTheme(),
-      // Persian is right-to-left, and the layout must follow: an RTL app with an
-      // LTR layout mirrors the navigation bar, the back gesture and the text
-      // alignment, which is not a detail.
-      locale: const Locale('fa', 'IR'),
-      supportedLocales: const [Locale('fa', 'IR')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      home: HomeShell(state: _state, services: _services),
+    return ListenableBuilder(
+      listenable: _state,
+      builder: (context, _) => MaterialApp(
+        title: 'سِلفیار',
+        debugShowCheckedModeBanner: false,
+        theme: buildLightTheme(),
+        darkTheme: buildDarkTheme(),
+        themeMode: _state.themeMode,
+        // Persian is right-to-left, and the layout must follow: an RTL app with an
+        // LTR layout mirrors the navigation bar, the back gesture and the text
+        // alignment, which is not a detail.
+        locale: const Locale('fa', 'IR'),
+        supportedLocales: const [Locale('fa', 'IR')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: HomeShell(state: _state, services: _services),
+      ),
     );
   }
 }

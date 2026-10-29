@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme.dart';
 
 import '../../core/hunt_notify.dart' show mealSlotPersian;
 import '../../core/models.dart';
@@ -404,7 +405,7 @@ class _BatchBookingSheetState extends State<BatchBookingSheet> {
                           ] else if (dishes.isNotEmpty) ...[
                             Row(
                               children: [
-                                const Icon(Icons.check_circle_outline, size: 16, color: Colors.green),
+                                Icon(Icons.check_circle_outline, size: 16, color: AppColors.heldOf(context)),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
@@ -569,10 +570,10 @@ class _BatchBookingSheetState extends State<BatchBookingSheet> {
                           await widget.onConfirm(offerings);
                         },
                   icon: _busy
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(strokeWidth: 2, color: theme.colorScheme.onPrimary),
                         )
                       : const Icon(Icons.check),
                   label: Text('تایید و ثبت رزرو (${toPersianDigits(widget.selectedRows.length)} وعده)'),

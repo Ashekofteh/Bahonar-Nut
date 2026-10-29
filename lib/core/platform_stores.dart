@@ -84,6 +84,7 @@ abstract final class StoreKeys {
   static const purchaseInFlight = 'purchase.inFlight';
   static const lastSyncAt = 'sync.lastAt';
   static const huntPrefix = 'hunt.';
+  static const themeMode = 'settings.themeMode';
 
   /// The key holding one account's record.
   static String account(AccountId id) => '$accountPrefix$id';

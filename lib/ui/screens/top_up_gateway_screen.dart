@@ -31,6 +31,7 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import '../theme.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/bank_card.dart';
@@ -724,13 +725,13 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
               onPressed: _finishAndReturn,
               icon: Icon(
                 Icons.check_circle_outline,
-                color: _paymentSuccessDetected ? Colors.green.shade800 : null,
+                color: _paymentSuccessDetected ? AppColors.heldOf(context) : null,
               ),
               label: Text(
                 'تکمیل و بازگشت',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: _paymentSuccessDetected ? Colors.green.shade900 : null,
+                  color: _paymentSuccessDetected ? AppColors.heldOf(context) : null,
                 ),
               ),
             ),
