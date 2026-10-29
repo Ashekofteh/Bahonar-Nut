@@ -70,6 +70,9 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/images/app_logo.png
+
   # Vazirmatn — the standard Persian UI typeface, SIL Open Font License 1.1
   # (licence text in assets/fonts/OFL.txt). Bundled rather than fetched at
   # runtime so the app works offline and renders Persian identically on every

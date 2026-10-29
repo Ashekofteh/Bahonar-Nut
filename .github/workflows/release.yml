@@ -73,13 +73,13 @@ jobs:
             echo "Release $RELEASE_TAG already exists. Uploading artifact..."
             gh release upload "$RELEASE_TAG" "release-output/bahonar-nut-beta.apk#bahonar-nut-beta.apk" --clobber
             gh release edit "$RELEASE_TAG" \
-              --title "باهنر نُت نسخه آزمایشی بتا ($RELEASE_TAG)" \
+              --title "سِلفیار نسخه آزمایشی بتا ($RELEASE_TAG)" \
               -F .github/RELEASE_NOTES_BETA.md \
               --prerelease
           else
             echo "Creating new release $RELEASE_TAG..."
             gh release create "$RELEASE_TAG" "release-output/bahonar-nut-beta.apk#bahonar-nut-beta.apk" \
-              --title "باهنر نُت نسخه آزمایشی بتا ($RELEASE_TAG)" \
+              --title "سِلفیار نسخه آزمایشی بتا ($RELEASE_TAG)" \
               -F .github/RELEASE_NOTES_BETA.md \
               --prerelease
           fi

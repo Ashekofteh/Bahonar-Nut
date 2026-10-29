@@ -82,7 +82,7 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'باهنر نُت',
+      title: 'سِلفیار',
       debugShowCheckedModeBanner: false,
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
