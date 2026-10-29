@@ -190,7 +190,10 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                 _AccountPicker(
                   accounts: accounts,
                   activeId: accountId,
-                  onChanged: widget.state.selectHuntAccount,
+                  onChanged: (id) {
+                    widget.state.selectHuntAccount(id);
+                    widget.onRefresh?.call();
+                  },
                 ),
               _WeekNavigator(
                 weekOffset: _weekOffset,

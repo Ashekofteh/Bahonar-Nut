@@ -235,72 +235,107 @@ class _MealRowTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          _SlotBadge(slot: row.slot, status: row.status),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  row.dishName ?? _bookableLabel(row),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () {
+        if (selectionMode && onToggleSelect != null) {
+          if (row.status == MealRowStatus.bookable) {
+            onToggleSelect!();
+          }
+        } else if (row.status == MealRowStatus.bookable) {
+          onBook();
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _SlotBadge(slot: row.slot, status: row.status),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    row.status == MealRowStatus.bookable
+                        ? 'منو: ${row.dishName ?? _bookableLabel(row)}'
+                        : (row.dishName ?? _bookableLabel(row)),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    _StatusChip(status: row.status),
-                    if (row.hallName != null) ...[
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          row.hallName!,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      _StatusChip(status: row.status),
+                      if (row.status == MealRowStatus.bookable && row.optionCount > 1) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(6),
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          child: Text(
+                            '${toPersianDigits(row.optionCount)} نوع غذا',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSecondaryContainer,
+                              fontSize: 10,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
+                      if (row.hallName != null) ...[
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            row.hallName!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          if (row.priceRial != null)
-            MoneyText(row.priceRial!, style: theme.textTheme.titleSmall),
-          const SizedBox(width: 4),
-          _Action(
-            row: row,
-            busy: busy,
-            onBook: onBook,
-            onCancel: onCancel,
-            onSell: onSell,
-            onForgotReceipt: onForgotReceipt,
-            selectionMode: selectionMode,
-            isSelected: isSelected,
-            onToggleSelect: onToggleSelect,
-          ),
-        ],
+            const SizedBox(width: 8),
+            if (row.priceRial != null)
+              MoneyText(row.priceRial!, style: theme.textTheme.titleSmall),
+            const SizedBox(width: 4),
+            _Action(
+              row: row,
+              busy: busy,
+              onBook: onBook,
+              onCancel: onCancel,
+              onSell: onSell,
+              onForgotReceipt: onForgotReceipt,
+              selectionMode: selectionMode,
+              isSelected: isSelected,
+              onToggleSelect: onToggleSelect,
+            ),
+          ],
+        ),
       ),
     );
   }
 
   /// What a bookable row says instead of a dish name.
-  static String _bookableLabel(MealRow row) =>
-      row.optionCount > 1
-          ? '${toPersianDigits(row.optionCount)} غذای موجود'
-          : 'یک غذای موجود';
+  static String _bookableLabel(MealRow row) {
+    if (row.availableDishes.isNotEmpty) {
+      return row.availableDishes.join(' یا ');
+    }
+    return row.optionCount > 1
+        ? '${toPersianDigits(row.optionCount)} غذای موجود'
+        : 'یک غذای موجود';
+  }
 }
 
 /// The leading badge: the meal's slot, coloured by its state.

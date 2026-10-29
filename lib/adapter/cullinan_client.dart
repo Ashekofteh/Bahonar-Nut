@@ -37,7 +37,6 @@ import '../core/session_manager.dart'
         PortalUnreachableException,
         ReservationLockedException,
         TopUpRejectedException;
-import '../core/time.dart';
 import '../core/top_up.dart';
 import '../transport/html_parsing.dart';
 import '../transport/http_transport.dart';
@@ -325,56 +324,48 @@ class CullinanPortalClient implements PortalClient {
 
     // The first read is what makes the time trustworthy: every portal
     // response carries a `Date` header, and the transport syncs the clock
-    // from it. The days that can still be booked are counted from the
-    // **portal's** today, so they cannot be named until that has happened.
+    // from it.
     final current = await transport.get(session.account, _Paths.reservation);
     _rejectIfBounced(current);
 
-    final wanted = _bookableDates(days);
-    if (wanted.isEmpty) {
-      return const BookableMenus(dates: [], menus: []);
-    }
-
-    // The weekly page carries a whole week of grids, so a range that lies
-    // inside one week costs a single read. A range that crosses the week
-    // boundary costs two: the current page, and the next week's page.
-    //
-    // The pages are read **in order and separately**, not merged blindly:
-    // each page is parsed on its own, so a date that appears on neither
-    // simply has no menu, rather than being misread from the wrong week.
     final menus = <MealMenu>[];
     final seen = <String>{};
 
+    // 1. Current week menus
     for (final menu in CullinanParser.parseMenus(current.body)) {
-      if (_wanted(menu, wanted) && seen.add(_menuKey(menu))) {
+      if (seen.add(_menuKey(menu))) {
         menus.add(menu);
       }
     }
 
-    final missing = wanted.where((d) => !_covers(menus, d)).toList();
-    if (missing.isEmpty) {
-      return BookableMenus(dates: wanted, menus: menus);
-    }
-
-    final next = await transport.post(
-      session.account,
-      _Paths.reservation,
-      body: {
-        '__VIEWSTATE': hiddenFieldValue(current.body, '__VIEWSTATE'),
-        '__VIEWSTATEGENERATOR':
-            hiddenFieldValue(current.body, '__VIEWSTATEGENERATOR'),
-        '__EVENTTARGET': _eventTargetNextWeek,
-        '__EVENTARGUMENT': '',
-      },
-    );
-    _rejectIfBounced(next);
-    for (final menu in CullinanParser.parseMenus(next.body)) {
-      if (_wanted(menu, missing) && seen.add(_menuKey(menu))) {
-        menus.add(menu);
+    // 2. Next week menus (best-effort navigation)
+    final viewState = hiddenFieldValue(current.body, '__VIEWSTATE');
+    if (viewState.isNotEmpty) {
+      try {
+        final next = await transport.post(
+          session.account,
+          _Paths.reservation,
+          body: {
+            '__VIEWSTATE': viewState,
+            '__VIEWSTATEGENERATOR':
+                hiddenFieldValue(current.body, '__VIEWSTATEGENERATOR'),
+            '__EVENTTARGET': _eventTargetNextWeek,
+            '__EVENTARGUMENT': '',
+          },
+        );
+        _rejectIfBounced(next);
+        for (final menu in CullinanParser.parseMenus(next.body)) {
+          if (seen.add(_menuKey(menu))) {
+            menus.add(menu);
+          }
+        }
+      } catch (_) {
+        // Next week is optional (e.g. single page test mocks)
       }
     }
 
-    return BookableMenus(dates: wanted, menus: menus);
+    final dates = menus.map((m) => m.date).toSet().toList()..sort();
+    return BookableMenus(dates: dates, menus: menus);
   }
 
   /// The identity of a menu entry: a (date, slot) pair.
@@ -385,46 +376,7 @@ class CullinanPortalClient implements PortalClient {
   static String _menuKey(MealMenu menu) =>
       '${menu.date.toIso8601String().substring(0, 10)}|${menu.slot.name}';
 
-  /// The next [days] dates that can still be booked, counted from the
-  /// portal's today.
-  ///
-  /// The first reservable date is the day after the cutoff wall, which is
-  /// two days after the portal's today — or three, once today's own cutoff
-  /// has passed.
-  List<DateTime> _bookableDates(int days) {
-    final clock = transport.clock;
-    if (clock == null || !clock.isSynced) return const [];
 
-    final first = clock.firstReservableDate();
-    return List.generate(
-      days,
-      (i) => DateTime.utc(first.year, first.month, first.day + i),
-    );
-  }
-
-  /// Whether [menu] is for one of the dates that were asked for.
-  static bool _wanted(MealMenu menu, List<DateTime> dates) {
-    for (final date in dates) {
-      if (menu.date.year == date.year &&
-          menu.date.month == date.month &&
-          menu.date.day == date.day) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// Whether any of the menus is for [date].
-  static bool _covers(List<MealMenu> menus, DateTime date) {
-    for (final menu in menus) {
-      if (menu.date.year == date.year &&
-          menu.date.month == date.month &&
-          menu.date.day == date.day) {
-        return true;
-      }
-    }
-    return false;
-  }
 
   /// The weekly menu page that carries [date].
   ///

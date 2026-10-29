@@ -77,16 +77,14 @@ class MealRow {
     this.hallName,
     this.priceRial,
     this.optionCount = 0,
+    this.availableDishes = const [],
   });
 
   final DateTime date;
   final MealSlot slot;
   final MealRowStatus status;
 
-  /// The dish of a **held** meal.
-  ///
-  /// Null for a bookable meal: several dishes are on offer and the student
-  /// picks one when they book.
+  /// The dish of a **held** meal, or the name(s) of dishes available for booking.
   final String? dishName;
 
   /// The hall a held meal is in.
@@ -100,6 +98,9 @@ class MealRow {
 
   /// How many dishes the portal offers for a bookable meal.
   final int optionCount;
+
+  /// The list of available dish names on offer for this meal.
+  final List<String> availableDishes;
 
   /// Whether the student can cancel this meal.
   ///
@@ -194,13 +195,20 @@ List<MealRow> buildMealRows({
         !clock.isReservable(dates[key]!);
 
     final cheapest = _cheapest(menu);
+    final dishDisplay = menu.dishes.length == 1
+        ? menu.dishes.first.name
+        : (menu.dishes.isNotEmpty
+            ? menu.dishes.map((d) => d.name).join(' یا ')
+            : null);
 
     rows.add(MealRow(
       date: dates[key]!,
       slot: slots[key]!,
       status: locked ? MealRowStatus.locked : MealRowStatus.bookable,
+      dishName: dishDisplay,
       priceRial: cheapest?.priceRial,
       optionCount: menu.dishes.length,
+      availableDishes: menu.dishes.map((d) => d.name).toList(),
     ));
   }
 
