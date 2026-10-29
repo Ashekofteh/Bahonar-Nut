@@ -915,6 +915,7 @@ class _HomeShellState extends State<HomeShell> {
       banks: banks,
       suggestedAmounts: _topUpSuggestions(),
       initialAmountRial: suggestedAmountRial,
+      savedCards: widget.state.savedBankCards,
       onSubmit: (amount, bank) async {
         amountRial = amount;
         return _beginTopUp(account, amount, bank);
@@ -981,6 +982,9 @@ class _HomeShellState extends State<HomeShell> {
           gateway: gateway,
           cookies: cookies,
           portalHost: Uri.parse(portalBaseUrl).host,
+          savedCards: widget.state.savedBankCards,
+          onSaveCard: widget.state.saveBankCard,
+          onDeleteCard: widget.state.deleteBankCard,
           onReturned: () => _settleTopUp(account, amountRial),
         ),
       ),

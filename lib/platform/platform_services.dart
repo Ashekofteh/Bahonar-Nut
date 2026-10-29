@@ -14,6 +14,7 @@ import 'dart:async';
 import '../adapter/captcha_solver.dart';
 import '../adapter/cullinan_client.dart';
 import '../core/account_store.dart';
+import '../core/bank_card_store.dart';
 import '../core/hunt_store.dart';
 import '../core/local_meal_store.dart';
 import '../core/platform_stores.dart';
@@ -126,6 +127,10 @@ class AppServices {
   /// The reminder configuration, persisted in the plain store.
   ReminderConfigStore get reminderConfigStore =>
       PreferencesReminderConfigStore(plainStore);
+
+  /// The saved bank cards store.
+  BankCardStore get bankCardStore =>
+      PlatformBankCardStore(plainStore: plainStore);
 
   /// The local mirror of held meals.
   ///

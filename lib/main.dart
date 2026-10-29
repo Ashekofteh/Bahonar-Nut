@@ -55,6 +55,7 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
       reminderConfigStore: _services.reminderConfigStore,
       huntConfigStore: _services.huntConfigStore,
       credentialStore: _services.credentialStore,
+      bankCardStore: _services.bankCardStore,
       // The **shared** mirror: the same store the portal sync writes, the
       // reservations screen reads, and the reminder service digests. A second
       // instance here would leave every one of them looking at an empty store.

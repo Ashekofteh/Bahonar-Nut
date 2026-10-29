@@ -1,12 +1,15 @@
+library;
+
 /// Application state, held in one place and shared by the screens.
 ///
 /// Deliberately a plain [ChangeNotifier] rather than a state-management
 /// package: the app has one store, and a framework would be more moving parts
 /// than the problem needs. The domain logic lives in `lib/core` and is unit
 /// tested there; this class only holds the results and forwards intent.
-library;
 
 import 'package:flutter/foundation.dart';
+import '../core/bank_card.dart';
+import '../core/bank_card_store.dart';
 
 import '../core/account.dart';
 import '../core/account_store.dart';
@@ -28,6 +31,7 @@ class AppState extends ChangeNotifier {
     required this.reminderConfigStore,
     this.huntConfigStore,
     this.credentialStore,
+    this.bankCardStore,
     LocalMealStore? mealStore,
     this._transactions = const [],
   }) : mealStore = mealStore ?? LocalMealStore();
@@ -47,6 +51,7 @@ class AppState extends ChangeNotifier {
   /// Where credentials are persisted, encrypted. Null when the app has no
   /// secure store — in tests, or before the platform layer is wired.
   final SecureCredentialStore? credentialStore;
+  final BankCardStore? bankCardStore;
 
   /// The local mirror of what the student holds. The reminders read from here,
   /// so they work offline.
@@ -178,6 +183,36 @@ class AppState extends ChangeNotifier {
   List<StoredMeal> mealsFor(AccountId accountId) =>
       mealStore.forAccount(accountId);
 
+
+  List<SavedBankCard> _savedBankCards = const [];
+
+  /// The list of saved bank cards, newest first.
+  List<SavedBankCard> get savedBankCards => List.unmodifiable(_savedBankCards);
+
+  /// Saves or updates a bank card and updates state.
+  Future<void> saveBankCard(SavedBankCard card) async {
+    await bankCardStore?.saveCard(card);
+    if (bankCardStore != null) {
+      _savedBankCards = await bankCardStore!.loadCards();
+    } else {
+      final list = _savedBankCards.where((c) => c.cleanPan != card.cleanPan).toList();
+      list.insert(0, card);
+      _savedBankCards = list;
+    }
+    notifyListeners();
+  }
+
+  /// Removes a saved bank card by id.
+  Future<void> deleteBankCard(String id) async {
+    await bankCardStore?.deleteCard(id);
+    if (bankCardStore != null) {
+      _savedBankCards = await bankCardStore!.loadCards();
+    } else {
+      _savedBankCards = _savedBankCards.where((c) => c.id != id).toList();
+    }
+    notifyListeners();
+  }
+
   // --------------------------------------------------------------- loading
 
   /// Loads the persisted state. Safe to call more than once.
@@ -185,6 +220,9 @@ class AppState extends ChangeNotifier {
     _accounts = await accountStore.loadAll();
     _reminderConfig = await reminderConfigStore.load();
     await _loadHuntConfigs();
+    if (bankCardStore != null) {
+      _savedBankCards = await bankCardStore!.loadCards();
+    }
     _loaded = true;
     notifyListeners();
     // The configuration is only readable once it has been loaded, so anything

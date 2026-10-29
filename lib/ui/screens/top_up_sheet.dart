@@ -25,6 +25,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/bank_card.dart';
 import '../../core/persian.dart';
 import '../../core/top_up.dart';
 import '../widgets.dart';
@@ -38,6 +39,7 @@ class TopUpSheet extends StatefulWidget {
     required this.onSubmit,
     this.suggestedAmounts = const [],
     this.initialAmountRial,
+    this.savedCards = const [],
   });
 
   /// The account's balance now, in Rial.
@@ -55,6 +57,9 @@ class TopUpSheet extends StatefulWidget {
   /// Optional initial amount to pre-fill in Rial (e.g. from deficit calculation).
   final int? initialAmountRial;
 
+  /// The student's saved bank cards.
+  final List<SavedBankCard> savedCards;
+
   /// Shows the sheet.
   static Future<void> show(
     BuildContext context, {
@@ -63,6 +68,7 @@ class TopUpSheet extends StatefulWidget {
     required Future<String?> Function(int amountRial, TopUpBank bank) onSubmit,
     List<int> suggestedAmounts = const [],
     int? initialAmountRial,
+    List<SavedBankCard> savedCards = const [],
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -75,6 +81,7 @@ class TopUpSheet extends StatefulWidget {
         onSubmit: onSubmit,
         suggestedAmounts: suggestedAmounts,
         initialAmountRial: initialAmountRial,
+        savedCards: savedCards,
       ),
     );
   }
@@ -217,6 +224,40 @@ class _TopUpSheetState extends State<TopUpSheet> {
                   ),
                 ],
 
+                if (widget.savedCards.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Icon(Icons.credit_card, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        'کارت‌های ذخیره‌شده شما برای پرداخت:',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        for (final card in widget.savedCards)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Chip(
+                              avatar: const Icon(Icons.payment, size: 14),
+                              label: Text(
+                                '${card.displayName} (${toPersianDigits(card.lastFourDigits)})',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Text(
                   'پرداخت در صفحه بانک انجام می‌شود. اطلاعات کارت خود را '
