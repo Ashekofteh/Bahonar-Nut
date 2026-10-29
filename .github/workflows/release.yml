@@ -62,24 +62,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          RELEASE_TAG="v1.0.0-beta.1"
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             RELEASE_TAG="${{ github.ref_name }}"
-          else
-            RELEASE_TAG="v1.0.0-beta.${{ github.run_number }}"
           fi
 
-          echo "Publishing release $RELEASE_TAG ..."
+          echo "Publishing release for tag: $RELEASE_TAG ..."
 
-          gh release create "$RELEASE_TAG" "release-output/bahonar-nut-beta.apk#Bahonar Nut Android App (Beta)" \
-            --title "باهنر نُت نسخه آزمایشی بتا ($RELEASE_TAG)" \
-            --notes "## باهنر نُت — اپلیکیشن رزرو و شکار غذای دانشگاه شهید باهنر کرمان (نسخه بتا)
-
-### ✨ ویژگی‌های نسخه بتا:
-- 👥 **پشتیبانی کامل از سلف‌های خواهران و برادران:** سازگاری داینامیک با سلف‌های مرکزی برادران/خواهران و فنی برادران/خواهران بدون هیچ‌گونه باگ یا وابستگی به متن فارسی.
-- 💳 **تشخیص هوشمند کسری موجودی و هدایت خودکار:** محاسبه دقیق کسری موجودی در رزرو تکی یا چندگانه و هدایت مستقیم کاربر به درگاه پرداخت با مبلغ پیش‌فرض بر مبنای تومان.
-- 🔄 **رزرو خودکار پس از پرداخت موفق:** رزرو خودکار وعده‌های انتخاب‌شده به محض اتمام تراکنش پرداخت اینترنتی.
-- 🍱 **سبد غذایی ثانویه و فروش غذا (`FoodBasketSale`):** امکان عرضه وعده‌های رزروشده جهت فروش در سبد غذایی دانشجویان.
-- 🎯 **سامانه هوشمند و کم‌مصرف شکار غذا (Food Hunt):** اولویت‌بندی غذاها و سلف‌ها، شکار هوشمند در پنجره‌های توزیع با نظارت بر بودجه ترافیکی و بدون مصرف باتری در ساعات غیر اوج.
-- 🧾 **دریافت فیش فراموشی موقت کارت (`ForgotReceipt`):** دریافت و کپی سریع کد فیش فراموشی جهت تحویل به سلف.
-- ⚡ **بهینه‌سازی حداکثری مصرف رم (RAM) و باتری:** هرس خودکار کش محلی، کش سراسری تمپلیت‌های کپچا و مدیریت اتصالات شبکه و چرخه حیات اندروید." \
-            --prerelease
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists. Uploading artifact..."
+            gh release upload "$RELEASE_TAG" "release-output/bahonar-nut-beta.apk#bahonar-nut-beta.apk" --clobber
+            gh release edit "$RELEASE_TAG" \
+              --title "باهنر نُت نسخه آزمایشی بتا ($RELEASE_TAG)" \
+              -F .github/RELEASE_NOTES_BETA.md \
+              --prerelease
+          else
+            echo "Creating new release $RELEASE_TAG..."
+            gh release create "$RELEASE_TAG" "release-output/bahonar-nut-beta.apk#bahonar-nut-beta.apk" \
+              --title "باهنر نُت نسخه آزمایشی بتا ($RELEASE_TAG)" \
+              -F .github/RELEASE_NOTES_BETA.md \
+              --prerelease
+          fi
