@@ -93,14 +93,20 @@ class SavedAccount {
   }
 
   /// A copy with the profile name learned from the portal.
-  SavedAccount withProfileName(String name) => SavedAccount(
-        id: id,
-        studentId: studentId,
-          alias: alias,
-        profileName: name.trim().isEmpty ? null : name.trim(),
-        addedAt: addedAt,
-        lastLoginAt: lastLoginAt,
-      );
+  SavedAccount withProfileName(String name) {
+    final cleaned = name.trim();
+    final profile = cleaned.isEmpty ? null : cleaned;
+    final updatedAlias =
+        (alias == null || alias!.trim().isEmpty) ? profile : alias;
+    return SavedAccount(
+      id: id,
+      studentId: studentId,
+      alias: updatedAlias,
+      profileName: profile,
+      addedAt: addedAt,
+      lastLoginAt: lastLoginAt,
+    );
+  }
 
   /// A copy with the last-login time recorded.
   SavedAccount withLastLogin(DateTime at) => SavedAccount(

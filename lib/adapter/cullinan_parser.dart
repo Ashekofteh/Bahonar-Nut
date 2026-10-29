@@ -717,6 +717,38 @@ abstract final class CullinanParser {
     return out;
   }
 
+  /// Parses the student's name from an authenticated page.
+  ///
+  /// Two sources carry it on authenticated pages:
+  ///   1. `<div id="divUsername" class="profileTitle">رضا شريفي</div>`
+  ///   2. `<label id="cphMain_titleBoxValue">کاربر: ابوالفضل شكفته - 401405035</label>`
+  static String? parseProfileName(String html) {
+    final divUser = elementText(html, 'divUsername');
+    if (divUser != null && divUser.trim().isNotEmpty) {
+      return divUser.trim();
+    }
+
+    final raw = labelText(html, 'cphMain_titleBoxValue') ??
+        elementText(html, 'titleBoxValue');
+    if (raw == null || raw.trim().isEmpty) return null;
+
+    return extractStudentName(raw);
+  }
+
+  /// Extracts the student's name from a string like "کاربر: ابوالفضل شكفته - 401405035".
+  static String? extractStudentName(String text) {
+    var cleaned = text.trim();
+    cleaned = cleaned.replaceFirst(RegExp(r'^کاربر\s*:\s*'), '').trim();
+    if (cleaned.isEmpty) return null;
+    final dashIndex = cleaned.lastIndexOf('-');
+    if (dashIndex != -1) {
+      final namePart = cleaned.substring(0, dashIndex).trim();
+      if (namePart.isNotEmpty) return namePart;
+    }
+    cleaned = cleaned.replaceAll(RegExp(r'\s*\d+\s*$'), '').trim();
+    return cleaned.isNotEmpty ? cleaned : null;
+  }
+
   /// The status of a payment row, read from its icon.
   ///
   /// The icon is the authority. The message is a fallback for a row whose

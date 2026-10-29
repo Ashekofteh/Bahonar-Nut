@@ -215,6 +215,9 @@ class _HomeShellState extends State<HomeShell> {
 
       if (result.ok) {
         widget.state.setBalance(account.id, result.balanceRial ?? 0);
+        if (result.profileName != null && result.profileName!.trim().isNotEmpty) {
+          await widget.state.setProfileName(account.id, result.profileName!.trim());
+        }
         transactions.addAll(result.transactions);
       } else {
         // A CAPTCHA was needed, or the read failed. The student is not being
@@ -570,6 +573,9 @@ class _HomeShellState extends State<HomeShell> {
 
         if (result.ok) {
           widget.state.setBalance(account.id, result.balanceRial ?? 0);
+          if (result.profileName != null && result.profileName!.trim().isNotEmpty) {
+            await widget.state.setProfileName(account.id, result.profileName!.trim());
+          }
           transactions.addAll(result.transactions);
         } else {
           widget.state.setSyncError(account.id, result.error ?? 'خطای نامشخص');
@@ -733,6 +739,9 @@ class _HomeShellState extends State<HomeShell> {
           : await _readAccount(accountId);
       if (syncResult.ok) {
         widget.state.setBalance(accountId, syncResult.balanceRial ?? 0);
+        if (syncResult.profileName != null && syncResult.profileName!.trim().isNotEmpty) {
+          await widget.state.setProfileName(accountId, syncResult.profileName!.trim());
+        }
         widget.state.setTransactions(syncResult.transactions);
       }
     } catch (_) {}

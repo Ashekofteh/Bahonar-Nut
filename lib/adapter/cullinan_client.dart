@@ -291,7 +291,12 @@ class CullinanPortalClient implements PortalClient {
     if (amount == null) {
       throw PortalUnreachableException('موجودی قابل تفسیر نبود: $text');
     }
-    return Balance(amountRial: amount, fetchedAt: _now());
+    final profileName = CullinanParser.parseProfileName(page.body);
+    return Balance(
+      amountRial: amount,
+      fetchedAt: _now(),
+      profileName: profileName,
+    );
   }
 
   @override

@@ -150,6 +150,7 @@ class PortalSync {
           accountId: accountId,
           ok: true,
           balanceRial: balance.amountRial,
+          profileName: balance.profileName,
           reservations: reservations,
           transactions: transactions,
         );

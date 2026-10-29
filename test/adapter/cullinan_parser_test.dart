@@ -287,5 +287,28 @@ void main() {
       expect(parseJalaliDate('شنبه 1405/08/02'), DateTime.utc(2026, 10, 24));
       expect(parseJalaliDate('یکشنبه 1405/07/26'), DateTime.utc(2026, 10, 18));
     });
+
+    test('parses student profile name from captures', () {
+      final html04 = File('captures/04_after_login.html').readAsStringSync();
+      expect(CullinanParser.parseProfileName(html04), 'رضا شريفي');
+
+      final html30 = File('captures/30_reservation_current.html').readAsStringSync();
+      expect(CullinanParser.parseProfileName(html30), 'ابوالفضل شكفته');
+    });
+
+    test('extracts clean student name from raw title strings', () {
+      expect(
+        CullinanParser.extractStudentName('کاربر: ابوالفضل شكفته - 401405035'),
+        'ابوالفضل شكفته',
+      );
+      expect(
+        CullinanParser.extractStudentName('کاربر : رضا شريفي - 401157013'),
+        'رضا شريفي',
+      );
+      expect(
+        CullinanParser.extractStudentName('کاربر: علی محمدی'),
+        'علی محمدی',
+      );
+    });
   });
 }

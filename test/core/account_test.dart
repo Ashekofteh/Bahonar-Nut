@@ -93,14 +93,16 @@ void main() {
   });
 
   group('withProfileName', () {
-    test('records the name learned from the portal', () {
+    test('records the name learned from the portal and sets alias if empty', () {
       final a = account().withProfileName('رضا شريفي');
       expect(a.profileName, 'رضا شريفي');
+      expect(a.alias, 'رضا شريفي');
       expect(a.resolvedName, 'رضا شريفي');
     });
 
     test('does not override an existing alias', () {
       final a = account(alias: 'مBright').withProfileName('رضا شريفي');
+      expect(a.alias, 'مBright');
       expect(a.resolvedName, 'مBright',
           reason: 'the user\'s own name takes precedence');
       expect(a.profileName, 'رضا شريفي',

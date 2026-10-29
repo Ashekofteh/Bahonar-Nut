@@ -310,11 +310,17 @@ class Listing {
 
 /// Account balance snapshot.
 class Balance {
-  const Balance({required this.amountRial, required this.fetchedAt});
+  const Balance({
+    required this.amountRial,
+    required this.fetchedAt,
+    this.profileName,
+  });
 
   final int amountRial;
   final DateTime fetchedAt;
+  final String? profileName;
 
   @override
-  String toString() => 'Balance($amountRial Rial)';
+  String toString() =>
+      'Balance($amountRial Rial${profileName != null ? ", $profileName" : ""})';
 }
