@@ -40,6 +40,7 @@ class ReservationsScreen extends StatefulWidget {
     this.onBatchBook,
     this.onTopUp,
     this.onRefresh,
+    this.onAccountChanged,
     this.menus = const [],
     this.clock,
     this.busy = false,
@@ -68,6 +69,9 @@ class ReservationsScreen extends StatefulWidget {
 
   /// Re-reads the portal.
   final VoidCallback? onRefresh;
+
+  /// Called when the selected account for reservations changes.
+  final void Function(AccountId accountId)? onAccountChanged;
 
   /// The portal's menu for the days that can still be booked.
   final List<MealMenu> menus;
@@ -156,7 +160,7 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
           );
         }
 
-        final accountId = widget.state.activeHuntAccount ?? accounts.first.id;
+        final accountId = widget.state.selectedReservationsAccountId ?? accounts.first.id;
         final allRows = buildMealRows(
           menus: widget.menus,
           held: widget.state.mealsFor(accountId),
@@ -206,9 +210,14 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                 _AccountPicker(
                   accounts: accounts,
                   activeId: accountId,
+                  balanceFor: (id) => widget.state.balanceFor(id),
                   onChanged: (id) {
-                    widget.state.selectHuntAccount(id);
-                    widget.onRefresh?.call();
+                    widget.state.selectReservationsAccount(id);
+                    if (widget.onAccountChanged != null) {
+                      widget.onAccountChanged!(id);
+                    } else {
+                      widget.onRefresh?.call();
+                    }
                   },
                 ),
               _WeekNavigator(
@@ -475,11 +484,13 @@ class _AccountPicker extends StatelessWidget {
     required this.accounts,
     required this.activeId,
     required this.onChanged,
+    this.balanceFor,
   });
 
   final List<SavedAccount> accounts;
   final AccountId activeId;
   final void Function(AccountId) onChanged;
+  final int? Function(AccountId)? balanceFor;
 
   @override
   Widget build(BuildContext context) {
@@ -488,28 +499,68 @@ class _AccountPicker extends StatelessWidget {
     return Container(
       width: double.infinity,
       color: theme.colorScheme.surface,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'حساب',
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+          Row(
+            children: [
+              Icon(
+                Icons.switch_account_outlined,
+                size: 16,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'رزرو برای حساب:',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final account in accounts)
-                ChoiceChip(
-                  label: Text(account.resolvedName),
-                  selected: account.id == activeId,
-                  onSelected: (_) => onChanged(account.id),
-                ),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final account in accounts) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: ChoiceChip(
+                      avatar: CircleAvatar(
+                        radius: 12,
+                        backgroundColor: account.id == activeId
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.surfaceContainerHighest,
+                        child: Text(
+                          account.resolvedName.isNotEmpty
+                              ? account.resolvedName.characters.first
+                              : '؟',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: account.id == activeId
+                                ? theme.colorScheme.onPrimary
+                                : theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      label: Text(
+                        balanceFor?.call(account.id) != null
+                            ? '${account.resolvedName} • ${formatTomanPersian(balanceFor!(account.id)!)}'
+                            : account.resolvedName,
+                      ),
+                      selected: account.id == activeId,
+                      onSelected: (selected) {
+                        if (selected) onChanged(account.id);
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ],
       ),

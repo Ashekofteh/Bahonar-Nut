@@ -33,11 +33,15 @@ class BookingSheet extends StatefulWidget {
     super.key,
     required this.menu,
     required this.onBook,
+    this.accountName,
     this.currentBalanceRial,
     this.onTopUp,
     this.busy = false,
     this.error,
   });
+
+  /// The name of the account this booking is made for.
+  final String? accountName;
 
   /// The menu for the meal being booked.
   final MealMenu menu;
@@ -62,6 +66,7 @@ class BookingSheet extends StatefulWidget {
     BuildContext context, {
     required MealMenu menu,
     required Future<String?> Function(MealOffering offering) onBook,
+    String? accountName,
     int? currentBalanceRial,
     void Function(int deficitRial)? onTopUp,
   }) {
@@ -73,6 +78,7 @@ class BookingSheet extends StatefulWidget {
       builder: (_) => BookingSheet(
         menu: menu,
         onBook: onBook,
+        accountName: accountName,
         currentBalanceRial: currentBalanceRial,
         onTopUp: onTopUp,
       ),
@@ -120,16 +126,54 @@ class _BookingSheetState extends State<BookingSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  '${mealSlotPersian(menu.slot)} — ${formatPersianDate(menu.date)}',
-                  style: theme.textTheme.titleMedium,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'غذای مورد نظر را انتخاب کنید.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${mealSlotPersian(menu.slot)} — ${formatPersianDate(menu.date)}',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'غذای مورد نظر را انتخاب کنید.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (widget.accountName != null) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.7),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.person, size: 14, color: theme.colorScheme.primary),
+                            const SizedBox(width: 4),
+                            Text(
+                              widget.accountName!,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onPrimaryContainer,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 16),
 

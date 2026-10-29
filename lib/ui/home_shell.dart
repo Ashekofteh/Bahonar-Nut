@@ -707,11 +707,13 @@ class _HomeShellState extends State<HomeShell> {
   /// The read is also what fills the **table**: the reservations screen shows
   /// every meal that can still be acted on, and the menu is what says which
   /// of those are bookable.
-  Future<void> _refreshTable({bool quiet = false}) async {
+  Future<void> _refreshTable({bool quiet = false, AccountId? targetAccount}) async {
     final accounts = widget.state.accounts;
     if (accounts.isEmpty) return;
 
-    final accountId = widget.state.activeHuntAccount ?? accounts.first.id;
+    final accountId = targetAccount ??
+        widget.state.selectedReservationsAccountId ??
+        accounts.first.id;
 
     if (!quiet) widget.state.setSyncing(true);
     BookableMenus read = const BookableMenus(dates: [], menus: []);
@@ -734,6 +736,9 @@ class _HomeShellState extends State<HomeShell> {
         widget.state.setTransactions(syncResult.transactions);
       }
     } catch (_) {}
+
+    await widget.services.mealStore.persist();
+    widget.state.mealsChanged();
 
     if (mounted && !quiet) widget.state.setSyncing(false);
     if (!mounted) return;
@@ -787,8 +792,12 @@ class _HomeShellState extends State<HomeShell> {
         break;
       }
     }
+    final accountId = widget.state.selectedReservationsAccountId ??
+        (widget.state.accounts.isEmpty
+            ? null
+            : widget.state.accounts.first.id);
     if (menu == null && mounted) {
-      await _refreshTable(quiet: true);
+      await _refreshTable(quiet: true, targetAccount: accountId);
       for (final candidate in _tableMenus) {
         if (candidate.date.year == date.year &&
             candidate.date.month == date.month &&
@@ -800,19 +809,16 @@ class _HomeShellState extends State<HomeShell> {
       }
     }
     if (menu == null) return;
-
-    final accountId = widget.state.activeHuntAccount ??
-        (widget.state.accounts.isEmpty
-            ? null
-            : widget.state.accounts.first.id);
     if (accountId == null) return;
 
     final currentBalance = widget.state.balanceFor(accountId);
+    final account = widget.state.accountFor(accountId);
     if (!mounted) return;
 
     await BookingSheet.show(
       context,
       menu: menu,
+      accountName: account?.resolvedName,
       currentBalanceRial: currentBalance,
       onTopUp: (deficit) => _startTopUpFor(accountId, suggestedAmountRial: deficit),
       onBook: (offering) => _book(accountId, offering),
@@ -1146,7 +1152,7 @@ class _HomeShellState extends State<HomeShell> {
     if (accounts.isEmpty) return;
 
     final accountId =
-        widget.state.activeHuntAccount ?? accounts.first.id;
+        widget.state.selectedReservationsAccountId ?? accounts.first.id;
 
     setState(() {
       _busyKey = '${date.year}-${date.month}-${date.day}|${slot.name}';
@@ -1191,7 +1197,7 @@ class _HomeShellState extends State<HomeShell> {
     if (accounts.isEmpty) return;
 
     final accountId =
-        widget.state.activeHuntAccount ?? accounts.first.id;
+        widget.state.selectedReservationsAccountId ?? accounts.first.id;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1342,15 +1348,16 @@ class _HomeShellState extends State<HomeShell> {
         onSell: _sellMeal,
         onForgotReceipt: _handleForgotReceipt,
         onBatchBook: (rows) => _batchBook(
-          widget.state.activeHuntAccount ?? widget.state.accounts.first.id,
+          widget.state.selectedReservationsAccountId ?? widget.state.accounts.first.id,
           rows,
         ),
         onTopUp: (deficit, {pendingRows}) => _handleReservationsTopUp(
-          widget.state.activeHuntAccount ?? widget.state.accounts.first.id,
+          widget.state.selectedReservationsAccountId ?? widget.state.accounts.first.id,
           deficit,
           pendingRows: pendingRows,
         ),
         onRefresh: _refreshTable,
+        onAccountChanged: (accountId) => _refreshTable(targetAccount: accountId),
       ),
       DashboardScreen(state: widget.state),
       RemindersScreen(state: widget.state, bridge: widget.services.bridge),
@@ -1776,7 +1783,7 @@ class _HomeShellState extends State<HomeShell> {
     MealSlot slot,
     String? dishName,
   ) async {
-    final accountId = widget.state.activeHuntAccount ??
+    final accountId = widget.state.selectedReservationsAccountId ??
         (widget.state.accounts.isEmpty ? null : widget.state.accounts.first.id);
     if (accountId == null) return;
 

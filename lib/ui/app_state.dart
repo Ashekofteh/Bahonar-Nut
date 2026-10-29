@@ -183,6 +183,14 @@ class AppState extends ChangeNotifier {
   List<StoredMeal> mealsFor(AccountId accountId) =>
       mealStore.forAccount(accountId);
 
+  /// Finds the account with [accountId], if it exists.
+  SavedAccount? accountFor(AccountId accountId) {
+    for (final account in _accounts) {
+      if (account.id == accountId) return account;
+    }
+    return null;
+  }
+
 
   List<SavedBankCard> _savedBankCards = const [];
 
@@ -368,6 +376,9 @@ class AppState extends ChangeNotifier {
   Future<void> removeAccount(AccountId accountId) async {
     await accountStore.remove(accountId);
     await credentialStore?.delete(accountId);
+    if (_selectedReservationsAccountId == accountId) {
+      _selectedReservationsAccountId = null;
+    }
     _accounts = await accountStore.loadAll();
     notifyListeners();
   }
@@ -419,6 +430,20 @@ class AppState extends ChangeNotifier {
   }
 
   // -------------------------------------------------------------------- hunt
+
+  AccountId? _selectedReservationsAccountId;
+
+  /// The account currently active for viewing and booking reservations.
+  AccountId? get selectedReservationsAccountId =>
+      _selectedReservationsAccountId ?? _activeHuntAccount;
+
+  /// Selects the account for viewing and booking reservations.
+  void selectReservationsAccount(AccountId accountId) {
+    if (_selectedReservationsAccountId == accountId) return;
+    _selectedReservationsAccountId = accountId;
+    _activeHuntAccount = accountId;
+    notifyListeners();
+  }
 
   /// Selects the account whose hunt the screen shows.
   void selectHuntAccount(AccountId accountId) {
