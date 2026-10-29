@@ -19,6 +19,7 @@ class AccountsScreen extends StatefulWidget {
     required this.state,
     this.onRefresh,
     this.onTopUp,
+    this.onAccountAdded,
   });
 
   final AppState state;
@@ -28,6 +29,9 @@ class AccountsScreen extends StatefulWidget {
 
   /// Starts a top-up for an account. Null in tests.
   final void Function(SavedAccount account)? onTopUp;
+
+  /// Called when a new account has been successfully added and saved.
+  final ValueChanged<SavedAccount>? onAccountAdded;
 
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
@@ -130,6 +134,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
         SnackBar(content: Text('حساب «${result.studentId}» ذخیره شد.')),
       );
       widget.onRefresh?.call();
+      if (result.password != null) {
+        final account = widget.state.accounts.firstWhere(
+          (a) => a.studentId == result.studentId,
+        );
+        widget.onAccountAdded?.call(account);
+      }
     } catch (e) {
       // A failed save must be visible. Silently dropping it would leave the
       // user believing the account is stored when it is not.

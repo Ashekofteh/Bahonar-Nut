@@ -41,6 +41,7 @@ class ReservationsTable extends StatelessWidget {
     this.busyKey,
     this.emptyTitle = 'هنوز وعده‌ای برای نمایش نیست',
     this.emptyMessage = 'پس از رزرو یا خرید، وعده‌های شما اینجا فهرست می‌شوند.',
+    this.emptyAction,
   });
 
   /// The rows, in date order then meal order.
@@ -79,6 +80,9 @@ class ReservationsTable extends StatelessWidget {
   /// Custom empty state message when this week has no rows.
   final String emptyMessage;
 
+  /// Optional action button to show in the empty state.
+  final Widget? emptyAction;
+
   @override
   Widget build(BuildContext context) {
     if (rows.isEmpty) {
@@ -86,6 +90,7 @@ class ReservationsTable extends StatelessWidget {
         icon: Icons.event_busy_outlined,
         title: emptyTitle,
         message: emptyMessage,
+        action: emptyAction,
       );
     }
 

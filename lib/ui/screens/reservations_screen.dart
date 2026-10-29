@@ -7,6 +7,7 @@ import '../../core/time.dart';
 import '../app_state.dart';
 import '../reservation_table_model.dart';
 import '../widgets.dart';
+import 'batch_booking_sheet.dart';
 import 'reservations_table.dart';
 
 /// The reservations screen: the student's week, in one table.
@@ -38,7 +39,9 @@ class ReservationsScreen extends StatefulWidget {
     this.onSell,
     this.onForgotReceipt,
     this.onBatchBook,
+    this.onBatchBookOfferings,
     this.onTopUp,
+    this.onTopUpOfferings,
     this.onRefresh,
     this.onAccountChanged,
     this.menus = const [],
@@ -64,8 +67,14 @@ class ReservationsScreen extends StatefulWidget {
   /// Books multiple offerings in sequence.
   final Future<void> Function(List<MealRow> rows)? onBatchBook;
 
+  /// Books multiple offerings with student-chosen dishes and halls.
+  final Future<void> Function(List<MealOffering> offerings)? onBatchBookOfferings;
+
   /// Directs student to increase balance when deficit is detected.
   final void Function(int deficitRial, {List<MealRow>? pendingRows})? onTopUp;
+
+  /// Directs student to increase balance with specific meal offerings pending.
+  final void Function(int deficitRial, List<MealOffering> pendingOfferings)? onTopUpOfferings;
 
   /// Re-reads the portal.
   final VoidCallback? onRefresh;
@@ -108,12 +117,6 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
   }
 
   void _checkInitialState() {
-    if (widget.menus.isEmpty && widget.state.accounts.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.onRefresh?.call();
-      });
-    }
-
     if (_weekOffset == 0 && widget.menus.isNotEmpty) {
       final currentSat = _currentSaturday();
       final accountId = widget.state.selectedReservationsAccountId ??
@@ -331,6 +334,16 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                   selectionMode: _selectionMode,
                   selectedKeys: _selectedKeys,
                   onToggleSelect: _toggleSelect,
+                  emptyAction: (widget.menus.isEmpty && widget.onRefresh != null)
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: FilledButton.icon(
+                            onPressed: widget.onRefresh,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('دریافت برنامه غذایی دانشگاه'),
+                          ),
+                        )
+                      : null,
                 ),
               ),
               if (_selectionMode && _selectedRows.isNotEmpty)
@@ -342,59 +355,50 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                     deficit,
                     pendingRows: _selectedRows.values.toList(),
                   ),
-                  onConfirmReserve: () async {
-                    final totalPrice = _selectedRows.values.fold<int>(0, (sum, r) => sum + (r.priceRial ?? 0));
-                    final balance = widget.state.balanceFor(accountId) ?? 0;
-                    final deficit = totalPrice - balance;
-
-                    if (deficit > 0) {
-                      final rowsToBook = _selectedRows.values.toList();
-                      final goToTopUp = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('کمبود موجودی حساب'),
-                          content: Text(
-                            'موجودی حساب شما برای رزرو این وعده‌ها کافی نیست.\n'
-                            'کسری موجودی: \${formatTomanPersian(deficit)}\n\n'
-                            'با شارژ حساب، این وعده‌ها پس از پرداخت به طور خودکار رزرو خواهند شد.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(false),
-                              child: const Text('بستن'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.of(ctx).pop(true),
-                              child: const Text('شارژ حساب'),
-                            ),
-                          ],
-                        ),
-                      );
-
-                      if (goToTopUp == true && mounted) {
-                        widget.onTopUp?.call(deficit, pendingRows: rowsToBook);
-                        setState(() {
-                          _selectionMode = false;
-                          _selectedKeys.clear();
-                          _selectedRows.clear();
-                        });
-                      }
-                      return;
-                    }
-
-                    final rowsToBookList = _selectedRows.values.toList();
-                    if (widget.onBatchBook != null) {
-                      await widget.onBatchBook!(rowsToBookList);
-                    } else {
-                      for (final row in rowsToBookList) {
-                        widget.onBook?.call(row.date, row.slot);
-                      }
-                    }
-                    setState(() {
-                      _selectionMode = false;
-                      _selectedKeys.clear();
-                      _selectedRows.clear();
-                    });
+                  onConfirmReserve: () {
+                    final account = accounts.firstWhere((a) => a.id == accountId);
+                    BatchBookingSheet.show(
+                      context,
+                      menus: widget.menus,
+                      selectedRows: _selectedRows.values.toList(),
+                      accountName: account.resolvedName,
+                      currentBalanceRial: widget.state.balanceFor(accountId),
+                      onConfirm: (offerings) async {
+                        if (widget.onBatchBookOfferings != null) {
+                          await widget.onBatchBookOfferings!(offerings);
+                        } else if (widget.onBatchBook != null) {
+                          await widget.onBatchBook!(_selectedRows.values.toList());
+                        } else {
+                          for (final off in offerings) {
+                            widget.onBook?.call(off.date, off.slot);
+                          }
+                        }
+                        if (mounted) {
+                          setState(() {
+                            _selectionMode = false;
+                            _selectedKeys.clear();
+                            _selectedRows.clear();
+                          });
+                        }
+                      },
+                      onTopUp: (deficit, offerings) {
+                        if (widget.onTopUpOfferings != null) {
+                          widget.onTopUpOfferings!(deficit, offerings);
+                        } else {
+                          widget.onTopUp?.call(
+                            deficit,
+                            pendingRows: _selectedRows.values.toList(),
+                          );
+                        }
+                        if (mounted) {
+                          setState(() {
+                            _selectionMode = false;
+                            _selectedKeys.clear();
+                            _selectedRows.clear();
+                          });
+                        }
+                      },
+                    );
                   },
                 ),
             ],

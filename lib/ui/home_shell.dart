@@ -579,10 +579,6 @@ class _HomeShellState extends State<HomeShell> {
       // the transactions the sync just read. Without them the chart was
       // permanently empty, whatever the portal said.
       widget.state.setTransactions(transactions);
-
-      // Always load the bookable menus as well so the reservations table is
-      // immediately populated with all available meals.
-      await _refreshTable(quiet: true);
     } finally {
       if (mounted) widget.state.setSyncing(false);
     }
@@ -1325,6 +1321,52 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// Books multiple offerings with specific student choices of dish and dining hall.
+  Future<void> _batchBookOfferings(AccountId accountId, List<MealOffering> offerings) async {
+    setState(() => _busyKey = 'batch');
+    int succeeded = 0;
+    int failed = 0;
+    String? lastError;
+
+    for (final offering in offerings) {
+      final outcome = await widget.services.reservations.reserve(
+        accountId: accountId,
+        offering: offering,
+      );
+      if (outcome.succeeded) {
+        succeeded++;
+      } else {
+        failed++;
+        lastError = outcome.message;
+      }
+    }
+
+    setState(() => _busyKey = null);
+    await widget.services.mealStore.persist();
+    widget.state.mealsChanged();
+    _refreshTable(quiet: true);
+
+    if (mounted) {
+      if (failed == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${toPersianDigits(succeeded)} وعده غذایی با موفقیت رزرو شد.'),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '$succeeded وعده رزرو شد، $failed وعده ناموفق بود.${lastError != null ? " ($lastError)" : ""}',
+            ),
+            backgroundColor: Colors.amber.shade900,
+          ),
+        );
+      }
+    }
+  }
+
   /// Says why a booking could not be started, on the screen the student is on.
   void _showBookingProblem(String message) {
     if (!mounted) return;
@@ -1340,6 +1382,9 @@ class _HomeShellState extends State<HomeShell> {
         state: widget.state,
         onRefresh: refreshFromPortal,
         onTopUp: _startTopUp,
+        onAccountAdded: (account) {
+          _refreshTable(quiet: true, targetAccount: account.id);
+        },
       ),
       ReservationsScreen(
         state: widget.state,
@@ -1351,9 +1396,18 @@ class _HomeShellState extends State<HomeShell> {
         onCancel: _cancelMeal,
         onSell: _sellMeal,
         onForgotReceipt: _handleForgotReceipt,
+        onBatchBookOfferings: (offerings) => _batchBookOfferings(
+          widget.state.selectedReservationsAccountId ?? widget.state.accounts.first.id,
+          offerings,
+        ),
         onBatchBook: (rows) => _batchBook(
           widget.state.selectedReservationsAccountId ?? widget.state.accounts.first.id,
           rows,
+        ),
+        onTopUpOfferings: (deficit, offerings) => _handleReservationsTopUp(
+          widget.state.selectedReservationsAccountId ?? widget.state.accounts.first.id,
+          deficit,
+          pendingOfferings: offerings,
         ),
         onTopUp: (deficit, {pendingRows}) => _handleReservationsTopUp(
           widget.state.selectedReservationsAccountId ?? widget.state.accounts.first.id,
@@ -1374,9 +1428,6 @@ class _HomeShellState extends State<HomeShell> {
         selectedIndex: _index,
         onDestinationSelected: (index) {
           setState(() => _index = index);
-          if (index == 1 && _tableMenus.isEmpty) {
-            _refreshTable(quiet: false);
-          }
           // The market is read when the hunt is opened, not on every rebuild:
           // every read is a request pattern, and the market changes slowly
           // compared with a hunt's window.
@@ -1752,8 +1803,12 @@ class _HomeShellState extends State<HomeShell> {
     AccountId accountId,
     int deficitRial, {
     List<MealRow>? pendingRows,
+    List<MealOffering>? pendingOfferings,
   }) async {
-    if (pendingRows != null && pendingRows.isNotEmpty) {
+    if (pendingOfferings != null && pendingOfferings.isNotEmpty) {
+      _pendingBookingsAccount = accountId;
+      _pendingOfferingsToBook = pendingOfferings;
+    } else if (pendingRows != null && pendingRows.isNotEmpty) {
       final offerings = <MealOffering>[];
       for (final row in pendingRows) {
         MealMenu? matchingMenu;
