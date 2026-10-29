@@ -141,7 +141,7 @@ class _RequestBridge extends PlatformBridge {
 class _SeededAccountStore implements AccountStore {
   final SavedAccount account = SavedAccount(
     id: accountId,
-    studentId: '401405035',
+    studentId: '400123456',
     alias: 'برادر',
     addedAt: DateTime.utc(2026, 10, 20),
   );

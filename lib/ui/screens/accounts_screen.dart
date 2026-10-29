@@ -417,7 +417,7 @@ class _AccountDialogState extends State<_AccountDialog> {
             textDirection: TextDirection.ltr,
             decoration: const InputDecoration(
               labelText: 'شماره دانشجویی',
-              hintText: '۴۰۱۴۰۵۰۳۵',
+              hintText: '۴۰۰۱۲۳۴۵۶',
             ),
             enabled: !isEdit,
           ),

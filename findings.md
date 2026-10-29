@@ -72,7 +72,7 @@ that look like an attack. **Server time must be authoritative.**
 
 ---
 
-## 2026-10-18 — Authenticated Recon (Session 3, live login as 401405035)
+## 2026-10-18 — Authenticated Recon (Session 3, live login as 400123456)
 
 **Method:** Real login performed with user-supplied credentials. CAPTCHA fetched in-session
 (`Captcha.ashx` binds answer to `ASP.NET_SessionId` at fetch time — a page re-GET between
@@ -92,9 +92,9 @@ payment, cancellation, or basket action was submitted. Credentials used once, ne
 | Transactions | `MyCullinan/MyTransaction.aspx` | Date-range ledger; shows per-reservation detail rows |
 | Forgot receipt | `Reservation/ForgotReceipt.aspx` | Monthly caps: breakfast/lunch/dinner ≤2 each; pickup windows per meal |
 
-### Verified account state (401405035, 1405/07/26)
+### Verified account state (400123456, 1405/07/26)
 
-- Display name: ابوالفضل شكفته. Main credit: **225,000 Rial**. Cafeteria credit: **0 Rial**.
+- Display name: علی حسینی. Main credit: **225,000 Rial**. Cafeteria credit: **0 Rial**.
 - Sunday lunch purchased: زرشک پلو با مرغ @ 500,000 Rial? NO — ledger row shows
   breakfast کره/عسل... @ 150,000 held; one lunch row `checked+disabled` =
   رزرو شده، خورده نشده، غیرفعال (reserved, uneaten, locked).
@@ -228,7 +228,7 @@ Today's Dinner Reminder (Sunday, Mehr 26 / Oct 18):
 
 Tomorrow's breakfast (Monday 27 Mehr) - received with tonight's dinner:
 * Moghasami - milk/halva-shakari/bread/tea/sugar
-* Shekofteh - ...
+* Hosseini - ...
 * Sharifi   - ...
 ```
 
@@ -1209,7 +1209,7 @@ add account (student id + alias + password)
   -> displayed in Toman with Persian digits
 ```
 
-Screenshot: **Shekofteh · 401405035 · اعتبار: ۲۲٬۵۰۰ تومان** — 225,000 Rial,
+Screenshot: **Hosseini · 400123456 · اعتبار: ۲۲٬۵۰۰ تومان** — 225,000 Rial,
 shown as 22,500 Toman, fetched live.
 
 The error path was proven too, and it is the portal's own message rather than
@@ -1244,7 +1244,7 @@ prove), and use manual tapping only to confirm *rendering*.
 
 Checked both accounts against every page of the portal:
 
-| | Male 401405035 (ابوالفضل شكفته) | Female 401157013 (رضا شريفي) |
+| | Male 400123456 (علی حسینی) | Female 401157013 (رضا شريفي) |
 |---|---|---|
 | Weekly grid hall dropdowns | `1=مرکزی برادران`, `2=فنی برادران` | **identical** |
 | Daily cafeteria hall picker | `7=رستوران پسران`, `8=رستوران فنی` | **identical** |
@@ -2696,8 +2696,8 @@ it was typed into the field and `ادامه` was tapped. The dialog closed, and 
 account card rendered:
 
 ```
-401405035
-401405035 • نام پروفایل در دست...
+400123456
+400123456 • نام پروفایل در دست...
 اعتبار: ۷,۵۰۰ تومان
 ```
 

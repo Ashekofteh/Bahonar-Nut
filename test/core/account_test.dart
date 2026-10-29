@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 SavedAccount account({
   String? alias,
   String? profileName,
-  String studentId = '401405035',
+  String studentId = '400123456',
 }) =>
     SavedAccount(
       id: 'a1',
@@ -29,7 +29,7 @@ void main() {
 
     test('the student id is the last resort', () {
       final a = account();
-      expect(a.resolvedName, '401405035');
+      expect(a.resolvedName, '400123456');
       expect(a.nameSource, NameSource.studentId);
     });
 
@@ -54,7 +54,7 @@ void main() {
 
     test('a blank profile name falls through to the student id', () {
       final a = account(profileName: '   ');
-      expect(a.resolvedName, '401405035');
+      expect(a.resolvedName, '400123456');
       expect(a.nameSource, NameSource.studentId);
     });
 

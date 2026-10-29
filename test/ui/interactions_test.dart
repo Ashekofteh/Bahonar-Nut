@@ -46,7 +46,7 @@ void main() {
       // The student id field.
       await tester.enterText(
         find.widgetWithText(TextField, 'شماره دانشجویی'),
-        '401405035',
+        '400123456',
       );
       // The alias field.
       await tester.enterText(
@@ -60,7 +60,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(state.accounts, hasLength(1));
-      expect(state.accounts.single.studentId, '401405035');
+      expect(state.accounts.single.studentId, '400123456');
       expect(state.accounts.single.resolvedName, 'برادر');
 
       // And the list now shows it.
@@ -77,7 +77,7 @@ void main() {
 
       await tester.enterText(
         find.widgetWithText(TextField, 'شماره دانشجویی'),
-        '401405035',
+        '400123456',
       );
       await tester.tap(find.widgetWithText(TextButton, 'انصراف'));
       await tester.pumpAndSettle();
@@ -102,11 +102,11 @@ void main() {
   group('editing an alias', () {
     testWidgets('an alias can be set and cleared', (tester) async {
       final state = await buildState();
-      await state.upsertAccount(studentId: '401405035');
+      await state.upsertAccount(studentId: '400123456');
       await tester.pumpWidget(wrap(state, AccountsScreen(state: state)));
 
       // Without an alias the student id is shown.
-      expect(find.text('401405035'), findsWidgets);
+      expect(find.text('400123456'), findsWidgets);
 
       await tester.tap(find.byIcon(Icons.edit_outlined).first);
       await tester.pumpAndSettle();
@@ -126,7 +126,7 @@ void main() {
   group('deleting an account', () {
     testWidgets('the confirmation is required', (tester) async {
       final state = await buildState();
-      await state.upsertAccount(studentId: '401405035', alias: 'برادر');
+      await state.upsertAccount(studentId: '400123456', alias: 'برادر');
       await tester.pumpWidget(wrap(state, AccountsScreen(state: state)));
 
       await tester.tap(find.byIcon(Icons.delete_outline).first);

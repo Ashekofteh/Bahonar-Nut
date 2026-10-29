@@ -119,7 +119,7 @@ None.
 
 ### What happened
 
-1. User supplied credentials for 401405035. First login attempt failed: an intermediate
+1. User supplied credentials for 400123456. First login attempt failed: an intermediate
    page re-GET between CAPTCHA fetch and POST rotated the BotDetect session binding.
 2. Second attempt — single continuous session, no intermediate requests — succeeded.
    Redirected to `Reservation/Reservation.aspx`.
@@ -1092,7 +1092,7 @@ scoped to the day it fires for.
   (`exactAllowReason=policy_permission`), and the configuration change
   re-armed both slots.
 - Firing it posted «🍽 یادآور ناهار» naming **one meal for one day** —
-  «🍽 ناهار (پنج‌شنبه ۳۰ مهر): • 401405035 — شوید پلو با تن ماهی,لیمو ترش,
+  «🍽 ناهار (پنج‌شنبه ۳۰ مهر): • 400123456 — شوید پلو با تن ماهی,لیمو ترش,
   دلستر — مرکزی برادران» — and re-armed itself for the next day.
 
 ### Testing approach

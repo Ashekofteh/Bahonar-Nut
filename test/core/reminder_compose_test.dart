@@ -92,16 +92,16 @@ void main() {
           account('a1', 'مقسمی', [
             item(slot: MealSlot.dinner, dish: 'خوراک تن ماهی', date: sunday),
           ]),
-          account('a2', 'شکفته', [
+          account('a2', 'حسینی', [
             item(slot: MealSlot.breakfast, dish: 'شیر/حلواشکری', date: monday),
           ]),
         ],
       );
       final body = composeNotification(digest).body;
 
-      // مقسمی appears under dinner, شکفته under breakfast.
+      // مقسمی appears under dinner, حسینی under breakfast.
       expect(body, contains('• مقسمی — خوراک تن ماهی'));
-      expect(body, contains('• شکفته — شیر/حلواشکری'));
+      expect(body, contains('• حسینی — شیر/حلواشکری'));
     });
 
     test('multiple accounts under one meal all appear', () {
@@ -112,7 +112,7 @@ void main() {
           account('a1', 'مقسمی', [
             item(slot: MealSlot.breakfast, dish: 'شیر/حلواشکری', date: monday),
           ]),
-          account('a2', 'شکفته', [
+          account('a2', 'حسینی', [
             item(slot: MealSlot.breakfast, dish: 'شیر/حلواشکری', date: monday),
           ]),
           account('a3', 'شریفی', [
@@ -122,7 +122,7 @@ void main() {
       );
       final body = composeNotification(digest).body;
       expect(body, contains('• مقسمی —'));
-      expect(body, contains('• شکفته —'));
+      expect(body, contains('• حسینی —'));
       expect(body, contains('• شریفی —'));
     });
   });
@@ -133,7 +133,7 @@ void main() {
         slot: ReminderSlot.lunch,
         generatedAt: sunday,
         accounts: [
-          account('a1', 'شکفته', [
+          account('a1', 'حسینی', [
             item(
               slot: MealSlot.lunch,
               dish: 'زرشک پلو با مرغ، سس مرغ، ماست',
@@ -147,7 +147,7 @@ void main() {
       expect(text.body, contains('🍽 ناهار (یکشنبه ۲۶ مهر):'));
       expect(
         text.body,
-        contains('• شکفته — زرشک پلو با مرغ، سس مرغ، ماست — مرکزی برادران'),
+        contains('• حسینی — زرشک پلو با مرغ، سس مرغ، ماست — مرکزی برادران'),
       );
     });
   });
@@ -210,7 +210,7 @@ void main() {
         failures: const [
           ReminderFailure(
             accountId: 'a2',
-            displayName: 'شکفته',
+            displayName: 'حسینی',
             cause: ReminderFailureCause.sessionExpired,
           ),
           ReminderFailure(
@@ -222,7 +222,7 @@ void main() {
       );
       expect(
         composeNotification(digest).body,
-        contains('⚠️ بررسی نشد: شکفته، شریفی'),
+        contains('⚠️ بررسی نشد: حسینی، شریفی'),
       );
     });
 
@@ -399,21 +399,21 @@ void main() {
       final meals = [
         HeldMealDigest(
           accountId: 'a1',
-          displayName: 'شکفته',
+          displayName: 'حسینی',
           dishName: 'اکبر جوجه با برنج',
           date: sunday,
           slot: MealSlot.lunch,
         ),
       ];
       final text = formatMultiAccountNotification(meals);
-      expect(text, 'با اکانت شکفته غذای اکبر جوجه با برنج را رزرو داری');
+      expect(text, 'با اکانت حسینی غذای اکبر جوجه با برنج را رزرو داری');
     });
 
     test('formats multi-account notification correctly separated by hyphen', () {
       final meals = [
         HeldMealDigest(
           accountId: 'a1',
-          displayName: 'شکفته',
+          displayName: 'حسینی',
           dishName: 'اکبر جوجه با برنج',
           date: sunday,
           slot: MealSlot.lunch,
@@ -429,7 +429,7 @@ void main() {
       final text = formatMultiAccountNotification(meals);
       expect(
         text,
-        'با اکانت شکفته غذای اکبر جوجه با برنج را رزرو داری - با اکانت مقسمی غذای چلو کباب کوبیده را رزرو داری',
+        'با اکانت حسینی غذای اکبر جوجه با برنج را رزرو داری - با اکانت مقسمی غذای چلو کباب کوبیده را رزرو داری',
       );
     });
 

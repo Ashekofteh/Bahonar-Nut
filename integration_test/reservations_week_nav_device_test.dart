@@ -22,7 +22,7 @@ void main() {
       mealStore: LocalMealStore(),
     );
     await state.load();
-    await state.upsertAccount(studentId: '401405035', alias: 'آرمین');
+    await state.upsertAccount(studentId: '400123456', alias: 'آرمین');
     final accountId = state.accounts.first.id;
 
     // Put a current week meal

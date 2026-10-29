@@ -63,7 +63,7 @@ void main() {
     test('round-trips every field', () {
       final account = SavedAccount(
         id: 'a1',
-        studentId: '401405035',
+        studentId: '400123456',
         alias: 'برادر',
         profileName: 'رضا شريفي',
         addedAt: DateTime.utc(2026, 10, 19, 12),
@@ -72,7 +72,7 @@ void main() {
 
       final decoded = decodeAccount(encodeAccount(account))!;
       expect(decoded.id, 'a1');
-      expect(decoded.studentId, '401405035');
+      expect(decoded.studentId, '400123456');
       expect(decoded.alias, 'برادر');
       expect(decoded.profileName, 'رضا شريفي');
       expect(decoded.addedAt, account.addedAt);
@@ -80,7 +80,7 @@ void main() {
     });
 
     test('survives a null alias and null dates', () {
-      final account = SavedAccount(id: 'a1', studentId: '401405035');
+      final account = SavedAccount(id: 'a1', studentId: '400123456');
       final decoded = decodeAccount(encodeAccount(account))!;
       expect(decoded.alias, isNull);
       expect(decoded.profileName, isNull);
@@ -98,7 +98,7 @@ void main() {
       final plain = MemoryPlainStore();
       final store = PreferencesAccountStore(plain);
 
-      await store.save(const SavedAccount(id: 'a1', studentId: '401405035'));
+      await store.save(const SavedAccount(id: 'a1', studentId: '400123456'));
       await store.save(const SavedAccount(id: 'a2', studentId: '401157013'));
 
       final loaded = await store.loadAll();
@@ -110,7 +110,7 @@ void main() {
       final plain = MemoryPlainStore();
       final store = PreferencesAccountStore(plain);
 
-      await store.save(const SavedAccount(id: 'a1', studentId: '401405035'));
+      await store.save(const SavedAccount(id: 'a1', studentId: '400123456'));
       await store.remove('a1');
       expect(await store.loadAll(), isEmpty);
     });
@@ -120,7 +120,7 @@ void main() {
       final store = PreferencesAccountStore(plain);
       await plain.writeString('reminder.config', '{}');
 
-      await store.save(const SavedAccount(id: 'a1', studentId: '401405035'));
+      await store.save(const SavedAccount(id: 'a1', studentId: '400123456'));
       expect(await plain.readString('reminder.config'), '{}');
     });
   });
@@ -188,7 +188,7 @@ void main() {
 
       await store.writeCredentials(
         'a1',
-        const Credentials(studentId: '401405035', password: 'secret'),
+        const Credentials(studentId: '400123456', password: 'secret'),
       );
       await store.writeSession(StoredSession(
         accountId: 'a1',

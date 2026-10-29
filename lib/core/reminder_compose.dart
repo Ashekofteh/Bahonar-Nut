@@ -91,7 +91,7 @@ NotificationText composeReminderText({
 }
 
 /// Renders the multi-account reminder text:
-/// `با اکانت شكفته غذای a را رزرو داری - با اکانت مقسمی غذای b را رزرو داری`
+/// `با اکانت علی غذای a را رزرو داری - با اکانت رضا غذای b را رزرو داری`
 String formatMultiAccountNotification(List<HeldMealDigest> meals) {
   if (meals.isEmpty) return '';
   return meals

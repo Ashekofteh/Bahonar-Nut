@@ -66,7 +66,7 @@ class _EmptySecureStore implements SecureCredentialStore {
 class _AlwaysStore implements SessionStore {
   @override
   Future<Credentials?> readCredentials(AccountId accountId) async =>
-      const Credentials(studentId: '401405035', password: 'pw');
+      const Credentials(studentId: '400123456', password: 'pw');
 
   @override
   Future<void> writeCredentials(AccountId a, Credentials c) async {}

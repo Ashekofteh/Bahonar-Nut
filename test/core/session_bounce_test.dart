@@ -11,7 +11,7 @@ class FakeStore implements SessionStore {
   FakeStore({this.credentials = true});
 
   final Map<AccountId, Credentials> stored = {
-    'a1': const Credentials(studentId: '401405035', password: 'pw'),
+    'a1': const Credentials(studentId: '400123456', password: 'pw'),
   };
 
   /// Whether the account has stored credentials at all.

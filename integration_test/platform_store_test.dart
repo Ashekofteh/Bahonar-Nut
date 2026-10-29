@@ -20,13 +20,13 @@ void main() {
   test('the Keystore-backed credential store round-trips', () async {
     const accountId = 'integration-account';
     const credentials =
-        Credentials(studentId: '401405035', password: 'TestPass123');
+        Credentials(studentId: '400123456', password: 'TestPass123');
 
     await bridge.credentialStore.write(accountId, credentials);
 
     final read = await bridge.credentialStore.read(accountId);
     expect(read, isNotNull, reason: 'the credentials should be readable back');
-    expect(read!.studentId, '401405035');
+    expect(read!.studentId, '400123456');
     expect(read.password, 'TestPass123');
 
     final ids = await bridge.credentialStore.listAccountIds();

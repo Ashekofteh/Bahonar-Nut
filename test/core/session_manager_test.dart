@@ -266,7 +266,7 @@ void main() {
   group('first login', () {
     test('logs in when no session is stored', () async {
       await store.writeCredentials(
-          'a1', const Credentials(studentId: '401405035', password: 'pw'));
+          'a1', const Credentials(studentId: '400123456', password: 'pw'));
 
       final manager = buildManager(client: client, store: store, solver: solver);
       final result = await manager.ensureSession('a1');
@@ -275,12 +275,12 @@ void main() {
       final ready = result as SessionReady;
       expect(ready.wasReused, isFalse);
       expect(client.completeLoginCount, 1);
-      expect(ready.session.cookies['ASP.NET_SessionId'], 'sid-401405035');
+      expect(ready.session.cookies['ASP.NET_SessionId'], 'sid-400123456');
     });
 
     test('solves the challenge and passes the answer through', () async {
       await store.writeCredentials(
-          'a1', const Credentials(studentId: '401405035', password: 'pw'));
+          'a1', const Credentials(studentId: '400123456', password: 'pw'));
 
       final manager = buildManager(client: client, store: store, solver: solver);
       await manager.ensureSession('a1');
@@ -290,7 +290,7 @@ void main() {
 
     test('persists the new session', () async {
       await store.writeCredentials(
-          'a1', const Credentials(studentId: '401405035', password: 'pw'));
+          'a1', const Credentials(studentId: '400123456', password: 'pw'));
 
       final manager = buildManager(client: client, store: store, solver: solver);
       await manager.ensureSession('a1');
@@ -301,7 +301,7 @@ void main() {
     test('logs in even when the portal issues no challenge', () async {
       client.issueChallenge = false;
       await store.writeCredentials(
-          'a1', const Credentials(studentId: '401405035', password: 'pw'));
+          'a1', const Credentials(studentId: '400123456', password: 'pw'));
 
       final manager = buildManager(client: client, store: store, solver: solver);
       final result = await manager.ensureSession('a1');
@@ -765,9 +765,9 @@ void main() {
 
   group('Credentials redaction', () {
     test('toString never exposes the password', () {
-      const creds = Credentials(studentId: '401405035', password: 'sekrit');
+      const creds = Credentials(studentId: '400123456', password: 'sekrit');
       expect(creds.toString(), isNot(contains('sekrit')));
-      expect(creds.toString(), contains('401405035'));
+      expect(creds.toString(), contains('400123456'));
     });
   });
 }

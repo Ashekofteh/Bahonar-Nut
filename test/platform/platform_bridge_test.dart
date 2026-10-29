@@ -36,7 +36,7 @@ void main() {
           return <String>['a', 'b'];
         case 'secureRead':
           return <String, dynamic>{
-            'studentId': '401405035',
+            'studentId': '400123456',
             'password': 'secret',
           };
         case 'secureList':
@@ -84,13 +84,13 @@ void main() {
     test('reads the credentials back', () async {
       final store = PlatformBridge(channel: channel).credentialStore;
       final credentials = await store.read('a1');
-      expect(credentials!.studentId, '401405035');
+      expect(credentials!.studentId, '400123456');
       expect(credentials.password, 'secret');
     });
 
     test('writes and deletes', () async {
       final store = PlatformBridge(channel: channel).credentialStore;
-      await store.write('a1', const Credentials(studentId: '401405035', password: 'pw'));
+      await store.write('a1', const Credentials(studentId: '400123456', password: 'pw'));
       expect(calls.map((c) => c.method), contains('secureWrite'));
 
       await store.delete('a1');

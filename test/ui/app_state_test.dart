@@ -25,7 +25,7 @@ void main() {
       );
       await state.load();
 
-      await state.upsertAccount(studentId: '401405035', alias: 'برادر');
+      await state.upsertAccount(studentId: '400123456', alias: 'برادر');
       expect(state.accounts, hasLength(1));
       expect(state.accounts.single.resolvedName, 'برادر');
     });
@@ -49,8 +49,8 @@ void main() {
       );
       await state.load();
 
-      await state.upsertAccount(studentId: '401405035', alias: 'یک');
-      await state.upsertAccount(studentId: '401405035', alias: 'دو');
+      await state.upsertAccount(studentId: '400123456', alias: 'یک');
+      await state.upsertAccount(studentId: '400123456', alias: 'دو');
       expect(state.accounts, hasLength(1));
       expect(state.accounts.single.resolvedName, 'دو');
     });
@@ -62,7 +62,7 @@ void main() {
       );
       await state.load();
 
-      await state.upsertAccount(studentId: '401405035', alias: 'برادر');
+      await state.upsertAccount(studentId: '400123456', alias: 'برادر');
       final id = state.accounts.single.id;
       await state.setProfileName(id, 'رضا شريفي');
       await state.setAlias(id, '   ');
@@ -77,7 +77,7 @@ void main() {
       );
       await state.load();
 
-      await state.upsertAccount(studentId: '401405035');
+      await state.upsertAccount(studentId: '400123456');
       final id = state.accounts.single.id;
       await state.removeAccount(id);
       expect(state.accounts, isEmpty);

@@ -70,7 +70,7 @@ void main() {
       huntConfigStore: InMemoryHuntConfigStore(),
       mealStore: services.mealStore.store,
     );
-    await state.upsertAccount(studentId: '401405035');
+    await state.upsertAccount(studentId: '400123456');
     await state.load();
 
     await tester.pumpWidget(

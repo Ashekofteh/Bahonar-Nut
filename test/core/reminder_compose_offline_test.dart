@@ -35,14 +35,14 @@ void main() {
         slot: ReminderSlot.lunch,
         meals: [
           meal('a1', 'مقسمی', sunday, MealSlot.lunch, dish: 'چلو خورشت قیمه'),
-          meal('a2', 'شکفته', sunday, MealSlot.lunch, dish: 'زرشک پلو با مرغ'),
+          meal('a2', 'حسینی', sunday, MealSlot.lunch, dish: 'زرشک پلو با مرغ'),
         ],
         now: sunday,
       );
 
       expect(text.title, contains('ناهار'));
       expect(text.body, contains('• مقسمی — چلو خورشت قیمه — مرکزی برادران'));
-      expect(text.body, contains('• شکفته — زرشک پلو با مرغ — مرکزی برادران'));
+      expect(text.body, contains('• حسینی — زرشک پلو با مرغ — مرکزی برادران'));
       // 2026-10-18 is 1405/07/26, which the composer renders in Jalali.
       expect(text.body, contains('۲۶ مهر'), reason: 'the date is shown');
     });
@@ -84,7 +84,7 @@ void main() {
         ],
         now: sunday,
       );
-      expect(text.body, isNot(contains('شکفته')));
+      expect(text.body, isNot(contains('حسینی')));
     });
 
     test('the hall is omitted when unknown', () {
@@ -113,7 +113,7 @@ void main() {
         slot: ReminderSlot.lunch,
         meals: [
           meal('a1', 'مقسمی', sunday, MealSlot.lunch),
-          meal('a2', 'شکفته', sunday, MealSlot.lunch),
+          meal('a2', 'حسینی', sunday, MealSlot.lunch),
         ],
         now: sunday,
       );

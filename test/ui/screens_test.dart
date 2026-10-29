@@ -33,7 +33,7 @@ void main() {
     await state.load();
 
     if (withAccounts) {
-      await state.upsertAccount(studentId: '401405035', alias: 'برادر');
+      await state.upsertAccount(studentId: '400123456', alias: 'برادر');
       await state.upsertAccount(studentId: '401157013', alias: 'رضا');
     }
     return state;
@@ -97,8 +97,8 @@ void main() {
       await tester.pumpWidget(wrap(state, AccountsScreen(state: state)));
 
       // The alias is in use, so the source line says so.
-      await scrollTo(tester, '401405035', contains: true);
-      expect(find.textContaining('401405035'), findsOneWidget);
+      await scrollTo(tester, '400123456', contains: true);
+      expect(find.textContaining('400123456'), findsOneWidget);
       // Both accounts use an alias, so both subtitles say so.
       expect(find.textContaining('نام دلخواه'), findsNWidgets(2));
     });
@@ -134,7 +134,7 @@ void main() {
 
       await tester.enterText(
         find.byType(TextField).at(2),
-        'pass-401405035',
+        'pass-400123456',
       );
       await tester.tap(find.text('ذخیره'));
       await tester.pumpAndSettle();
@@ -144,8 +144,8 @@ void main() {
       final accountId = state.accounts.first.id;
       final stored = await secure.read(accountId);
       expect(stored, isNotNull);
-      expect(stored!.password, 'pass-401405035');
-      expect(stored.studentId, '401405035');
+      expect(stored!.password, 'pass-400123456');
+      expect(stored.studentId, '400123456');
       expect(await state.hasCredentials(accountId), isTrue);
     });
 
@@ -156,7 +156,7 @@ void main() {
       final accountId = state.accounts.first.id;
       await state.saveCredentials(
         accountId,
-        const Credentials(studentId: '401405035', password: 'old-pass'),
+        const Credentials(studentId: '400123456', password: 'old-pass'),
       );
       await tester.pumpWidget(wrap(state, AccountsScreen(state: state)));
       expect(await secure.read(accountId), isNotNull);
@@ -183,7 +183,7 @@ void main() {
     testWidgets('shows totals in Toman, never Rial', (tester) async {
       final state = await buildState(transactions: [
         const Transaction(
-          accountId: '401405035',
+          accountId: '400123456',
           type: 'رزرو غذا',
           foodName: 'چلو اکبرجوجه,دوغ',
           slot: MealSlot.lunch,
@@ -204,7 +204,7 @@ void main() {
     testWidgets('shows the multi-select filters', (tester) async {
       final state = await buildState(transactions: [
         const Transaction(
-          accountId: '401405035',
+          accountId: '400123456',
           type: 'رزرو غذا',
           foodName: 'چلو',
           slot: MealSlot.lunch,
@@ -228,7 +228,7 @@ void main() {
     testWidgets('selecting a slot filters the total', (tester) async {
       final state = await buildState(transactions: [
         const Transaction(
-          accountId: '401405035',
+          accountId: '400123456',
           type: 'رزرو غذا',
           foodName: 'چلو',
           slot: MealSlot.lunch,
@@ -238,7 +238,7 @@ void main() {
           amountRial: 500000,
         ),
         const Transaction(
-          accountId: '401405035',
+          accountId: '400123456',
           type: 'رزرو غذا',
           foodName: 'شیر',
           slot: MealSlot.breakfast,

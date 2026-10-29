@@ -69,7 +69,7 @@ void main() {
       reminderConfigStore: InMemoryReminderConfigStore(),
       huntConfigStore: InMemoryHuntConfigStore(),
     );
-    await state.upsertAccount(studentId: '401405035');
+    await state.upsertAccount(studentId: '400123456');
     await state.load();
     state.selectHuntAccount(state.accounts.first.id);
     await state.saveHuntConfig(
