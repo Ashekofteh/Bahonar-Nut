@@ -45,6 +45,7 @@ class AppServices {
     required this.plainStore,
     required this.clock,
     this.requests,
+    this.transport,
   });
 
   /// Builds the real services, backed by the Android platform.
@@ -94,6 +95,7 @@ class AppServices {
       plainStore: plainStore,
       clock: clock,
       requests: requests,
+      transport: transport,
     );
   }
 
@@ -111,6 +113,12 @@ class AppServices {
   /// nobody can check, and this project treats the account as the thing at
   /// risk. Null only in a test that has no transport.
   final RequestLedger? requests;
+  final PortalTransport? transport;
+
+  /// Closes network transport sockets and releases resources.
+  void dispose() {
+    transport?.close();
+  }
 
   /// The account list, persisted in the plain store.
   AccountStore get accountStore => PreferencesAccountStore(plainStore);
@@ -236,6 +244,7 @@ class LocalMealStoreHolder {
     if (raw == null) return;
     try {
       store.replaceAll(decodeMealList(raw));
+      store.prune(DateTime.now().toUtc());
     } catch (_) {
       // A corrupt cache is not worth surfacing: the next sync fills it again.
     }

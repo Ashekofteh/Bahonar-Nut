@@ -47,7 +47,9 @@ class CaptchaSolution {
 
 /// Solves the portal's CAPTCHA images locally.
 class CaptchaSolver {
-  CaptchaSolver() : _templates = _loadTemplates();
+  CaptchaSolver() : _templates = _cachedTemplates;
+
+  static final Map<String, Uint8List> _cachedTemplates = _loadTemplates();
 
   final Map<String, Uint8List> _templates;
 

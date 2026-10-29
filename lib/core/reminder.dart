@@ -65,6 +65,8 @@ class ReminderConfig {
     this.evening = ReminderSlotConfig.eveningDefault,
     this.nextWeekNudgeEnabled = true,
     this.excludedFromSlot = const {},
+    this.nudgeAccountIds,
+    this.dismissedNudgeWeekSaturday,
   });
 
   /// Global switch. Off means no alarms at all are scheduled.
@@ -82,6 +84,26 @@ class ReminderConfig {
   /// Accounts excluded from one specific slot, so a user can receive the evening
   /// digest for an account without also receiving the morning one.
   final Map<ReminderSlot, Set<AccountId>> excludedFromSlot;
+
+  /// Accounts included in the weekend reservation reminder (nudge).
+  /// If null, defaults to [accountIds].
+  final Set<AccountId>? nudgeAccountIds;
+
+  /// The Saturday start date of the week for which the next-week reservation reminder
+  /// was manually dismissed by the student for this week only.
+  final DateTime? dismissedNudgeWeekSaturday;
+
+  /// The active accounts for the next-week nudge.
+  Set<AccountId> get activeNudgeAccounts => nudgeAccountIds ?? accountIds;
+
+  /// True when the nudge for [targetSaturday] was dismissed for that specific week.
+  bool isNudgeDismissedForWeek(DateTime targetSaturday) {
+    final d = dismissedNudgeWeekSaturday;
+    if (d == null) return false;
+    return d.year == targetSaturday.year &&
+        d.month == targetSaturday.month &&
+        d.day == targetSaturday.day;
+  }
 
   /// Accounts that should receive [slot], after exclusions.
   Set<AccountId> accountsFor(ReminderSlot slot) =>
@@ -108,6 +130,9 @@ class ReminderConfig {
     ReminderSlotConfig? evening,
     bool? nextWeekNudgeEnabled,
     Map<ReminderSlot, Set<AccountId>>? excludedFromSlot,
+    Set<AccountId>? nudgeAccountIds,
+    DateTime? dismissedNudgeWeekSaturday,
+    bool clearDismissedNudge = false,
   }) =>
       ReminderConfig(
         masterEnabled: masterEnabled ?? this.masterEnabled,
@@ -117,6 +142,10 @@ class ReminderConfig {
         nextWeekNudgeEnabled:
             nextWeekNudgeEnabled ?? this.nextWeekNudgeEnabled,
         excludedFromSlot: excludedFromSlot ?? this.excludedFromSlot,
+        nudgeAccountIds: nudgeAccountIds ?? this.nudgeAccountIds,
+        dismissedNudgeWeekSaturday: clearDismissedNudge
+            ? null
+            : (dismissedNudgeWeekSaturday ?? this.dismissedNudgeWeekSaturday),
       );
 }
 
@@ -221,6 +250,7 @@ class NotificationText {
     required this.title,
     required this.body,
     this.summary,
+    this.multiAccountText,
   });
 
   final String title;
@@ -228,6 +258,9 @@ class NotificationText {
 
   /// Collapsed one-liner shown in the notification shade.
   final String? summary;
+
+  /// Specific multi-account phrasing: `با اکانت X غذای Y را رزرو داری`
+  final String? multiAccountText;
 
   @override
   String toString() => 'NotificationText($title | $body)';

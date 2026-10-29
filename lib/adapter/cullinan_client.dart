@@ -53,6 +53,7 @@ class _Paths {
   static const captcha = '/UserControls/Captcha.ashx';
   static const topUp = '/ePay/ePay_Payment.aspx';
   static const topUpList = '/MyCullinan/MyePayList.aspx';
+  static const forgotReceipt = '/Reservation/ForgotReceipt.aspx';
 }
 
 /// The top-up form's control names.
@@ -865,6 +866,48 @@ class CullinanPortalClient implements PortalClient {
       return SaleListingAmbiguous(e.message);
     } catch (e) {
       return SaleListingAmbiguous(e.toString());
+    }
+  }
+
+  @override
+  Future<ForgotReceiptOutcome> requestForgotReceipt(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+    ReserveType reserveType = ReserveType.weekly,
+  }) async {
+    try {
+      final page = await transport.get(session.account, _Paths.forgotReceipt);
+      if (page.looksLikeLoginPage) {
+        return const ForgotReceiptRefused('نشست منقضی شده است. لطفا دوباره وارد شوید.');
+      }
+
+      final body = CullinanParser.forgotReceiptFormBody(
+        page.body,
+        jalaliDate: _jalaliOf(date),
+        slot: slot,
+        reserveType: reserveType,
+      );
+
+      final response = await transport.post(
+        session.account,
+        _Paths.forgotReceipt,
+        body: body,
+      );
+
+      if (response.looksLikeLoginPage) {
+        return const ForgotReceiptRefused('نشست منقضی شده است. لطفا دوباره وارد شوید.');
+      }
+
+      return CullinanParser.parseForgotReceiptOutcome(
+        response.body,
+        date: date,
+        slot: slot,
+      );
+    } on TransportException catch (e) {
+      return ForgotReceiptAmbiguous(e.message);
+    } catch (e) {
+      return ForgotReceiptAmbiguous(e.toString());
     }
   }
 

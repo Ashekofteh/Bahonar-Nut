@@ -419,6 +419,53 @@ void main() {
 
       expect(postedNotifications(), isEmpty);
     });
+
+    test('the nudge is suppressed if dismissed for the current week', () async {
+      final targetSat = DateTime.utc(2026, 10, 24);
+      nudge.config = ReminderConfig(
+        accountIds: {'a1'},
+        nextWeekNudgeEnabled: true,
+        dismissedNudgeWeekSaturday: targetSat,
+      );
+
+      await nudge.handleFire(ReminderService.nudgePayload);
+
+      expect(postedNotifications(), isEmpty,
+          reason: 'snoozed/dismissed for this week only');
+      expect(scheduledAlarms(), isNotEmpty,
+          reason: 'still re-arms for subsequent weeks');
+    });
+
+    test('the nudge checks only accounts selected in nudgeAccountIds', () async {
+      // a1 has no meals booked, but a2 has all meals booked.
+      reservationsByAccount['a1'] = const [];
+      reservationsByAccount['a2'] = [
+        for (var day = 24; day <= 30; day++)
+          for (final slot in MealSlot.values)
+            Reservation(
+              id: 'r',
+              date: DateTime.utc(2026, 10, day),
+              slot: slot,
+              hall: const Hall(id: '1', name: 'مرکزی برادران'),
+              option:
+                  const MenuOption(id: '1', name: 'غذا', priceRial: 150000),
+              state: ReservationState.active,
+            ),
+      ];
+
+      // If both a1 and a2 were checked, a1 would trigger a nudge.
+      // But only a2 is in nudgeAccountIds!
+      nudge.config = const ReminderConfig(
+        accountIds: {'a1', 'a2'},
+        nudgeAccountIds: {'a2'},
+        nextWeekNudgeEnabled: true,
+      );
+
+      await nudge.handleFire(ReminderService.nudgePayload);
+
+      expect(postedNotifications(), isEmpty,
+          reason: 'only a2 is checked, and a2 has all meals booked');
+    });
   });
 
   group('the catch-up', () {

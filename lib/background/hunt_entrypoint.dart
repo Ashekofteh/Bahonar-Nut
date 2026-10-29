@@ -99,6 +99,7 @@ Future<void> runHeadlessHunt(AccountId accountId) async {
     // The hunt is off, or there is no hunt for this account. Nothing is
     // started, and nothing is announced: a hunt the student switched off must
     // not become a notification.
+    services.dispose();
     await _releaseService(bridge);
     return;
   }
@@ -126,6 +127,7 @@ Future<void> runHeadlessHunt(AccountId accountId) async {
   if (!verdict.passed) {
     await _announceRefusal(bridge, verdict.failures);
     await _rearm(services, accountId, hunt);
+  services.dispose();
     await _releaseService(bridge);
     return;
   }
@@ -149,6 +151,7 @@ Future<void> runHeadlessHunt(AccountId accountId) async {
   await _awaitCompletion(services.engine, _ruleId(accountId));
 
   await _rearm(services, accountId, hunt);
+  services.dispose();
   await _releaseService(bridge);
 }
 

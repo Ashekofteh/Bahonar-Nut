@@ -284,6 +284,8 @@ String encodeReminderConfig(ReminderConfig config) => jsonEncode({
       'excludedFromSlot': config.excludedFromSlot.map(
         (slot, ids) => MapEntry(slot.name, ids.toList()),
       ),
+      'nudgeAccountIds': config.nudgeAccountIds?.toList(),
+      'dismissedNudgeWeekSaturday': config.dismissedNudgeWeekSaturday?.toIso8601String(),
     });
 
 /// Reads the reminder configuration back, or null when unreadable.
@@ -309,6 +311,12 @@ ReminderConfig? decodeReminderConfig(String raw) {
                 ),
               ) ??
           const {},
+      nudgeAccountIds: (decoded['nudgeAccountIds'] as List<dynamic>?)
+          ?.map((e) => e.toString())
+          .toSet(),
+      dismissedNudgeWeekSaturday: decoded['dismissedNudgeWeekSaturday'] != null
+          ? DateTime.tryParse(decoded['dismissedNudgeWeekSaturday'] as String)
+          : null,
     );
   } catch (_) {
     return null;

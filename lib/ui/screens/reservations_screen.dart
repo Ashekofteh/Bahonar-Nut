@@ -36,6 +36,7 @@ class ReservationsScreen extends StatefulWidget {
     this.onBook,
     this.onCancel,
     this.onSell,
+    this.onForgotReceipt,
     this.onTopUp,
     this.onRefresh,
     this.menus = const [],
@@ -55,8 +56,11 @@ class ReservationsScreen extends StatefulWidget {
   /// Lists a held meal for sale in the Food Basket.
   final void Function(DateTime date, MealSlot slot)? onSell;
 
+  /// Requests a forgot receipt for a held meal.
+  final void Function(DateTime date, MealSlot slot, String? dishName)? onForgotReceipt;
+
   /// Directs student to increase balance when deficit is detected.
-  final void Function(int deficitRial)? onTopUp;
+  final void Function(int deficitRial, {List<MealRow>? pendingRows})? onTopUp;
 
   /// Re-reads the portal.
   final VoidCallback? onRefresh;
@@ -213,6 +217,9 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                   onBook: (date, slot) => widget.onBook?.call(date, slot),
                   onCancel: (date, slot) => widget.onCancel?.call(date, slot),
                   onSell: widget.onSell != null ? (date, slot) => widget.onSell!(date, slot) : null,
+                  onForgotReceipt: widget.onForgotReceipt != null
+                      ? (date, slot, dishName) => widget.onForgotReceipt!(date, slot, dishName)
+                      : null,
                   selectionMode: _selectionMode,
                   selectedKeys: _selectedKeys,
                   onToggleSelect: _toggleSelect,
@@ -223,8 +230,50 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                   selectedCount: _selectedRows.length,
                   totalPriceRial: _selectedRows.values.fold<int>(0, (sum, r) => sum + (r.priceRial ?? 0)),
                   balanceRial: widget.state.balanceFor(accountId) ?? 0,
-                  onTopUp: (deficit) => widget.onTopUp?.call(deficit),
-                  onConfirmReserve: () {
+                  onTopUp: (deficit) => widget.onTopUp?.call(
+                    deficit,
+                    pendingRows: _selectedRows.values.toList(),
+                  ),
+                  onConfirmReserve: () async {
+                    final totalPrice = _selectedRows.values.fold<int>(0, (sum, r) => sum + (r.priceRial ?? 0));
+                    final balance = widget.state.balanceFor(accountId) ?? 0;
+                    final deficit = totalPrice - balance;
+
+                    if (deficit > 0) {
+                      final rowsToBook = _selectedRows.values.toList();
+                      final goToTopUp = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('کمبود موجودی حساب'),
+                          content: Text(
+                            'موجودی حساب شما برای رزرو این وعده‌ها کافی نیست.\n'
+                            'کسری موجودی: \${formatTomanPersian(deficit)}\n\n'
+                            'با شارژ حساب، این وعده‌ها پس از پرداخت به طور خودکار رزرو خواهند شد.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('بستن'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text('شارژ حساب'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (goToTopUp == true && mounted) {
+                        widget.onTopUp?.call(deficit, pendingRows: rowsToBook);
+                        setState(() {
+                          _selectionMode = false;
+                          _selectedKeys.clear();
+                          _selectedRows.clear();
+                        });
+                      }
+                      return;
+                    }
+
                     for (final row in _selectedRows.values) {
                       widget.onBook?.call(row.date, row.slot);
                     }
@@ -498,13 +547,26 @@ class _MultiSelectSummaryBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: () => onTopUp(deficitRial),
-                icon: const Icon(Icons.account_balance_wallet_outlined),
-                label: Text('افزایش موجودی (${formatTomanPersian(deficitRial)})'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: theme.colorScheme.primary,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: onConfirmReserve,
+                      child: const Text('ثبت رزرو'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => onTopUp(deficitRial),
+                      icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+                      label: Text('شارژ حساب (${formatTomanPersian(deficitRial)})'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ] else ...[
               const SizedBox(height: 8),

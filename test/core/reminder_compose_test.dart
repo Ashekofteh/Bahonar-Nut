@@ -394,6 +394,50 @@ void main() {
     });
   });
 
+  group('formatMultiAccountNotification', () {
+    test('formats single account notification correctly', () {
+      final meals = [
+        HeldMealDigest(
+          accountId: 'a1',
+          displayName: 'شکفته',
+          dishName: 'اکبر جوجه با برنج',
+          date: sunday,
+          slot: MealSlot.lunch,
+        ),
+      ];
+      final text = formatMultiAccountNotification(meals);
+      expect(text, 'با اکانت شکفته غذای اکبر جوجه با برنج را رزرو داری');
+    });
+
+    test('formats multi-account notification correctly separated by hyphen', () {
+      final meals = [
+        HeldMealDigest(
+          accountId: 'a1',
+          displayName: 'شکفته',
+          dishName: 'اکبر جوجه با برنج',
+          date: sunday,
+          slot: MealSlot.lunch,
+        ),
+        HeldMealDigest(
+          accountId: 'a2',
+          displayName: 'مقسمی',
+          dishName: 'چلو کباب کوبیده',
+          date: sunday,
+          slot: MealSlot.lunch,
+        ),
+      ];
+      final text = formatMultiAccountNotification(meals);
+      expect(
+        text,
+        'با اکانت شکفته غذای اکبر جوجه با برنج را رزرو داری - با اکانت مقسمی غذای چلو کباب کوبیده را رزرو داری',
+      );
+    });
+
+    test('returns empty string when no meals', () {
+      expect(formatMultiAccountNotification([]), '');
+    });
+  });
+
   group('output is always Persian', () {
     test('no Latin digits leak into a digest body', () {
       final digest = ReminderDigest(

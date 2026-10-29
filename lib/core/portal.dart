@@ -233,6 +233,64 @@ class SaleListingAmbiguous extends SaleListingResult {
   final String diagnostic;
 }
 
+/// The type of reservation for forgot receipt request.
+enum ReserveType {
+  /// Weekly reservation (رزرو هفتگی - 0).
+  weekly(0, 'رزرو هفتگی'),
+
+  /// Day sale (روزفروش - 1).
+  daily(1, 'روزفروش'),
+
+  /// Food basket (سبد غذایی - 2).
+  foodBasket(2, 'سبد غذایی');
+
+  const ReserveType(this.value, this.label);
+  final int value;
+  final String label;
+}
+
+/// The outcome of requesting a temporary forgot-card receipt slip (فیش فراموشی).
+sealed class ForgotReceiptOutcome {
+  const ForgotReceiptOutcome();
+}
+
+/// The slip was successfully generated.
+class ForgotReceiptSucceeded extends ForgotReceiptOutcome {
+  const ForgotReceiptSucceeded({
+    required this.date,
+    required this.slot,
+    required this.code,
+    this.message,
+    this.quotaRemaining,
+  });
+
+  final DateTime date;
+  final MealSlot slot;
+
+  /// The generated numeric slip token/code to show at the dining turnstile.
+  final String code;
+
+  /// Optional message from the portal.
+  final String? message;
+
+  /// Remaining monthly quota for this slot (if parsed).
+  final int? quotaRemaining;
+}
+
+/// The slip was refused by the portal (e.g. limit exceeded, no meal found).
+class ForgotReceiptRefused extends ForgotReceiptOutcome {
+  const ForgotReceiptRefused(this.reason);
+
+  final String reason;
+}
+
+/// Ambiguous outcome due to transport/network disruption.
+class ForgotReceiptAmbiguous extends ForgotReceiptOutcome {
+  const ForgotReceiptAmbiguous(this.diagnostic);
+
+  final String diagnostic;
+}
+
 /// What went wrong during login, when it goes wrong.
 class LoginFailure {
   const LoginFailure(this.reason, {this.retryable = false});
@@ -463,6 +521,16 @@ abstract class PortalClient {
     Session session, {
     required DateTime date,
     required MealSlot slot,
+  });
+
+  /// Requests a forgot-card slip (فیش فراموشی) for [date] and [slot].
+  ///
+  /// Maximum quota is 2 slips per meal slot per month per account.
+  Future<ForgotReceiptOutcome> requestForgotReceipt(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+    ReserveType reserveType = ReserveType.weekly,
   });
 
   // --- Top-up ---

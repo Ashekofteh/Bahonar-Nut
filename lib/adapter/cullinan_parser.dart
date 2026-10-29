@@ -463,6 +463,87 @@ abstract final class CullinanParser {
   static String? parseSaleAlert(String html) =>
       labelText(html, 'cphMain_alertBoxValue');
 
+  /// Form data for requesting a forgot receipt on ForgotReceipt.aspx.
+  static Map<String, String> forgotReceiptFormBody(
+    String html, {
+    required String jalaliDate,
+    required MealSlot slot,
+    ReserveType reserveType = ReserveType.weekly,
+  }) =>
+      <String, String>{
+        '__VIEWSTATE': hiddenFieldValue(html, '__VIEWSTATE'),
+        '__VIEWSTATEGENERATOR': hiddenFieldValue(html, '__VIEWSTATEGENERATOR'),
+        '__VIEWSTATEENCRYPTED': '',
+        '__EVENTTARGET': '',
+        '__EVENTARGUMENT': '',
+        r'ctl00$cphMain$txtDate': jalaliDate,
+        r'ctl00$cphMain$drpReserveType': reserveType.value.toString(),
+        r'ctl00$cphMain$drpFoodType': switch (slot) {
+          MealSlot.breakfast => '1',
+          MealSlot.lunch => '2',
+          MealSlot.dinner => '3',
+        },
+        r'ctl00$cphMain$btnOk': 'تأیید',
+      };
+
+  /// Parses the response of a ForgotReceipt.aspx submission.
+  static ForgotReceiptOutcome parseForgotReceiptOutcome(
+    String html, {
+    required DateTime date,
+    required MealSlot slot,
+  }) {
+    if (html.contains('id="txtUsername"') || html.contains('ورود به سامانه')) {
+      return const ForgotReceiptRefused('نشست کاربری منقضی شده است.');
+    }
+
+    final alert = labelText(html, 'cphMain_alertBoxValue');
+    if (alert != null && alert.trim().isNotEmpty) {
+      final text = alert.trim();
+      final hasRefusalWord = text.contains('خطا') ||
+          text.contains('غیرفعال') ||
+          text.contains('یافت نشد') ||
+          text.contains('مقدور') ||
+          text.contains('مجاز') ||
+          text.contains('نمی باشد') ||
+          text.contains('امکان پذیر نیست');
+
+      final codeMatch = RegExp(r'(?:کد|شماره|فیش|توکن)\s*(?:[:=]|\s)\s*(\d+)').firstMatch(text);
+      if (codeMatch != null && !hasRefusalWord) {
+        return ForgotReceiptSucceeded(
+          date: date,
+          slot: slot,
+          code: codeMatch.group(1)!,
+          message: text,
+        );
+      }
+
+      if (hasRefusalWord) {
+        return ForgotReceiptRefused(text);
+      }
+    }
+
+    final codeMatch = RegExp(r'(?:کد فیش|شماره فیش|کد رهگیری|کد رسید)[^\d]*(\d{3,10})').firstMatch(html);
+    if (codeMatch != null) {
+      return ForgotReceiptSucceeded(
+        date: date,
+        slot: slot,
+        code: codeMatch.group(1)!,
+        message: 'فیش فراموشی با موفقیت دریافت شد.',
+      );
+    }
+
+    if (alert != null && alert.trim().isNotEmpty) {
+      return ForgotReceiptRefused(alert.trim());
+    }
+
+    final message = labelText(html, 'cphMain_messageBoxValue');
+    if (message != null && (message.contains('غیرفعال') || message.contains('خطا'))) {
+      return ForgotReceiptRefused(message.trim());
+    }
+
+    return const ForgotReceiptAmbiguous('پاسخ دریافت فیش فراموشی از سامانه نامشخص است.');
+  }
+
   /// Whether the buy page shows [optionId] as **held**: checked and charged.
   ///
   /// This is the only reliable success signal. Verified live 2026-10-20 against

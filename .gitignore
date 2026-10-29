@@ -54,3 +54,12 @@ testout.txt
 test_pending.txt
 buildout.txt
 uidump*.xml
+
+# Tool scratch files
+tool/_*.txt
+tool/_*.xml
+tool/_*.py
+tool/__pycache__/
+
+# Root scratch images
+/*.png

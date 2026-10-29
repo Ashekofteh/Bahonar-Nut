@@ -33,6 +33,7 @@ class ReservationsTable extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.onForgotReceipt,
     this.selectionMode = false,
     this.selectedKeys = const {},
     this.onToggleSelect,
@@ -53,6 +54,9 @@ class ReservationsTable extends StatelessWidget {
 
   /// Lists a held meal for sale in the secondary Food Basket.
   final void Function(DateTime date, MealSlot slot)? onSell;
+
+  /// Requests a forgot receipt for a held meal.
+  final void Function(DateTime date, MealSlot slot, String? dishName)? onForgotReceipt;
 
   /// Whether multi-selection mode is active.
   final bool selectionMode;
@@ -110,6 +114,7 @@ class ReservationsTable extends StatelessWidget {
                       onBook: () => onBook(row.date, row.slot),
                       onCancel: () => onCancel(row.date, row.slot),
                       onSell: onSell != null ? () => onSell!(row.date, row.slot) : null,
+                      onForgotReceipt: onForgotReceipt != null ? () => onForgotReceipt!(row.date, row.slot, row.dishName) : null,
                       selectionMode: selectionMode,
                       isSelected: selectedKeys.contains(_keyOf(row)),
                       onToggleSelect: onToggleSelect != null ? () => onToggleSelect!(row) : null,
@@ -210,6 +215,7 @@ class _MealRowTile extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.onForgotReceipt,
     this.selectionMode = false,
     this.isSelected = false,
     this.onToggleSelect,
@@ -220,6 +226,7 @@ class _MealRowTile extends StatelessWidget {
   final VoidCallback onBook;
   final VoidCallback onCancel;
   final VoidCallback? onSell;
+  final VoidCallback? onForgotReceipt;
   final bool selectionMode;
   final bool isSelected;
   final VoidCallback? onToggleSelect;
@@ -279,6 +286,7 @@ class _MealRowTile extends StatelessWidget {
             onBook: onBook,
             onCancel: onCancel,
             onSell: onSell,
+            onForgotReceipt: onForgotReceipt,
             selectionMode: selectionMode,
             isSelected: isSelected,
             onToggleSelect: onToggleSelect,
@@ -382,6 +390,7 @@ class _Action extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.onForgotReceipt,
     this.selectionMode = false,
     this.isSelected = false,
     this.onToggleSelect,
@@ -392,6 +401,7 @@ class _Action extends StatelessWidget {
   final VoidCallback onBook;
   final VoidCallback onCancel;
   final VoidCallback? onSell;
+  final VoidCallback? onForgotReceipt;
   final bool selectionMode;
   final bool isSelected;
   final VoidCallback? onToggleSelect;
@@ -402,47 +412,86 @@ class _Action extends StatelessWidget {
 
     switch (row.status) {
       case MealRowStatus.held:
-        // A weekly reservation can be given back while its date is editable.
-        return IconButton(
-          onPressed: busy ? null : onCancel,
-          icon: const Icon(Icons.close),
-          tooltip: 'لغو رزرو',
-          visualDensity: VisualDensity.compact,
-          style: IconButton.styleFrom(
-            foregroundColor: theme.colorScheme.error,
-            disabledForegroundColor: theme.colorScheme.outline,
-          ),
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (onForgotReceipt != null)
+              IconButton(
+                onPressed: busy ? null : onForgotReceipt,
+                icon: const Icon(Icons.receipt_long, size: 20),
+                tooltip: 'دریافت فیش فراموشی',
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  foregroundColor: theme.colorScheme.secondary,
+                ),
+              ),
+            IconButton(
+              onPressed: busy ? null : onCancel,
+              icon: const Icon(Icons.close),
+              tooltip: 'لغو رزرو',
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(
+                foregroundColor: theme.colorScheme.error,
+                disabledForegroundColor: theme.colorScheme.outline,
+              ),
+            ),
+          ],
         );
 
       case MealRowStatus.bought:
-        // A basket purchase is irreversible (F16), so there is nothing to
-        // offer but the truth.
-        return Icon(
-          Icons.lock_outline,
-          size: 18,
-          color: theme.colorScheme.outline,
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (onForgotReceipt != null)
+              IconButton(
+                onPressed: busy ? null : onForgotReceipt,
+                icon: const Icon(Icons.receipt_long, size: 20),
+                tooltip: 'دریافت فیش فراموشی',
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  foregroundColor: theme.colorScheme.secondary,
+                ),
+              ),
+            Icon(
+              Icons.lock_outline,
+              size: 18,
+              color: theme.colorScheme.outline,
+            ),
+          ],
         );
 
       case MealRowStatus.heldLocked:
-        // The meal is the student's, but its date has locked, so the portal
-        // will not give it back (F14). It can, however, be offered for sale
-        // in the secondary Food Basket to avoid the unconsumed meal penalty.
-        if (onSell != null) {
-          return IconButton(
-            onPressed: busy ? null : onSell,
-            icon: const Icon(Icons.storefront_outlined),
-            tooltip: 'فروش در سبد غذایی',
-            visualDensity: VisualDensity.compact,
-            style: IconButton.styleFrom(
-              foregroundColor: theme.colorScheme.primary,
-              disabledForegroundColor: theme.colorScheme.outline,
-            ),
-          );
-        }
-        return Icon(
-          Icons.lock_clock_outlined,
-          size: 18,
-          color: theme.colorScheme.outline,
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (onForgotReceipt != null)
+              IconButton(
+                onPressed: busy ? null : onForgotReceipt,
+                icon: const Icon(Icons.receipt_long, size: 20),
+                tooltip: 'دریافت فیش فراموشی',
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  foregroundColor: theme.colorScheme.secondary,
+                ),
+              ),
+            if (onSell != null)
+              IconButton(
+                onPressed: busy ? null : onSell,
+                icon: const Icon(Icons.storefront_outlined),
+                tooltip: 'فروش در سبد غذایی',
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  foregroundColor: theme.colorScheme.primary,
+                  disabledForegroundColor: theme.colorScheme.outline,
+                ),
+              )
+            else
+              Icon(
+                Icons.lock_clock_outlined,
+                size: 18,
+                color: theme.colorScheme.outline,
+              ),
+          ],
         );
 
       case MealRowStatus.bookable:

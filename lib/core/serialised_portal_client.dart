@@ -213,6 +213,23 @@ class SerialisedPortalClient implements PortalClient {
         () => _inner.listMealForSale(session, date: date, slot: slot),
       );
 
+  @override
+  Future<ForgotReceiptOutcome> requestForgotReceipt(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+    ReserveType reserveType = ReserveType.weekly,
+  }) =>
+      _exclusive(
+        session.account,
+        () => _inner.requestForgotReceipt(
+          session,
+          date: date,
+          slot: slot,
+          reserveType: reserveType,
+        ),
+      );
+
   // --- Top-up ---
 
   @override

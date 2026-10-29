@@ -162,9 +162,11 @@ class AppState extends ChangeNotifier {
   /// The transactions the dashboard is computed from.
   List<Transaction> get transactions => _transactions;
 
+  SpendSummary? _cachedSpendSummary;
+
   /// The computed spend summary, honouring the current filter.
   SpendSummary get spendSummary =>
-      summarise(transactions: _transactions, filter: _spendFilter);
+      _cachedSpendSummary ??= summarise(transactions: _transactions, filter: _spendFilter);
 
   /// The accounts selected in the dashboard's account filter.
   Set<AccountId> get selectedAccountIds => _spendFilter.accountIds;
@@ -221,6 +223,7 @@ class AppState extends ChangeNotifier {
   /// Replaces the transaction history, e.g. after a live read.
   void setTransactions(List<Transaction> transactions) {
     _transactions = transactions;
+    _cachedSpendSummary = null;
     notifyListeners();
   }
 
@@ -359,6 +362,24 @@ class AppState extends ChangeNotifier {
     await saveReminderConfig(_reminderConfig.copyWith(accountIds: next));
   }
 
+  /// Toggles an account's participation in the weekend reservation nudge.
+  Future<void> toggleNudgeAccount(AccountId accountId) async {
+    final current = _reminderConfig.nudgeAccountIds ?? _reminderConfig.accountIds;
+    final next = Set<AccountId>.from(current);
+    if (!next.remove(accountId)) next.add(accountId);
+    await saveReminderConfig(_reminderConfig.copyWith(nudgeAccountIds: next));
+  }
+
+  /// Sets or clears dismissal of the next-week reservation reminder for a specific week.
+  Future<void> setNudgeWeekDismissal(DateTime? weekSaturday) async {
+    await saveReminderConfig(
+      _reminderConfig.copyWith(
+        dismissedNudgeWeekSaturday: weekSaturday,
+        clearDismissedNudge: weekSaturday == null,
+      ),
+    );
+  }
+
   // -------------------------------------------------------------------- hunt
 
   /// Selects the account whose hunt the screen shows.
@@ -422,18 +443,21 @@ class AppState extends ChangeNotifier {
   /// Toggles an account in the dashboard's filter.
   void toggleSpendAccount(AccountId accountId) {
     _spendFilter = _spendFilter.toggleAccount(accountId);
+    _cachedSpendSummary = null;
     notifyListeners();
   }
 
   /// Toggles a meal slot in the dashboard's filter.
   void toggleSpendSlot(MealSlot slot) {
     _spendFilter = _spendFilter.toggleSlot(slot);
+    _cachedSpendSummary = null;
     notifyListeners();
   }
 
   /// Clears the dashboard's filter, back to showing everything.
   void clearSpendFilter() {
     _spendFilter = const SpendFilter();
+    _cachedSpendSummary = null;
     notifyListeners();
   }
 

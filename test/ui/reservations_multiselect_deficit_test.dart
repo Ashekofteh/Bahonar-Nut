@@ -80,7 +80,7 @@ void main() {
           state: state,
           clock: clock,
           menus: testMenus,
-          onTopUp: (deficit) {
+          onTopUp: (deficit, {pendingRows}) {
             capturedDeficit = deficit;
           },
         ),
@@ -103,17 +103,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('کسری موجودی: ${formatTomanPersian(50000)}'), findsOneWidget);
-    expect(find.text('افزایش موجودی (${formatTomanPersian(50000)})'), findsOneWidget);
+    expect(find.text('شارژ حساب (${formatTomanPersian(50000)})'), findsOneWidget);
 
     // Select second meal (250,000 Rial) -> Total 450,000 Rial -> Deficit is 300,000 Rial (30,000 Toman)
     await tester.tap(checkboxes.at(1));
     await tester.pumpAndSettle();
 
     expect(find.text('کسری موجودی: ${formatTomanPersian(300000)}'), findsOneWidget);
-    expect(find.text('افزایش موجودی (${formatTomanPersian(300000)})'), findsOneWidget);
+    expect(find.text('شارژ حساب (${formatTomanPersian(300000)})'), findsOneWidget);
 
     // Tap on increase balance button
-    await tester.tap(find.text('افزایش موجودی (${formatTomanPersian(300000)})'));
+    await tester.tap(find.text('شارژ حساب (${formatTomanPersian(300000)})'));
     await tester.pumpAndSettle();
 
     expect(capturedDeficit, 300000);

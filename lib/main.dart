@@ -75,6 +75,7 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
   @override
   void dispose() {
     _state.dispose();
+    _services.dispose();
     super.dispose();
   }
 

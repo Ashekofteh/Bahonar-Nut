@@ -264,9 +264,22 @@ class ReminderDelivery {
     // hours later. So the read is given a deadline, and a read that misses
     // it is reported as a failure — which the digest names, so the student
     // is told the check could not be made rather than being told nothing.
+    final nextSat = nextWeekStart(clock.portalTodayUtc);
+    if (config.isNudgeDismissedForWeek(nextSat)) {
+      // User dismissed reservation reminder for this week!
+      await service.armNudge(config, clock);
+      return;
+    }
+
+    final targetAccounts = config.activeNudgeAccounts;
+    if (targetAccounts.isEmpty) {
+      await service.armNudge(config, clock);
+      return;
+    }
+
     final reservations = <AccountId, List<Reservation>>{};
     final failures = <ReminderFailure>[];
-    for (final accountId in config.accountIds) {
+    for (final accountId in targetAccounts) {
       try {
         reservations[accountId] = await read(accountId).timeout(readTimeout);
       } catch (_) {

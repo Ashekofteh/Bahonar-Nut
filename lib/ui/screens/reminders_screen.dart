@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/account.dart';
+import '../../core/next_week.dart';
 import '../../core/persian.dart';
 import '../../core/reminder.dart';
 import '../../core/time.dart';
@@ -73,7 +75,7 @@ class RemindersScreen extends StatelessWidget {
               const SizedBox(height: 12),
               _AccountsCard(state: state, config: config, accounts: accounts),
               const SizedBox(height: 12),
-              _NudgeCard(state: state, config: config),
+              _NudgeCard(state: state, config: config, accounts: accounts),
               const SizedBox(height: 12),
               const _LiveSyncCard(),
             ],
@@ -525,15 +527,24 @@ class _AccountsCard extends StatelessWidget {
   }
 }
 
-/// The next-week nudge.
+/// The next-week nudge with per-account selection and single-week dismissal.
 class _NudgeCard extends StatelessWidget {
-  const _NudgeCard({required this.state, required this.config});
+  const _NudgeCard({
+    required this.state,
+    required this.config,
+    required this.accounts,
+  });
 
   final AppState state;
   final ReminderConfig config;
+  final List<SavedAccount> accounts;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final nextSat = nextWeekStart(DateTime.now().toUtc());
+    final isDismissed = config.isNudgeDismissedForWeek(nextSat);
+
     return SectionCard(
       title: 'یادآور رزرو هفته آینده',
       subtitle:
@@ -543,7 +554,97 @@ class _NudgeCard extends StatelessWidget {
         onChanged: (value) => state
             .saveReminderConfig(config.copyWith(nextWeekNudgeEnabled: value)),
       ),
-      child: const SizedBox.shrink(),
+      child: config.nextWeekNudgeEnabled
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (accounts.isNotEmpty) ...[
+                  const Divider(height: 16),
+                  Text(
+                    'حساب‌های مشمول یادآور رزرو آخر هفته:',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final account in accounts)
+                        FilterChip(
+                          label: Text(account.resolvedName),
+                          selected: config.activeNudgeAccounts.contains(account.id),
+                          onSelected: (_) => state.toggleNudgeAccount(account.id),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 14),
+                if (isDismissed) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.notifications_off_outlined,
+                          size: 18,
+                          color: theme.colorScheme.onSecondaryContainer,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'یادآور رزرو برای این هفته لغو شده است (برای هفته‌های بعد فعال خواهد بود).',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSecondaryContainer,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => state.setNudgeWeekDismissal(null),
+                          child: const Text('فعال‌سازی مجدد'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('لغو یادآور رزرو این هفته'),
+                          content: const Text(
+                            'آیا می‌خواهید یادآور رزرو غذای هفته آینده فقط برای این هفته غیرفعال شود؟\n\n'
+                            'این لغو موقت است و یادآور در هفته‌های بعد به صورت خودکار فعال خواهد بود.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(false),
+                              child: const Text('انصراف'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.of(context).pop(true),
+                              child: const Text('لغو برای این هفته'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        await state.setNudgeWeekDismissal(nextSat);
+                      }
+                    },
+                    icon: const Icon(Icons.snooze_outlined, size: 18),
+                    label: const Text('لغو یادآور رزرو برای این هفته'),
+                  ),
+                ],
+              ],
+            )
+          : const SizedBox.shrink(),
     );
   }
 }

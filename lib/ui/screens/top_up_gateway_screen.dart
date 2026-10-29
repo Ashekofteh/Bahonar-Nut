@@ -155,6 +155,12 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
   }
 
   @override
+  void dispose() {
+    _controller.loadRequest(Uri.parse('about:blank'));
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 

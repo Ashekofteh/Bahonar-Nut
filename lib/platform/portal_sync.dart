@@ -142,6 +142,7 @@ class PortalSync {
           ..._basketMeals(accountId, transactions, reservations, now),
         ];
         mealStore.replaceAll(refreshed);
+        mealStore.prune(now);
         await persist?.call();
         onMealsChanged?.call();
 

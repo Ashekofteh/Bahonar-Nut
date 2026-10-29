@@ -80,11 +80,23 @@ NotificationText composeReminderText({
       ? 'امروز هیچ وعده رزروشده‌ای ندارید.'
       : sections.join('\n\n');
 
+  final multiAccount = formatMultiAccountNotification(meals);
+
   return NotificationText(
     title: title,
     body: body,
     summary: '${toPersianDigits(meals.length)} وعده',
+    multiAccountText: multiAccount.isNotEmpty ? multiAccount : null,
   );
+}
+
+/// Renders the multi-account reminder text:
+/// `با اکانت شكفته غذای a را رزرو داری - با اکانت مقسمی غذای b را رزرو داری`
+String formatMultiAccountNotification(List<HeldMealDigest> meals) {
+  if (meals.isEmpty) return '';
+  return meals
+      .map((m) => 'با اکانت ${m.displayName} غذای ${m.dishName ?? _mealName(m.slot)} را رزرو داری')
+      .join(' - ');
 }
 
 /// Renders the next-week nudge.

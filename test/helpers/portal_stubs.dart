@@ -142,6 +142,20 @@ class FakePortalClient implements PortalClient {
   }) async =>
       const SaleListingSucceeded();
 
+  @override
+  Future<ForgotReceiptOutcome> requestForgotReceipt(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+    ReserveType reserveType = ReserveType.weekly,
+  }) async =>
+      ForgotReceiptSucceeded(
+        date: date,
+        slot: slot,
+        code: '12345',
+        message: 'فیش فراموشی با موفقیت صادر شد.',
+      );
+
   // --- Top-up ---
 
   @override

@@ -28,8 +28,10 @@ import 'screens/dashboard_screen.dart';
 import 'screens/hunt_screen.dart';
 import 'screens/reminders_screen.dart';
 import 'screens/reservations_screen.dart';
+import 'package:flutter/services.dart';
 import 'screens/top_up_gateway_screen.dart';
 import 'screens/top_up_sheet.dart';
+import 'reservation_table_model.dart';
 
 /// The app's navigation shell.
 ///
@@ -165,6 +167,14 @@ class _HomeShellState extends State<HomeShell> {
         _refreshBalancesQuietly();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    widget.state.onReminderConfigChanged = null;
+    widget.state.onHuntConfigChanged = null;
+    widget.state.onLoaded = null;
+    super.dispose();
   }
 
   /// Reads every account's balance once, at launch, without a prompt.
@@ -757,6 +767,14 @@ class _HomeShellState extends State<HomeShell> {
   /// The (date, slot) an action is in flight for.
   String? _busyKey;
 
+  /// Pending reservations waiting for payment completion.
+  AccountId? _pendingBookingsAccount;
+  List<MealOffering>? _pendingOfferingsToBook;
+
+  /// Pending hunt activation waiting for payment completion.
+  AccountId? _pendingHuntAccount;
+  HuntConfig? _pendingHuntConfig;
+
   /// Opens the booking sheet for a (date, slot) the student tapped.
   Future<void> _bookMeal(DateTime date, MealSlot slot) async {
     MealMenu? menu;
@@ -837,6 +855,8 @@ class _HomeShellState extends State<HomeShell> {
       );
 
       if (goToTopUp == true && mounted) {
+        _pendingBookingsAccount = accountId;
+        _pendingOfferingsToBook = [offering];
         await _startTopUpFor(accountId, suggestedAmountRial: deficit);
       }
       return outcome.message;
@@ -904,7 +924,13 @@ class _HomeShellState extends State<HomeShell> {
     // The sheet closed. If the student got as far as the gateway, the
     // payment is settled when the gateway returns — which the gateway
     // screen reports back.
-    if (amountRial == 0 || !mounted) return;
+    if (amountRial == 0 || !mounted) {
+      _pendingBookingsAccount = null;
+      _pendingOfferingsToBook = null;
+      _pendingHuntAccount = null;
+      _pendingHuntConfig = null;
+      return;
+    }
   }
 
   /// The banks that actually work.
@@ -986,6 +1012,63 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     if (matched.status.isPaid) {
+      // 1. Auto-arm pending hunt if payment was triggered from hunt deficit
+      if (_pendingHuntAccount == account.id && _pendingHuntConfig != null) {
+        final config = _pendingHuntConfig!;
+        _pendingHuntAccount = null;
+        _pendingHuntConfig = null;
+
+        final armed = config.copyWith(enabled: true);
+        await widget.state.saveHuntConfig(armed);
+        _armHunt(account.id, armed);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'پرداخت با موفقیت انجام شد و سیستم شکار به طور خودکار فعال شد.',
+              ),
+              backgroundColor: Colors.green.shade700,
+            ),
+          );
+        }
+        return;
+      }
+
+      // 2. Auto-reserve pending offerings if payment was triggered from reservation deficit
+      if (_pendingBookingsAccount == account.id &&
+          _pendingOfferingsToBook != null &&
+          _pendingOfferingsToBook!.isNotEmpty) {
+        final offerings = List.of(_pendingOfferingsToBook!);
+        _pendingBookingsAccount = null;
+        _pendingOfferingsToBook = null;
+
+        var bookedCount = 0;
+        for (final offering in offerings) {
+          final outcome = await widget.services.reservations.reserve(
+            accountId: account.id,
+            offering: offering,
+          );
+          if (outcome.succeeded) {
+            bookedCount++;
+          }
+        }
+        await widget.services.mealStore.persist();
+        widget.state.mealsChanged();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'پرداخت با موفقیت انجام شد و ${toPersianDigits(bookedCount)} وعده به طور خودکار رزرو شدند.',
+              ),
+              backgroundColor: Colors.green.shade700,
+            ),
+          );
+        }
+        return;
+      }
+
       _showBookingProblem(
         'پرداخت با موفقیت انجام شد و اعتبار حساب افزایش یافت.',
       );
@@ -1137,9 +1220,11 @@ class _HomeShellState extends State<HomeShell> {
         onBook: _bookMeal,
         onCancel: _cancelMeal,
         onSell: _sellMeal,
-        onTopUp: (deficit) => _startTopUpFor(
+        onForgotReceipt: _handleForgotReceipt,
+        onTopUp: (deficit, {pendingRows}) => _handleReservationsTopUp(
           widget.state.activeHuntAccount ?? widget.state.accounts.first.id,
-          suggestedAmountRial: deficit,
+          deficit,
+          pendingRows: pendingRows,
         ),
         onRefresh: _refreshTable,
       ),
@@ -1402,6 +1487,59 @@ class _HomeShellState extends State<HomeShell> {
     final accountId = widget.state.activeHuntAccount;
     if (accountId == null) return true;
 
+    // Rule: If multiple dishes in priority, calculate deficit on the MORE EXPENSIVE dish
+    var requiredCostRial = 0;
+    for (final dish in config.dishPriority) {
+      HuntDishOption? match;
+      for (final d in _marketDishes) {
+        if (d.name == dish.name) {
+          match = d;
+          break;
+        }
+      }
+      final price = match?.priceRial ?? 350000;
+      if (price > requiredCostRial) {
+        requiredCostRial = price;
+      }
+    }
+
+    final balance = widget.state.balanceFor(accountId) ?? 0;
+    final deficitRial = requiredCostRial - balance;
+    if (deficitRial > 0) {
+      final goToTopUp = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('کمبود موجودی برای شکار'),
+          content: Text(
+            'موجودی شما ${formatTomanPersian(balance)} است و برای رزرو غذاهایی که در اولویت آورده‌اید کافی نیست.\n'
+            'کسری موجودی: ${formatTomanPersian(deficitRial)}\n\n'
+            'در صورتی که دو غذا در اولویت باشند، غذای گران‌تر مبنای محاسبه است.\n'
+            'آیا مایلید برای افزایش اعتبار به صفحه پرداخت هدایت شوید؟ (پس از پرداخت، شکار به طور خودکار فعال می‌شود)',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('لغو فرایند'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('افزایش موجودی'),
+            ),
+          ],
+        ),
+      );
+
+      if (goToTopUp == true && mounted) {
+        _pendingHuntAccount = accountId;
+        _pendingHuntConfig = config;
+        await _startTopUpFor(accountId, suggestedAmountRial: deficitRial);
+      }
+
+      widget.state.setHuntEnableRefusal('کسری موجودی: ${formatTomanPersian(deficitRial)}');
+      _enableNeedsTopUp = true;
+      return false;
+    }
+
     final rule = config.toRule(id: 'hunt-$accountId', account: accountId);
     final verdict = await widget.services.engine.preflight(rule, hunt: config);
 
@@ -1470,6 +1608,183 @@ class _HomeShellState extends State<HomeShell> {
         .firstWhere((_) => true, orElse: () => null);
     if (account == null) return;
     await _startTopUp(account, suggestedAmountRial: suggestedAmountRial);
+  }
+
+  Future<void> _handleReservationsTopUp(
+    AccountId accountId,
+    int deficitRial, {
+    List<MealRow>? pendingRows,
+  }) async {
+    if (pendingRows != null && pendingRows.isNotEmpty) {
+      final offerings = <MealOffering>[];
+      for (final row in pendingRows) {
+        MealMenu? matchingMenu;
+        for (final m in _tableMenus) {
+          if (m.date == row.date && m.slot == row.slot) {
+            matchingMenu = m;
+            break;
+          }
+        }
+        if (matchingMenu != null && matchingMenu.dishes.isNotEmpty) {
+          offerings.add(MealOffering(
+            date: row.date,
+            slot: row.slot,
+            hall: matchingMenu.halls.isNotEmpty ? matchingMenu.halls.first : const Hall(id: '1', name: 'مرکزی'),
+            option: matchingMenu.dishes.first,
+            reservable: true,
+          ));
+        }
+      }
+      _pendingBookingsAccount = accountId;
+      _pendingOfferingsToBook = offerings;
+    }
+    await _startTopUpFor(accountId, suggestedAmountRial: deficitRial);
+  }
+
+  String _mealSlotName(MealSlot slot) => switch (slot) {
+        MealSlot.breakfast => 'صبحانه',
+        MealSlot.lunch => 'ناهار',
+        MealSlot.dinner => 'شام',
+      };
+
+  Future<void> _handleForgotReceipt(
+    DateTime date,
+    MealSlot slot,
+    String? dishName,
+  ) async {
+    final accountId = widget.state.activeHuntAccount ??
+        (widget.state.accounts.isEmpty ? null : widget.state.accounts.first.id);
+    if (accountId == null) return;
+
+    final account = widget.state.accounts.firstWhere((a) => a.id == accountId);
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('دریافت فیش فراموشی کارت'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('حساب: ${account.resolvedName}'),
+            const SizedBox(height: 4),
+            Text('وعده: ${_mealSlotName(slot)} - ${formatPersianDate(date)}'),
+            if (dishName != null) ...[
+              const SizedBox(height: 4),
+              Text('غذا: $dishName'),
+            ],
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                slot == MealSlot.breakfast
+                    ? 'توجه: فیش صبحانه فردا هم‌زمان با توزیع شام امشب (۱۶:۳۰ تا ۲۰:۳۰) دریافت می‌شود.\nسقف دریافت فیش: ۲ بار در ماه.'
+                    : 'سقف دریافت فیش فراموشی برای هر وعده: حداکثر ۲ بار در ماه.',
+                style: Theme.of(ctx).textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('انصراف'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.receipt_long, size: 18),
+            label: const Text('دریافت فیش'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    setState(() {
+      _busyKey = '${date.year}-${date.month}-${date.day}|${slot.name}';
+    });
+
+    final outcome = await widget.services.sessions.withSession(
+      accountId,
+      (session) => widget.services.client.requestForgotReceipt(
+        session,
+        date: date,
+        slot: slot,
+      ),
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _busyKey = null;
+    });
+
+    if (outcome is ForgotReceiptSucceeded) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('فیش فراموشی صادر شد'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'کد فیش فراموشی:',
+                style: Theme.of(ctx).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Theme.of(ctx).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: SelectableText(
+                  outcome.code,
+                  style: Theme.of(ctx).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 4,
+                    color: Theme.of(ctx).colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'این کد را در دستگاه سلف وارد کنید یا به متصدی تحویل دهید.',
+                textAlign: TextAlign.center,
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: outcome.code));
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('کد فیش کپی شد')),
+                );
+              },
+              icon: const Icon(Icons.copy, size: 18),
+              label: const Text('کپی کد'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('بستن'),
+            ),
+          ],
+        ),
+      );
+    } else if (outcome is ForgotReceiptRefused) {
+      _showBookingProblem(outcome.reason);
+    } else if (outcome is ForgotReceiptAmbiguous) {
+      _showBookingProblem(outcome.diagnostic);
+    }
   }
 
   /// Redraws the dish and hall lists from a menu.
