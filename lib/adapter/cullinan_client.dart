@@ -1109,32 +1109,54 @@ class CullinanPortalClient implements PortalClient {
     final first = await transport.get(session.account, _Paths.topUpList);
     _rejectIfBounced(first);
 
-    // Find the per-row «استعلام» verify button in the table
-    final match = RegExp(
-      r'name="([^"]*grdContent\$ctl02\$imgbtnVerify)"',
-    ).firstMatch(first.body) ?? RegExp(
-      r'name="([^"]*imgbtnVerify)"',
-    ).firstMatch(first.body);
+    // Find the first non-disabled «استعلام» verify button in the table.
+    // Rows that have already been verified carry disabled="disabled".
+    final allButtons = RegExp(
+      r'<input[^>]*name="([^"]*imgbtnVerify)"[^>]*>',
+      caseSensitive: false,
+    ).allMatches(first.body);
 
-    if (match == null) {
+    String? btnName;
+    for (final m in allButtons) {
+      final fullTag = m.group(0)!;
+      if (!fullTag.contains('disabled')) {
+        btnName = m.group(1);
+        break;
+      }
+    }
+
+    btnName ??= RegExp(r'name="([^"]*imgbtnVerify)"').firstMatch(first.body)?.group(1);
+
+    if (btnName == null) {
       return CullinanParser.parseTopUpPayments(first.body);
     }
 
-    final btnName = match.group(1)!;
+    final postBody = <String, String>{
+      '__VIEWSTATE': hiddenFieldValue(first.body, '__VIEWSTATE'),
+      '__VIEWSTATEGENERATOR':
+          hiddenFieldValue(first.body, '__VIEWSTATEGENERATOR'),
+      '__VIEWSTATEENCRYPTED':
+          hiddenFieldValue(first.body, '__VIEWSTATEENCRYPTED'),
+      '__EVENTTARGET': '',
+      '__EVENTARGUMENT': '',
+    };
+
+    final dateFrom = _inputValue(first.body, 'cphMain_txtDateFrom');
+    if (dateFrom != null && dateFrom.isNotEmpty) {
+      postBody['ctl00\$cphMain\$txtDateFrom'] = dateFrom;
+    }
+    final dateTo = _inputValue(first.body, 'cphMain_txtDateTo');
+    if (dateTo != null && dateTo.isNotEmpty) {
+      postBody['ctl00\$cphMain\$txtDateTo'] = dateTo;
+    }
+
+    postBody['$btnName.x'] = '15';
+    postBody['$btnName.y'] = '15';
+
     final verified = await transport.post(
       session.account,
       _Paths.topUpList,
-      body: {
-        '__VIEWSTATE': hiddenFieldValue(first.body, '__VIEWSTATE'),
-        '__VIEWSTATEGENERATOR':
-            hiddenFieldValue(first.body, '__VIEWSTATEGENERATOR'),
-        '__VIEWSTATEENCRYPTED':
-            hiddenFieldValue(first.body, '__VIEWSTATEENCRYPTED'),
-        '__EVENTTARGET': '',
-        '__EVENTARGUMENT': '',
-        '$btnName.x': '10',
-        '$btnName.y': '10',
-      },
+      body: postBody,
     );
     _rejectIfBounced(verified);
     return CullinanParser.parseTopUpPayments(verified.body);

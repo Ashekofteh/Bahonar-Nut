@@ -153,9 +153,14 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
             );
           }
         }
-      } else if (type == 'payment_success') {
+      } else if (type == 'payment_success' || type == 'portal_return_success') {
         if (mounted && !_paymentSuccessDetected) {
           setState(() => _paymentSuccessDetected = true);
+        }
+        if (type == 'portal_return_success') {
+          Future.delayed(const Duration(milliseconds: 1500), () {
+            if (mounted) _finishAndReturn();
+          });
         }
       }
     } catch (_) {}
@@ -298,9 +303,37 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
     });
   }
 
+  try {
+    window.open = function(url) {
+      if (url) window.location.href = url;
+      return window;
+    };
+  } catch(e) {}
+  document.querySelectorAll('form[target], a[target]').forEach(el => {
+    if (el.target === '_blank' || el.target === '_parent') el.target = '_self';
+  });
+
   function checkSuccessAndAutoReturn() {
     const pageText = document.body ? (document.body.innerText || '') : '';
+    const isPortal = window.location.hostname.includes('uk.ac.ir');
+
+    if (isPortal) {
+      const isPortalSuccess = pageText.includes('پرداخت اینترنتی با موفقیت') || 
+                              pageText.includes('با موفقیت انجام شد') || 
+                              (pageText.includes('موفق') && pageText.includes('کد پیگیری')) ||
+                              pageText.includes('اعتبار');
+      if (isPortalSuccess) {
+        if (window.BankCardCaptureChannel) {
+          window.BankCardCaptureChannel.postMessage(JSON.stringify({
+            type: 'portal_return_success'
+          }));
+        }
+        return;
+      }
+    }
+
     const hasSuccessText = pageText.includes('پرداخت با موفقیت انجام شد') || 
+                           pageText.includes('پرداخت اینترنتی با موفقیت') || 
                            pageText.includes('تراکنش با موفقیت') || 
                            pageText.includes('تکمیل فرآیند خرید');
 
@@ -311,13 +344,25 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
         }));
       }
 
-      const buttons = document.querySelectorAll('button, input[type="submit"], input[type="button"], a, #btnConfirm, #submitBtn');
-      for (const btn of buttons) {
-        const text = (btn.innerText || btn.value || '').trim();
+      const returnForm = document.querySelector('form[action*="uk.ac.ir" i], form[action*="ePay" i], form[action*="Return" i], #returnForm, form[name="returnForm"]');
+      if (returnForm) {
+        setTimeout(() => {
+          try { returnForm.submit(); } catch(e) {}
+        }, 500);
+        return;
+      }
+
+      const elements = document.querySelectorAll('button, input[type="submit"], input[type="button"], a, div[role="button"], span[role="button"], .btn, #btnConfirm, #submitBtn');
+      for (const el of elements) {
+        const text = (el.innerText || el.value || '').trim();
         if (text.includes('تکمیل فرآیند خرید') || text.includes('تکمیل خرید') || text.includes('بازگشت به سایت پذیرنده')) {
           setTimeout(() => {
-            try { btn.click(); } catch(e) {}
-          }, 800);
+            try {
+              el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+              el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+              el.click();
+            } catch(e) {}
+          }, 500);
           break;
         }
       }
@@ -638,9 +683,8 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
               await _promptSaveCardIfPending();
             }
             if (mounted) {
-              widget.onReturned?.call();
               Future.delayed(const Duration(milliseconds: 1500), () {
-                if (mounted) Navigator.of(context).maybePop();
+                if (mounted) _finishAndReturn();
               });
             }
           });
@@ -669,6 +713,11 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'بازگشت به برنامه',
+            onPressed: _finishAndReturn,
+          ),
           title: const Text('پرداخت اینترنتی'),
           actions: [
             FilledButton.tonalIcon(

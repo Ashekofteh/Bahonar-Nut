@@ -169,10 +169,17 @@ class TopUpService {
         // trigger an automatic bank verification (استعلام) on the portal.
         var matched = matchTopUpPayment(payments, amountRial);
         if (matched == null || !matched.status.isPaid) {
-          try {
-            payments = await client.verifyTopUpPayment(session);
-          } catch (_) {
-            // Best effort verification
+          for (var i = 0; i < 3; i++) {
+            try {
+              payments = await client.verifyTopUpPayment(session);
+              matched = matchTopUpPayment(payments, amountRial);
+              if (matched != null && matched.status.isPaid) break;
+            } catch (_) {
+              // Best effort verification
+            }
+            if (i < 2) {
+              await Future<void>.delayed(const Duration(milliseconds: 1200));
+            }
           }
         }
 
