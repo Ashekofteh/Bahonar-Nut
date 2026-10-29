@@ -655,8 +655,7 @@ class CullinanPortalClient implements PortalClient {
     final reservations = _parseReservations(confirmation.body);
     for (final reservation in reservations) {
       if (reservation.slot == offering.slot &&
-          _sameDate(reservation.date, offering.date) &&
-          reservation.hall.id == offering.hall.id) {
+          _sameDate(reservation.date, offering.date)) {
         return reservation;
       }
     }
@@ -945,7 +944,11 @@ class CullinanPortalClient implements PortalClient {
       }
     }
 
-    body[_gridSaveButton(ref.slot)] = 'ذخیره';
+    final saveCancelBtnName = _gridSaveButton(ref.slot);
+    final saveCancelBtnInput = inputBySuffix(html, _gridSaveButtonSuffix(ref.slot));
+    body[saveCancelBtnName] = saveCancelBtnInput?.value.isNotEmpty == true
+        ? saveCancelBtnInput!.value
+        : 'ذخیره';
     return body;
   }
 
@@ -1356,7 +1359,7 @@ class CullinanPortalClient implements PortalClient {
           body[checkbox.name] = 'on';
           body[self.name] = offering.hall.id;
           body[food.name] = offering.option.id;
-          body[count.name] = count.options.firstOrNull?.value ?? '1';
+          body[count.name] = count.options.any((o) => o.value == '1') ? '1' : (count.options.firstOrNull?.value ?? '1');
           continue;
         }
 
@@ -1371,7 +1374,11 @@ class CullinanPortalClient implements PortalClient {
       }
     }
 
-    body[_gridSaveButton(offering.slot)] = 'ذخیره';
+    final saveBtnName = _gridSaveButton(offering.slot);
+    final saveBtnInput = inputBySuffix(html, _gridSaveButtonSuffix(offering.slot));
+    body[saveBtnName] = saveBtnInput?.value.isNotEmpty == true
+        ? saveBtnInput!.value
+        : 'ذخیره';
     return body;
   }
 
@@ -1379,6 +1386,12 @@ class CullinanPortalClient implements PortalClient {
         MealSlot.breakfast => 'grdReservationBreakfast',
         MealSlot.lunch => 'grdReservationLunch',
         MealSlot.dinner => 'grdReservationDinner',
+      };
+
+  static String _gridSaveButtonSuffix(MealSlot slot) => switch (slot) {
+        MealSlot.breakfast => 'btnSaveBreakfast',
+        MealSlot.lunch => 'btnSaveLunch',
+        MealSlot.dinner => 'btnSaveDinner',
       };
 
   static String _gridSaveButton(MealSlot slot) => switch (slot) {

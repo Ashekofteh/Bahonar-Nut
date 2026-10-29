@@ -190,9 +190,8 @@ List<MealRow> buildMealRows({
 
     // The cutoff. The portal refuses a locked row silently, so the app has to
     // say so first.
-    final locked = clock != null &&
-        clock.isSynced &&
-        !clock.isReservable(dates[key]!);
+    final locked = !menu.reservable ||
+        (clock != null && clock.isSynced && !clock.isReservable(dates[key]!));
 
     final cheapest = _cheapest(menu);
     final dishDisplay = menu.dishes.length == 1

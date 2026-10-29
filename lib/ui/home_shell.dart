@@ -779,9 +779,24 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _bookMeal(DateTime date, MealSlot slot) async {
     MealMenu? menu;
     for (final candidate in _tableMenus) {
-      if (candidate.date == date && candidate.slot == slot) {
+      if (candidate.date.year == date.year &&
+          candidate.date.month == date.month &&
+          candidate.date.day == date.day &&
+          candidate.slot == slot) {
         menu = candidate;
         break;
+      }
+    }
+    if (menu == null && mounted) {
+      await _refreshTable(quiet: true);
+      for (final candidate in _tableMenus) {
+        if (candidate.date.year == date.year &&
+            candidate.date.month == date.month &&
+            candidate.date.day == date.day &&
+            candidate.slot == slot) {
+          menu = candidate;
+          break;
+        }
       }
     }
     if (menu == null) return;
@@ -793,6 +808,7 @@ class _HomeShellState extends State<HomeShell> {
     if (accountId == null) return;
 
     final currentBalance = widget.state.balanceFor(accountId);
+    if (!mounted) return;
 
     await BookingSheet.show(
       context,
@@ -827,6 +843,9 @@ class _HomeShellState extends State<HomeShell> {
     // screen, and a booking that failed would show a meal they do not have.
     await widget.services.mealStore.persist();
     widget.state.mealsChanged();
+    if (outcome.succeeded) {
+      _refreshTable(quiet: true);
+    }
 
     if (!mounted) return outcome.message;
 
@@ -1229,6 +1248,73 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// Books multiple offerings in sequence.
+  Future<void> _batchBook(AccountId accountId, List<MealRow> rows) async {
+    setState(() => _busyKey = 'batch');
+    int succeeded = 0;
+    int failed = 0;
+    String? lastError;
+
+    for (final row in rows) {
+      MealMenu? matchingMenu;
+      for (final m in _tableMenus) {
+        if (m.date.year == row.date.year &&
+            m.date.month == row.date.month &&
+            m.date.day == row.date.day &&
+            m.slot == row.slot) {
+          matchingMenu = m;
+          break;
+        }
+      }
+      if (matchingMenu != null && matchingMenu.dishes.isNotEmpty) {
+        final offering = MealOffering(
+          date: row.date,
+          slot: row.slot,
+          hall: matchingMenu.halls.isNotEmpty
+              ? matchingMenu.halls.first
+              : const Hall(id: '1', name: 'مرکزی'),
+          option: matchingMenu.dishes.first,
+          reservable: true,
+        );
+        final outcome = await widget.services.reservations.reserve(
+          accountId: accountId,
+          offering: offering,
+        );
+        if (outcome.succeeded) {
+          succeeded++;
+        } else {
+          failed++;
+          lastError = outcome.message;
+        }
+      }
+    }
+
+    setState(() => _busyKey = null);
+    await widget.services.mealStore.persist();
+    widget.state.mealsChanged();
+    _refreshTable(quiet: true);
+
+    if (mounted) {
+      if (failed == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${toPersianDigits(succeeded)} وعده غذایی با موفقیت رزرو شد.'),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '$succeeded وعده رزرو شد، $failed وعده ناموفق بود.${lastError != null ? " ($lastError)" : ""}',
+            ),
+            backgroundColor: Colors.amber.shade900,
+          ),
+        );
+      }
+    }
+  }
+
   /// Says why a booking could not be started, on the screen the student is on.
   void _showBookingProblem(String message) {
     if (!mounted) return;
@@ -1255,6 +1341,10 @@ class _HomeShellState extends State<HomeShell> {
         onCancel: _cancelMeal,
         onSell: _sellMeal,
         onForgotReceipt: _handleForgotReceipt,
+        onBatchBook: (rows) => _batchBook(
+          widget.state.activeHuntAccount ?? widget.state.accounts.first.id,
+          rows,
+        ),
         onTopUp: (deficit, {pendingRows}) => _handleReservationsTopUp(
           widget.state.activeHuntAccount ?? widget.state.accounts.first.id,
           deficit,

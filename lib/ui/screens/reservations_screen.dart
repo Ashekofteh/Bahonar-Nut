@@ -37,6 +37,7 @@ class ReservationsScreen extends StatefulWidget {
     this.onCancel,
     this.onSell,
     this.onForgotReceipt,
+    this.onBatchBook,
     this.onTopUp,
     this.onRefresh,
     this.menus = const [],
@@ -58,6 +59,9 @@ class ReservationsScreen extends StatefulWidget {
 
   /// Requests a forgot receipt for a held meal.
   final void Function(DateTime date, MealSlot slot, String? dishName)? onForgotReceipt;
+
+  /// Books multiple offerings in sequence.
+  final Future<void> Function(List<MealRow> rows)? onBatchBook;
 
   /// Directs student to increase balance when deficit is detected.
   final void Function(int deficitRial, {List<MealRow>? pendingRows})? onTopUp;
@@ -86,6 +90,8 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
   /// Navigation is unconstrained: tapping next week or previous week advances or rewinds freely.
   int _weekOffset = 0;
   bool _selectionMode = false;
+
+
   final Set<String> _selectedKeys = {};
   final Map<String, MealRow> _selectedRows = {};
 
@@ -157,6 +163,16 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
           clock: widget.clock,
         );
 
+        final currentSat = _currentSaturday();
+        final currentWeekRows = filterRowsForWeek(allRows, currentSat);
+        final nextSat = currentSat.add(const Duration(days: 7));
+        final nextWeekRows = filterRowsForWeek(allRows, nextSat);
+
+        final currentBookableCount = currentWeekRows.where((r) => r.status == MealRowStatus.bookable).length;
+        final nextBookableCount = nextWeekRows.where((r) => r.status == MealRowStatus.bookable).length;
+
+
+
         final selectedSat = _selectedSaturday();
         final weekRows = filterRowsForWeek(allRows, selectedSat);
 
@@ -201,7 +217,44 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                 onPrevious: _previousWeek,
                 onNext: _nextWeek,
                 onReset: _resetToCurrentWeek,
+                onSelectOffset: (offset) => setState(() => _weekOffset = offset),
+                nextBookableCount: nextBookableCount,
               ),
+              if (_weekOffset == 0 && currentBookableCount == 0 && nextBookableCount > 0)
+                Container(
+                  margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.event_available, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '${toPersianDigits(nextBookableCount)} وعده غذایی در «هفته بعد» باز و قابل رزرو است.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onPrimaryContainer,
+                              ),
+                        ),
+                      ),
+                      FilledButton.tonal(
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        onPressed: () => setState(() => _weekOffset = 1),
+                        child: const Text('مشاهده و رزرو'),
+                      ),
+                    ],
+                  ),
+                ),
               Expanded(
                 child: ReservationsTable(
                   rows: weekRows,
@@ -277,8 +330,13 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                       return;
                     }
 
-                    for (final row in _selectedRows.values) {
-                      widget.onBook?.call(row.date, row.slot);
+                    final rowsToBookList = _selectedRows.values.toList();
+                    if (widget.onBatchBook != null) {
+                      await widget.onBatchBook!(rowsToBookList);
+                    } else {
+                      for (final row in rowsToBookList) {
+                        widget.onBook?.call(row.date, row.slot);
+                      }
                     }
                     setState(() {
                       _selectionMode = false;
@@ -304,6 +362,8 @@ class _WeekNavigator extends StatelessWidget {
     required this.onPrevious,
     required this.onNext,
     required this.onReset,
+    this.onSelectOffset,
+    this.nextBookableCount = 0,
   });
 
   final int weekOffset;
@@ -311,6 +371,8 @@ class _WeekNavigator extends StatelessWidget {
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final VoidCallback onReset;
+  final void Function(int offset)? onSelectOffset;
+  final int nextBookableCount;
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +410,7 @@ class _WeekNavigator extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       mainAxisSize: MainAxisSize.min,

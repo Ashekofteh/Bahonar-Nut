@@ -98,7 +98,7 @@ RowStatus rowStatus(String rowHtml) {
   if (tag.contains('lockAcceptGreen24')) {
     return const RowStatus(held: true, locked: true);
   }
-  if (tag.contains('AcceptGreen16')) {
+  if (tag.contains('AcceptGreen') || tag.contains('رزرو شده')) {
     return const RowStatus(held: true);
   }
   if (tag.contains('Token_Eating20') || tag.contains('Eating16')) {
