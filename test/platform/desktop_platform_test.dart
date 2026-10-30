@@ -116,4 +116,11 @@ void main() {
       services.dispose();
     });
   });
+
+  group('defaultDesktopStorageDirectory', () {
+    test('returns a valid non-empty Directory path on desktop', () {
+      final dir = defaultDesktopStorageDirectory();
+      expect(dir.path, isNotEmpty);
+    });
+  });
 }

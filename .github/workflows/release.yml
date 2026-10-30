@@ -1,4 +1,4 @@
-name: Build and Release Multi-Platform (Android, Windows, macOS)
+name: Build and Release Multi-Platform (Android, Windows, macOS, Linux)
 
 on:
   push:
@@ -131,9 +131,64 @@ jobs:
           name: selfiyar-macos-zip
           path: selfiyar-macos.zip
 
+  build-linux:
+    name: Build Linux Desktop (x64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux Build Dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Enable Linux Desktop Support
+        run: flutter config --enable-linux-desktop
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build Linux Release
+        run: flutter build linux --release
+
+      - name: Package Linux Relocatable Tarball (.tar.gz)
+        run: |
+          cd build/linux/x64/release/bundle
+          if [ -f "bahonar_nut" ] && [ ! -f "Selfiyar" ]; then
+            cp bahonar_nut Selfiyar
+          fi
+          echo "[Desktop Entry]" > Selfiyar.desktop
+          echo "Name=سِلفیار" >> Selfiyar.desktop
+          echo "GenericName=Selfiyar" >> Selfiyar.desktop
+          echo "Comment=Smart Dining Assistant for Shahid Bahonar University" >> Selfiyar.desktop
+          echo "Exec=Selfiyar" >> Selfiyar.desktop
+          echo "Icon=data/flutter_assets/assets/images/app_logo.png" >> Selfiyar.desktop
+          echo "Terminal=false" >> Selfiyar.desktop
+          echo "Type=Application" >> Selfiyar.desktop
+          echo "Categories=Utility;" >> Selfiyar.desktop
+          chmod +x Selfiyar bahonar_nut
+          cd ../../../..
+          tar -czvf selfiyar-linux-x64.tar.gz -C build/linux/x64/release bundle
+
+      - name: Upload Linux TAR.GZ Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfiyar-linux-tar
+          path: selfiyar-linux-x64.tar.gz
+
   publish-release:
     name: Publish Multi-Platform Release
-    needs: [build-android, build-windows, build-macos]
+    needs: [build-android, build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -162,11 +217,17 @@ jobs:
           name: selfiyar-macos-zip
           path: release-assets
 
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: selfiyar-linux-tar
+          path: release-assets
+
       - name: Publish or Update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RELEASE_TAG="v1.0.0-beta.5"
+          RELEASE_TAG="v1.0.0-beta.18"
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             RELEASE_TAG="${{ github.ref_name }}"
           fi
@@ -179,6 +240,7 @@ jobs:
               "release-assets/selfiyar-beta.apk#selfiyar-beta.apk" \
               "release-assets/selfiyar-windows-x64.zip#selfiyar-windows-x64.zip" \
               "release-assets/selfiyar-macos.zip#selfiyar-macos.zip" \
+              "release-assets/selfiyar-linux-x64.tar.gz#selfiyar-linux-x64.tar.gz" \
               --clobber
             gh release edit "$RELEASE_TAG" \
               --title "سِلفیار نسخه آزمایشی بتا ($RELEASE_TAG)" \
@@ -190,6 +252,7 @@ jobs:
               "release-assets/selfiyar-beta.apk#selfiyar-beta.apk" \
               "release-assets/selfiyar-windows-x64.zip#selfiyar-windows-x64.zip" \
               "release-assets/selfiyar-macos.zip#selfiyar-macos.zip" \
+              "release-assets/selfiyar-linux-x64.tar.gz#selfiyar-linux-x64.tar.gz" \
               --title "سِلفیار نسخه آزمایشی بتا ($RELEASE_TAG)" \
               -F .github/RELEASE_NOTES_BETA.md \
               --prerelease
