@@ -5,6 +5,8 @@ import '../../core/persian.dart';
 import '../../core/session.dart';
 import '../app_state.dart';
 import '../widgets.dart';
+import '../../platform/platform_services.dart';
+import 'about_dialog.dart';
 
 /// The accounts screen: the app's front door.
 ///
@@ -17,12 +19,14 @@ class AccountsScreen extends StatefulWidget {
   const AccountsScreen({
     super.key,
     required this.state,
+    this.services,
     this.onRefresh,
     this.onTopUp,
     this.onAccountAdded,
   });
 
   final AppState state;
+  final AppServices? services;
 
   /// Reads the portal for the saved accounts. Null in tests.
   final Future<void> Function()? onRefresh;
@@ -49,6 +53,22 @@ class _AccountsScreenState extends State<AccountsScreen> {
           appBar: AppBar(
             title: const Text('حساب‌ها'),
             actions: [
+              IconButton(
+                onPressed: () {
+                  if (widget.services != null) {
+                    showAboutSelfiyarDialog(
+                      context,
+                      widget.services!,
+                      state: widget.state,
+                    );
+                  }
+                },
+                icon: Badge(
+                  isLabelVisible: widget.state.hasAvailableUpdate,
+                  child: const Icon(Icons.info_outline_rounded),
+                ),
+                tooltip: 'درباره سِلفیار و بروزرسانی',
+              ),
               IconButton(
                 onPressed: () => _chooseThemeMode(context),
                 icon: Icon(switch (widget.state.themeMode) {

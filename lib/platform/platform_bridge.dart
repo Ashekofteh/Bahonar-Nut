@@ -207,6 +207,13 @@ class PlatformBridge {
     });
   }
 
+  /// Opens a URL in the platform's default web browser.
+  Future<void> openUrl(String url) async {
+    await _call<void>('openUrl', {
+      'url': url,
+    });
+  }
+
   /// Invokes a platform method, surfacing any failure.
   ///
   /// A silent failure here is the worst kind: the app would appear to have

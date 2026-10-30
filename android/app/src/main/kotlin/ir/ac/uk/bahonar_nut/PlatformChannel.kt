@@ -264,6 +264,15 @@ class PlatformChannel(
                     result.success(null)
                 }
 
+                "openUrl" -> {
+                    val url = call.argument<String>("url") ?: ""
+                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(browserIntent)
+                    result.success(null)
+                }
+
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {

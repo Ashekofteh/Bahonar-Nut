@@ -20,6 +20,7 @@ import '../platform/platform_services.dart';
 import '../platform/portal_sync.dart';
 import '../platform/reminder_delivery.dart';
 import '../platform/reminder_service.dart';
+import '../platform/app_update_service.dart';
 import '../platform/reservation_service.dart' show ReservationFailure;
 import 'app_state.dart';
 import 'screens/accounts_screen.dart';
@@ -157,6 +158,7 @@ class _HomeShellState extends State<HomeShell> {
         _deliverPending();
         _answerPendingRequests();
         _refreshBalancesQuietly();
+        _checkUpdatesQuietly();
       }
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -167,6 +169,7 @@ class _HomeShellState extends State<HomeShell> {
         _deliverPending();
         _answerPendingRequests();
         _refreshBalancesQuietly();
+        _checkUpdatesQuietly();
       }
     });
   }
@@ -203,7 +206,22 @@ class _HomeShellState extends State<HomeShell> {
   /// That flag drives the refresh button's spinner. A quiet read that never
   /// prompted must not make the button look busy — the student would read it
   /// as "a refresh is running" and wait for a result that is not coming.
-  Future<void> _refreshBalancesQuietly() async {
+  /// Checks for application updates silently in the background.
+  ///
+  /// Adheres to standard 24-hour rate limits and never displays disruptive modal popups.
+  /// If a new version is available, it illuminates a subtle badge on the About icon.
+  Future<void> _checkUpdatesQuietly() async {
+    try {
+      final result = await widget.services.updates.checkForUpdates(force: false);
+      if (mounted && result.status == AppUpdateStatus.updateAvailable) {
+        widget.state.setHasAvailableUpdate(true);
+      }
+    } catch (_) {
+      // Quiet background check: never throw or disrupt the user
+    }
+  }
+
+    Future<void> _refreshBalancesQuietly() async {
     final accounts = widget.state.accounts;
     if (accounts.isEmpty) return;
 
@@ -1533,6 +1551,7 @@ class _HomeShellState extends State<HomeShell> {
     final screens = <Widget>[
       AccountsScreen(
         state: widget.state,
+        services: widget.services,
         onRefresh: refreshFromPortal,
         onTopUp: _startTopUp,
         onAccountAdded: (account) {

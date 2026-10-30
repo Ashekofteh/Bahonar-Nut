@@ -77,6 +77,16 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  bool _hasAvailableUpdate = false;
+  bool get hasAvailableUpdate => _hasAvailableUpdate;
+
+  void setHasAvailableUpdate(bool value) {
+    if (_hasAvailableUpdate != value) {
+      _hasAvailableUpdate = value;
+      notifyListeners();
+    }
+  }
+
   /// The local mirror of what the student holds. The reminders read from here,
   /// so they work offline.
   ///

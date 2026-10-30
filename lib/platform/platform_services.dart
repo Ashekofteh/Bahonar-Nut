@@ -36,6 +36,7 @@ import 'platform_bridge.dart';
 import 'reminder_service.dart';
 import 'reservation_service.dart';
 import 'top_up_service.dart';
+import 'app_update_service.dart';
 
 /// The portal's base address.
 const String portalBaseUrl = 'https://nut.uk.ac.ir/';
@@ -176,6 +177,9 @@ class AppServices {
       (bridge as DesktopPlatformBridge).dispose();
     }
   }
+
+  /// The app update coordinator.
+  AppUpdateService get updates => AppUpdateService(plainStore: plainStore);
 
   /// The account list, persisted in the plain store.
   AccountStore get accountStore => PreferencesAccountStore(plainStore);

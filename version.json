@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0-beta.19",
+  "build_number": 19,
+  "release_title": "سِلفیار نسخه آزمایشی بتا (v1.0.0-beta.19)",
+  "release_notes": "پشتیبانی از ۵ پلتفرم (اندروید، iOS، ویندوز، لینوکس و مک)، حل مشکل فیلتر حساب‌ها، اصلاح عملکرد فروش در سبد و بهینه‌سازی‌های عملکردی.",
+  "published_at": "2026-10-30T18:34:41Z",
+  "release_url": "https://github.com/Ashekofteh/Bahonar-Nut/releases/tag/v1.0.0-beta.19",
+  "assets": {
+    "android": "https://github.com/Ashekofteh/Bahonar-Nut/releases/download/v1.0.0-beta.19/selfiyar-beta.apk",
+    "windows": "https://github.com/Ashekofteh/Bahonar-Nut/releases/download/v1.0.0-beta.19/selfiyar-windows-x64.zip",
+    "linux": "https://github.com/Ashekofteh/Bahonar-Nut/releases/download/v1.0.0-beta.19/selfiyar-linux-x64.tar.gz",
+    "macos": "https://github.com/Ashekofteh/Bahonar-Nut/releases/download/v1.0.0-beta.19/selfiyar-macos.zip",
+    "ios": "https://github.com/Ashekofteh/Bahonar-Nut/releases/download/v1.0.0-beta.19/selfiyar-ios.ipa"
+  }
+}

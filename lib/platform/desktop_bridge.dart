@@ -78,6 +78,23 @@ class DesktopPlatformBridge extends PlatformBridge {
   }
 
   @override
+  Future<void> openUrl(String url) async {
+    try {
+      if (Platform.isWindows) {
+        await Process.run('cmd', ['/c', 'start', '', url]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [url]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [url]);
+      } else {
+        await Clipboard.setData(ClipboardData(text: url));
+      }
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: url));
+    }
+  }
+
+  @override
   Future<void> scheduleAlarm({
     required int requestCode,
     required DateTime triggerAt,
