@@ -11,6 +11,11 @@ library;
 
 import 'dart:async';
 
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+
+import 'desktop_bridge.dart';
+import 'desktop_stores.dart';
 import '../adapter/captcha_solver.dart';
 import '../adapter/cullinan_client.dart';
 import '../core/account_store.dart';
@@ -100,6 +105,55 @@ class AppServices {
     );
   }
 
+  /// Builds the real services for Desktop platforms (Windows, macOS, Linux).
+  factory AppServices.forDesktop({
+    DesktopPlatformBridge? bridge,
+    Directory? storageDirectory,
+    DateTime Function()? now,
+  }) {
+    final theBridge = bridge ?? DesktopPlatformBridge(storageDirectory: storageDirectory);
+    final clock = SyncedServerClock();
+    final requests = RequestLedger();
+    final transport = PortalTransport(
+      baseUri: Uri.parse(portalBaseUrl),
+      clock: clock,
+      ledger: requests,
+    );
+    final client = CullinanPortalClient(transport: transport);
+    final portal = SerialisedPortalClient(client);
+    final credentialStore = theBridge.credentialStore;
+    final plainStore = theBridge.plainStore;
+
+    return AppServices(
+      bridge: theBridge,
+      client: portal,
+      sessions: SessionManager(
+        client: portal,
+        store: PlatformSessionStore(
+          secureStore: credentialStore,
+          plainStore: plainStore,
+        ),
+        solver: _SolverAdapter(CaptchaSolver()),
+        clock: clock,
+      ),
+      credentialStore: credentialStore,
+      plainStore: plainStore,
+      clock: clock,
+      requests: requests,
+      transport: transport,
+    );
+  }
+
+  /// Automatically selects the correct service implementation based on the host platform.
+  factory AppServices.forCurrentPlatform({
+    DateTime Function()? now,
+  }) {
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+      return AppServices.forDesktop(now: now);
+    }
+    return AppServices.forAndroid(now: now);
+  }
+
   final PlatformBridge bridge;
   final PortalClient client;
   final SessionManager sessions;
@@ -119,6 +173,9 @@ class AppServices {
   /// Closes network transport sockets and releases resources.
   void dispose() {
     transport?.close();
+    if (bridge is DesktopPlatformBridge) {
+      (bridge as DesktopPlatformBridge).dispose();
+    }
   }
 
   /// The account list, persisted in the plain store.

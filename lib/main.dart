@@ -45,10 +45,10 @@ class _BahonarNutAppState extends State<BahonarNutApp> {
   void initState() {
     super.initState();
 
-    // On a device this is the Keystore-backed, preference-backed set. In a
-    // test the services can be supplied, so the UI can be driven without a
-    // platform.
-    _services = widget.services ?? AppServices.forAndroid();
+    // On a device this is the Keystore-backed, preference-backed set. On desktop
+    // this is backed by persistent file storage. In a test the services can be
+    // supplied, so the UI can be driven without a platform.
+    _services = widget.services ?? AppServices.forCurrentPlatform();
 
     _state = AppState(
       accountStore: _services.accountStore,

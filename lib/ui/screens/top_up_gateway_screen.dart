@@ -29,6 +29,9 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'package:flutter/material.dart';
 import '../theme.dart';
@@ -45,6 +48,8 @@ class TopUpGatewayScreen extends StatefulWidget {
     required this.cookies,
     required this.portalHost,
     this.savedCards = const [],
+    this.autoLaunchBrowser = true,
+    this.onLaunchExternalBrowser,
     this.onSaveCard,
     this.onDeleteCard,
     this.onReturned,
@@ -62,6 +67,12 @@ class TopUpGatewayScreen extends StatefulWidget {
   /// The list of saved bank cards available for auto-filling.
   final List<SavedBankCard> savedCards;
 
+  /// Whether to automatically launch the payment URL in the system browser on desktop.
+  final bool autoLaunchBrowser;
+
+  /// Optional override for launching the external browser (useful for testing).
+  final Future<void> Function(Uri uri)? onLaunchExternalBrowser;
+
   /// Invoked when the user confirms saving a new card.
   final Future<void> Function(SavedBankCard card)? onSaveCard;
 
@@ -76,7 +87,8 @@ class TopUpGatewayScreen extends StatefulWidget {
 }
 
 class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
-  late final WebViewController _controller;
+  WebViewController? _controller;
+  bool _isDesktop = false;
 
   int _progress = 0;
   String? _error;
@@ -91,40 +103,65 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
     super.initState();
     _cards = List.of(widget.savedCards);
 
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..addJavaScriptChannel(
-        'BankCardCaptureChannel',
-        onMessageReceived: _handleChannelMessage,
-      )
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onProgress: (progress) {
-            if (mounted) setState(() => _progress = progress);
-          },
-          onUrlChange: (change) {
-            final url = change.url;
-            if (url != null) _onUrl(url);
-          },
-          onPageFinished: (url) {
-            _injectGatewayScript();
-            _onUrl(url);
-          },
-          onNavigationRequest: (request) => _onUrl(request.url),
-          onWebResourceError: (error) {
-            // A failed sub-resource must not close the page: the gateway
-            // loads images and scripts from elsewhere, and one missing
-            // script is not a failed payment.
-            if (error.isForMainFrame == true) {
-              if (mounted) {
-                setState(() => _error = 'صفحه درگاه پرداخت باز نشد.');
-              }
-            }
-          },
-        ),
-      );
+    _isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+    if (_isDesktop) {
+      _openInExternalBrowser();
+      return;
+    }
 
-    _load();
+    try {
+      _controller = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..addJavaScriptChannel(
+          'BankCardCaptureChannel',
+          onMessageReceived: _handleChannelMessage,
+        )
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onProgress: (progress) {
+              if (mounted) setState(() => _progress = progress);
+            },
+            onUrlChange: (change) {
+              final url = change.url;
+              if (url != null) _onUrl(url);
+            },
+            onPageFinished: (url) {
+              _injectGatewayScript();
+              _onUrl(url);
+            },
+            onNavigationRequest: (request) => _onUrl(request.url),
+            onWebResourceError: (error) {
+              if (error.isForMainFrame == true) {
+                if (mounted) {
+                  setState(() => _error = 'صفحه درگاه پرداخت باز نشد.');
+                }
+              }
+            },
+          ),
+        );
+      _load();
+    } catch (_) {
+      setState(() => _isDesktop = true);
+      _openInExternalBrowser();
+    }
+  }
+
+  Future<void> _openInExternalBrowser({bool force = false}) async {
+    if (!force && !widget.autoLaunchBrowser) return;
+    if (widget.onLaunchExternalBrowser != null) {
+      await widget.onLaunchExternalBrowser!(widget.gateway);
+      return;
+    }
+    final uriStr = widget.gateway.toString();
+    try {
+      if (Platform.isWindows) {
+        await Process.start('cmd', ['/c', 'start', '', uriStr], mode: ProcessStartMode.detached);
+      } else if (Platform.isMacOS) {
+        await Process.start('open', [uriStr], mode: ProcessStartMode.detached);
+      } else if (Platform.isLinux) {
+        await Process.start('xdg-open', [uriStr], mode: ProcessStartMode.detached);
+      }
+    } catch (_) {}
   }
 
   void _handleChannelMessage(JavaScriptMessage message) {
@@ -381,7 +418,8 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
 })();
 ''';
     try {
-      await _controller.runJavaScript(script);
+      if (_controller == null) return;
+    await _controller!.runJavaScript(script);
     } catch (_) {}
   }
 
@@ -485,7 +523,8 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
 })();
 ''';
     try {
-      await _controller.runJavaScript(script);
+      if (_controller == null) return;
+    await _controller!.runJavaScript(script);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -660,7 +699,8 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
       );
     }
 
-    await _controller.loadRequest(widget.gateway);
+    if (_controller == null) return;
+    await _controller!.loadRequest(widget.gateway);
   }
 
   /// Watches for the return to the portal.
@@ -698,7 +738,7 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
 
   @override
   void dispose() {
-    _controller.loadRequest(Uri.parse('about:blank'));
+    _controller?.loadRequest(Uri.parse('about:blank'));
     super.dispose();
   }
 
@@ -737,12 +777,14 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
             ),
             const SizedBox(width: 8),
           ],
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(3),
-            child: LinearProgressIndicator(
-              value: _progress == 100 ? null : _progress / 100,
-            ),
-          ),
+          bottom: _isDesktop || _progress >= 100
+              ? null
+              : PreferredSize(
+                  preferredSize: const Size.fromHeight(3),
+                  child: LinearProgressIndicator(
+                    value: _progress / 100,
+                  ),
+                ),
         ),
         body: Column(
           children: [
@@ -857,10 +899,191 @@ class _TopUpGatewayScreenState extends State<TopUpGatewayScreen> {
                 ),
               ),
             Expanded(
-              child: WebViewWidget(controller: _controller),
+              child: _isDesktop
+                  ? _buildDesktopView(theme)
+                  : WebViewWidget(controller: _controller!),
             ),
           ],
         ),
+      ),
+    );
+  }
+  Widget _buildDesktopView(ThemeData theme) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 680),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Icon(
+                    Icons.payment_outlined,
+                    size: 64,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'انتقال به درگاه رسمی پرداخت شاپرک',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'در نسخه ویندوز و مک، جهت حفظ بالاترین سطح امنیت بانکی، درگاه پرداخت شاپرک در مرورگر اصلی سیستم شما باز می‌شود.\n'
+                    'پس از تکمیل تراکنش در مرورگر، روی دکمه «تکمیل و ثبت نهایی در برنامه» کلیک کنید تا موجودی حساب شما به‌روزرسانی شود.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.7,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _finishAndReturn,
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: const Text('تکمیل و ثبت نهایی در برنامه'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _openInExternalBrowser(force: true),
+                        icon: const Icon(Icons.open_in_browser),
+                        label: const Text('باز کردن مجدد درگاه'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_cards.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    const Divider(),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Icon(Icons.credit_card, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'کپی سریع اطلاعات کارت‌های بانکی ذخیره‌شده:',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    for (final card in _cards)
+                      _DesktopCardTile(
+                        card: card,
+                        onDelete: widget.onDeleteCard != null
+                            ? () async {
+                                await widget.onDeleteCard!(card.id);
+                                if (mounted) {
+                                  setState(() => _cards.removeWhere((c) => c.id == card.id));
+                                }
+                              }
+                            : null,
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopCardTile extends StatelessWidget {
+  const _DesktopCardTile({required this.card, this.onDelete});
+
+  final SavedBankCard card;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pan = card.cleanPan;
+    final formattedPan = pan.length == 16
+        ? '${pan.substring(0, 4)} - ${pan.substring(4, 8)} - ${pan.substring(8, 12)} - ${pan.substring(12, 16)}'
+        : pan;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.payment, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  card.displayName,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  toPersianDigits(formattedPan),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontFamily: 'monospace',
+                  ),
+                  textDirection: TextDirection.ltr,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy, size: 18),
+            tooltip: 'کپی شماره کارت',
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: pan));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('شماره کارت ${card.displayName} در کلیپ‌بورد کپی شد.'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+          if (onDelete != null)
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 18),
+              tooltip: 'حذف کارت',
+              onPressed: onDelete,
+            ),
+        ],
       ),
     );
   }
