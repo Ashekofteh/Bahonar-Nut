@@ -269,6 +269,30 @@ class ReservationService {
     return outcome;
   }
 
+  /// Removes a meal listed for sale in the secondary Food Basket
+  /// (`FoodBasketSale.aspx`).
+  Future<SaleListingResult> removeFromSale({
+    required AccountId accountId,
+    required DateTime date,
+    required MealSlot slot,
+  }) async {
+    final SaleListingResult outcome;
+    try {
+      outcome = await sessions.withSession(
+        accountId,
+        (session) => client.removeFromSale(
+          session,
+          date: date,
+          slot: slot,
+        ),
+      );
+    } catch (e) {
+      return SaleListingAmbiguous('ارتباط با سامانه برقرار نشد: $e');
+    }
+
+    return outcome;
+  }
+
   Future<Balance?> _readBalance(AccountId accountId) async {
     try {
       return await sessions.withSession(

@@ -143,6 +143,14 @@ class FakePortalClient implements PortalClient {
       const SaleListingSucceeded();
 
   @override
+  Future<SaleListingResult> removeFromSale(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+  }) async =>
+      const SaleListingSucceeded();
+
+  @override
   Future<ForgotReceiptOutcome> requestForgotReceipt(
     Session session, {
     required DateTime date,

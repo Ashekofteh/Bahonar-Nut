@@ -37,6 +37,7 @@ class ReservationsScreen extends StatefulWidget {
     this.onBook,
     this.onCancel,
     this.onSell,
+    this.onRemoveFromSell,
     this.onForgotReceipt,
     this.onBatchBook,
     this.onBatchBookOfferings,
@@ -60,6 +61,9 @@ class ReservationsScreen extends StatefulWidget {
 
   /// Lists a held meal for sale in the Food Basket.
   final void Function(DateTime date, MealSlot slot)? onSell;
+
+  /// Removes a listed meal from the Food Basket sale.
+  final void Function(DateTime date, MealSlot slot)? onRemoveFromSell;
 
   /// Requests a forgot receipt for a held meal.
   final void Function(DateTime date, MealSlot slot, String? dishName)? onForgotReceipt;
@@ -126,6 +130,7 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
           menus: widget.menus,
           held: widget.state.mealsFor(accountId),
           clock: widget.clock,
+          isListedInBasket: (date, slot) => widget.state.isListedInBasket(accountId, date, slot),
         );
         final currentWeekRows = filterRowsForWeek(allRows, currentSat);
         final nextSat = currentSat.add(const Duration(days: 7));
@@ -211,6 +216,7 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
           menus: widget.menus,
           held: widget.state.mealsFor(accountId),
           clock: widget.clock,
+          isListedInBasket: (date, slot) => widget.state.isListedInBasket(accountId, date, slot),
         );
 
         final currentSat = _currentSaturday();
@@ -328,6 +334,9 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                   onBook: (date, slot) => widget.onBook?.call(date, slot),
                   onCancel: (date, slot) => widget.onCancel?.call(date, slot),
                   onSell: widget.onSell != null ? (date, slot) => widget.onSell!(date, slot) : null,
+                  onRemoveFromSell: widget.onRemoveFromSell != null
+                      ? (date, slot) => widget.onRemoveFromSell!(date, slot)
+                      : null,
                   onForgotReceipt: widget.onForgotReceipt != null
                       ? (date, slot, dishName) => widget.onForgotReceipt!(date, slot, dishName)
                       : null,

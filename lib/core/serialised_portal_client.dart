@@ -214,6 +214,17 @@ class SerialisedPortalClient implements PortalClient {
       );
 
   @override
+  Future<SaleListingResult> removeFromSale(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+  }) =>
+      _exclusive(
+        session.account,
+        () => _inner.removeFromSale(session, date: date, slot: slot),
+      );
+
+  @override
   Future<ForgotReceiptOutcome> requestForgotReceipt(
     Session session, {
     required DateTime date,

@@ -279,6 +279,8 @@ class AppState extends ChangeNotifier {
     _normalizeTransactions();
     _reminderConfig = await reminderConfigStore.load();
     await _loadHuntConfigs();
+    await _loadBasketSales();
+    _pruneBasketSales();
     if (bankCardStore != null) {
       _savedBankCards = await bankCardStore!.loadCards();
     }
@@ -408,12 +410,78 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Active Food Basket sale listings, keyed by `"$accountId|${date.year}-${date.month}-${date.day}|${slot.name}"`.
+  final Set<String> _basketSales = {};
+
+  Set<String> get basketSales => Set.unmodifiable(_basketSales);
+
+  static String _basketSaleKey(AccountId accountId, DateTime date, MealSlot slot) =>
+      '$accountId|${date.year}-${date.month}-${date.day}|${slot.name}';
+
+  bool isListedInBasket(AccountId accountId, DateTime date, MealSlot slot) {
+    return _basketSales.contains(_basketSaleKey(accountId, date, slot));
+  }
+
+  void markListedInBasket(AccountId accountId, DateTime date, MealSlot slot) {
+    _basketSales.add(_basketSaleKey(accountId, date, slot));
+    _persistBasketSales();
+    notifyListeners();
+  }
+
+  void unmarkListedInBasket(AccountId accountId, DateTime date, MealSlot slot) {
+    _basketSales.remove(_basketSaleKey(accountId, date, slot));
+    _persistBasketSales();
+    notifyListeners();
+  }
+
+  Future<void> _loadBasketSales() async {
+    final store = plainStore;
+    if (store == null) return;
+    final raw = await store.readString(StoreKeys.basketSales);
+    if (raw != null && raw.isNotEmpty) {
+      final list = raw.split(',').where((s) => s.isNotEmpty);
+      _basketSales.addAll(list);
+    }
+  }
+
+  Future<void> _persistBasketSales() async {
+    final store = plainStore;
+    if (store == null) return;
+    await store.writeString(StoreKeys.basketSales, _basketSales.join(','));
+  }
+
+  void _pruneBasketSales() {
+    if (_basketSales.isEmpty) return;
+    final toRemove = <String>[];
+    for (final key in _basketSales) {
+      final parts = key.split('|');
+      if (parts.length != 3) {
+        toRemove.add(key);
+        continue;
+      }
+      final accId = parts[0];
+      final dateParts = parts[1].split('-').map(int.parse).toList();
+      final date = DateTime.utc(dateParts[0], dateParts[1], dateParts[2]);
+      final slot = MealSlot.values.byName(parts[2]);
+
+      // If the meal is no longer held in mealStore, it was either sold or pruned
+      if (mealStore.find(accId, date, slot) == null) {
+        toRemove.add(key);
+      }
+    }
+    if (toRemove.isNotEmpty) {
+      _basketSales.removeAll(toRemove);
+      _persistBasketSales();
+    }
+  }
+
   /// Tells the UI that the shared meal store changed.
   ///
   /// The store is a plain value type shared with the platform layer, so it
   /// cannot notify on its own. The platform writes it and calls this; the
   /// screens that read it redraw.
   void mealsChanged() {
+    _pruneBasketSales();
     notifyListeners();
   }
 
@@ -519,6 +587,8 @@ class AppState extends ChangeNotifier {
       accountIds: _spendFilter.accountIds.where((id) => id != accountId).toSet(),
     );
     _transactions = _transactions.where((t) => t.accountId != accountId).toList();
+    _basketSales.removeWhere((key) => key.startsWith('$accountId|'));
+    _persistBasketSales();
     _accounts = await accountStore.loadAll();
     _cachedSpendSummary = null;
     notifyListeners();

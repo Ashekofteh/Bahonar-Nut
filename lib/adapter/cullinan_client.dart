@@ -826,6 +826,52 @@ class CullinanPortalClient implements PortalClient {
   }
 
   @override
+  Future<SaleListingResult> removeFromSale(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+  }) async {
+    try {
+      final page = await transport.get(session.account, _Paths.basketSale);
+      if (page.looksLikeLoginPage) {
+        return const SaleListingRefused('نشست منقضی شده است.');
+      }
+
+      final body = CullinanParser.saleCancelFormBody(
+        page.body,
+        jalaliDate: _jalaliOf(date),
+        slot: slot,
+      );
+
+      final response = await transport.post(
+        session.account,
+        _Paths.basketSale,
+        body: body,
+      );
+
+      if (response.looksLikeLoginPage) {
+        return const SaleListingRefused('نشست منقضی شده است.');
+      }
+
+      final alert = CullinanParser.parseSaleAlert(response.body);
+      if (alert != null) {
+        if (alert.contains('موفق') || alert.contains('حذف') || alert.contains('انصراف')) {
+          return SaleListingSucceeded(alert);
+        }
+        if (alert.contains('خطا') || alert.contains('یافت نشد') || alert.contains('امکان پذیر نیست')) {
+          return SaleListingRefused(alert);
+        }
+      }
+
+      return const SaleListingSucceeded('غذا با موفقیت از سبد فروش خارج شد.');
+    } on TransportException catch (e) {
+      return SaleListingAmbiguous(e.message);
+    } catch (e) {
+      return SaleListingAmbiguous(e.toString());
+    }
+  }
+
+  @override
   Future<ForgotReceiptOutcome> requestForgotReceipt(
     Session session, {
     required DateTime date,

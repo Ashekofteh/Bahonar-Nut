@@ -459,6 +459,42 @@ abstract final class CullinanParser {
         r'ctl00$cphMain$btnFoodReload': 'بارگذاری غذا',
       };
 
+  /// Form fields for cancelling/withdrawing a meal listing on `FoodBasketSale.aspx`.
+  static Map<String, String> saleCancelFormBody(
+    String html, {
+    required String jalaliDate,
+    required MealSlot slot,
+  }) {
+    final body = <String, String>{
+      '__VIEWSTATE': hiddenFieldValue(html, '__VIEWSTATE'),
+      '__VIEWSTATEGENERATOR': hiddenFieldValue(html, '__VIEWSTATEGENERATOR'),
+      '__VIEWSTATEENCRYPTED': '',
+      '__EVENTTARGET': '',
+      '__EVENTARGUMENT': '',
+      r'ctl00$cphMain$txtDate': jalaliDate,
+      r'ctl00$cphMain$drpReserveType': '0',
+      r'ctl00$cphMain$drpFoodType': switch (slot) {
+        MealSlot.breakfast => '1',
+        MealSlot.lunch => '2',
+        MealSlot.dinner => '3',
+      },
+    };
+
+    final cancelMatch = RegExp(
+      r'<input[^>]*name="([^"]*(?:btnDelete|btnCancel|btnFoodDelete)[^"]*)"[^>]*(?:value="([^"]*)")?',
+      caseSensitive: false,
+    ).firstMatch(html);
+    if (cancelMatch != null) {
+      final btnName = cancelMatch.group(1)!;
+      final btnVal = cancelMatch.group(2) ?? 'انصراف';
+      body[btnName] = btnVal;
+      return body;
+    }
+
+    body[r'ctl00$cphMain$btnCancel'] = 'انصراف';
+    return body;
+  }
+
   /// The alert message shown on the sale page, if any.
   static String? parseSaleAlert(String html) =>
       labelText(html, 'cphMain_alertBoxValue');

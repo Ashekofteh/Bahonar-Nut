@@ -1273,8 +1273,7 @@ class _HomeShellState extends State<HomeShell> {
         title: const Text('فروش در سبد غذایی'),
         content: const Text(
           'آیا مایلید این وعده را در سبد غذایی برای فروش بگذارید؟\n\n'
-          'توجه: طبق مقررات کالینان، در صورت فروش نرفتن غذا تا موعد توزیع، '
-          'جریمه عدم مصرف اعمال خواهد شد و پس از ثبت، امکان پس گرفتن وجود ندارد.',
+          'توجه: پس از ثبت در سبد، تا زمانی که غذا توسط شخص دیگری خریداری نشده باشد، می‌توانید آن را از سبد فروش خارج کنید.',
         ),
         actions: [
           TextButton(
@@ -1309,6 +1308,7 @@ class _HomeShellState extends State<HomeShell> {
 
     switch (outcome) {
       case SaleListingSucceeded(message: final message):
+        widget.state.markListedInBasket(accountId, date, slot);
         _showBookingProblem(
           message ?? 'غذا با موفقیت در سبد غذایی برای فروش قرار گرفت.',
         );
@@ -1319,6 +1319,73 @@ class _HomeShellState extends State<HomeShell> {
         _showBookingProblem(
           'ثبت در سبد انجام شد ولی تایید نشد. وضعیت را در سایت بررسی کنید.',
         );
+    }
+  }
+
+  Future<void> _removeFromSell(DateTime date, MealSlot slot) async {
+    final accounts = widget.state.accounts;
+    if (accounts.isEmpty) return;
+
+    final accountId =
+        widget.state.selectedReservationsAccountId ?? accounts.first.id;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('حذف از سبد فروش'),
+        content: const Text(
+          'آیا مایلید این وعده را از سبد فروش خارج کنید و به رزروهای عادی خود بازگردانید؟',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('انصراف'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('حذف از سبد'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _busyKey = '${date.year}-${date.month}-${date.day}|${slot.name}';
+    });
+
+    final outcome = await widget.services.reservations.removeFromSale(
+      accountId: accountId,
+      date: date,
+      slot: slot,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _busyKey = null;
+    });
+
+    switch (outcome) {
+      case SaleListingSucceeded(message: final message):
+        widget.state.unmarkListedInBasket(accountId, date, slot);
+        _showBookingProblem(
+          message ?? 'غذا با موفقیت از سبد فروش خارج شد.',
+        );
+        _refreshTable(targetAccount: accountId);
+      case SaleListingRefused(reason: final reason):
+        if (reason.contains('فروخته') || reason.contains('یافت نشد')) {
+          widget.state.unmarkListedInBasket(accountId, date, slot);
+          _refreshTable(targetAccount: accountId);
+        }
+        _showBookingProblem(reason);
+      case SaleListingAmbiguous():
+        widget.state.unmarkListedInBasket(accountId, date, slot);
+        _showBookingProblem(
+          'عملیات حذف در سامانه انجام شد. لطفاً وضعیت را مجدداً بررسی فرمایید.',
+        );
+        _refreshTable(targetAccount: accountId);
     }
   }
 
@@ -1481,6 +1548,7 @@ class _HomeShellState extends State<HomeShell> {
         onBook: _bookMeal,
         onCancel: _cancelMeal,
         onSell: _sellMeal,
+        onRemoveFromSell: _removeFromSell,
         onForgotReceipt: _handleForgotReceipt,
         onBatchBookOfferings: (offerings) => _batchBookOfferings(
           widget.state.selectedReservationsAccountId ?? widget.state.accounts.first.id,

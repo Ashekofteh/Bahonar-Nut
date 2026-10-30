@@ -523,6 +523,14 @@ abstract class PortalClient {
     required MealSlot slot,
   });
 
+  /// Removes a meal held for (date, slot) from sale in the secondary Food Basket
+  /// (FoodBasketSale.aspx).
+  Future<SaleListingResult> removeFromSale(
+    Session session, {
+    required DateTime date,
+    required MealSlot slot,
+  });
+
   /// Requests a forgot-card slip (فیش فراموشی) for [date] and [slot].
   ///
   /// Maximum quota is 2 slips per meal slot per month per account.

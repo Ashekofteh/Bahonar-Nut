@@ -93,6 +93,25 @@ void main() {
       final htmlWithoutAlert = sampleSalePage(alert: '');
       expect(CullinanParser.parseSaleAlert(htmlWithoutAlert), isNull);
     });
+
+    test('saleCancelFormBody constructs valid WebForms cancellation payload', () {
+      final html = sampleSalePage(viewState: 'CANCEL_VS', viewStateGen: 'CANCEL_GEN');
+      final body = CullinanParser.saleCancelFormBody(
+        html,
+        jalaliDate: '1405/08/04',
+        slot: MealSlot.lunch,
+      );
+
+      expect(body['__VIEWSTATE'], 'CANCEL_VS');
+      expect(body['__VIEWSTATEGENERATOR'], 'CANCEL_GEN');
+      expect(body['__VIEWSTATEENCRYPTED'], '');
+      expect(body['__EVENTTARGET'], '');
+      expect(body['__EVENTARGUMENT'], '');
+      expect(body[r'ctl00$cphMain$txtDate'], '1405/08/04');
+      expect(body[r'ctl00$cphMain$drpReserveType'], '0');
+      expect(body[r'ctl00$cphMain$drpFoodType'], '2'); // lunch = 2
+      expect(body[r'ctl00$cphMain$btnCancel'], 'انصراف');
+    });
   });
 
   group('CullinanPortalClient.listMealForSale', () {
@@ -228,6 +247,120 @@ void main() {
 
       final client = CullinanPortalClient(transport: transport);
       final result = await client.listMealForSale(
+        session,
+        date: DateTime.utc(2026, 10, 25),
+        slot: MealSlot.lunch,
+      );
+
+      expect(result, isA<SaleListingAmbiguous>());
+    });
+  });
+
+  group('CullinanPortalClient.removeFromSale', () {
+    test('succeeds when portal posts cancel without alert box error', () async {
+      final sentBodies = <Map<String, String>>[];
+      final requestUrls = <String>[];
+
+      final transport = PortalTransport(
+        baseUri: Uri.parse('https://nut.uk.ac.ir/'),
+        httpClient: MockClient((request) async {
+          requestUrls.add('${request.method} ${request.url.path}');
+          if (request.method == 'POST') {
+            sentBodies.add(request.bodyFields);
+          }
+
+          if (request.url.path.contains('FoodBasketSale.aspx')) {
+            if (request.method == 'GET') {
+              return http.Response(
+                sampleSalePage(viewState: 'GET_VS', viewStateGen: 'GET_GEN'),
+                200,
+                headers: {'content-type': 'text/html; charset=utf-8'},
+              );
+            } else if (request.method == 'POST') {
+              return http.Response(
+                sampleSalePage(viewState: 'POST_VS', viewStateGen: 'POST_GEN', alert: ''),
+                200,
+                headers: {'content-type': 'text/html; charset=utf-8'},
+              );
+            }
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final client = CullinanPortalClient(transport: transport);
+      final result = await client.removeFromSale(
+        session,
+        date: DateTime.utc(2026, 10, 25),
+        slot: MealSlot.lunch,
+      );
+
+      expect(result, isA<SaleListingSucceeded>());
+      expect(requestUrls, [
+        'GET /FoodBasket/FoodBasketSale.aspx',
+        'POST /FoodBasket/FoodBasketSale.aspx',
+      ]);
+      expect(sentBodies.single[r'ctl00$cphMain$txtDate'], '1405/08/03');
+      expect(sentBodies.single[r'ctl00$cphMain$drpFoodType'], '2');
+      expect(sentBodies.single[r'ctl00$cphMain$btnCancel'], 'انصراف');
+    });
+
+    test('refuses when alert indicates error during cancel', () async {
+      final transport = PortalTransport(
+        baseUri: Uri.parse('https://nut.uk.ac.ir/'),
+        httpClient: MockClient((request) async {
+          if (request.method == 'GET') {
+            return http.Response(sampleSalePage(), 200, headers: {'content-type': 'text/html; charset=utf-8'});
+          }
+          return http.Response(
+            sampleSalePage(alert: 'غذای مورد نظر یافت نشد یا فروخته شده است.'),
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }),
+      );
+
+      final client = CullinanPortalClient(transport: transport);
+      final result = await client.removeFromSale(
+        session,
+        date: DateTime.utc(2026, 10, 25),
+        slot: MealSlot.dinner,
+      );
+
+      expect(result, isA<SaleListingRefused>());
+      expect((result as SaleListingRefused).reason, 'غذای مورد نظر یافت نشد یا فروخته شده است.');
+    });
+
+    test('refuses when redirected to login page due to expired session', () async {
+      final loginHtml = '<html><input name="txtUsernamePlain" id="txtUsernamePlain" /></html>';
+      final transport = PortalTransport(
+        baseUri: Uri.parse('https://nut.uk.ac.ir/'),
+        httpClient: MockClient((request) async {
+          return http.Response(loginHtml, 200, headers: {'content-type': 'text/html; charset=utf-8'});
+        }),
+      );
+
+      final client = CullinanPortalClient(transport: transport);
+      final result = await client.removeFromSale(
+        session,
+        date: DateTime.utc(2026, 10, 25),
+        slot: MealSlot.lunch,
+      );
+
+      expect(result, isA<SaleListingRefused>());
+      expect((result as SaleListingRefused).reason, contains('نشست'));
+    });
+
+    test('returns ambiguous on transport exception', () async {
+      final transport = PortalTransport(
+        baseUri: Uri.parse('https://nut.uk.ac.ir/'),
+        httpClient: MockClient((request) async {
+          throw const SocketException('Connection reset by peer');
+        }),
+      );
+
+      final client = CullinanPortalClient(transport: transport);
+      final result = await client.removeFromSale(
         session,
         date: DateTime.utc(2026, 10, 25),
         slot: MealSlot.lunch,

@@ -85,6 +85,7 @@ abstract final class StoreKeys {
   static const lastSyncAt = 'sync.lastAt';
   static const huntPrefix = 'hunt.';
   static const themeMode = 'settings.themeMode';
+  static const basketSales = 'basket.sales';
 
   /// The key holding one account's record.
   static String account(AccountId id) => '$accountPrefix$id';

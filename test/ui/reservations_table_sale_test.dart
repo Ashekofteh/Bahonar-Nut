@@ -27,7 +27,7 @@ void main() {
   final testDate = DateTime.utc(2026, 10, 20);
 
   group('ReservationsTable - Food Basket Sale action', () {
-    testWidgets('renders storefront button for heldLocked row when onSell is provided',
+    testWidgets('renders basket outline button for heldLocked row when onSell is provided',
         (tester) async {
       DateTime? soldDate;
       MealSlot? soldSlot;
@@ -58,8 +58,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final sellButtonFinder = find.widgetWithIcon(IconButton, Icons.storefront_outlined);
+      final sellButtonFinder = find.widgetWithIcon(IconButton, Icons.shopping_basket_outlined);
       expect(sellButtonFinder, findsOneWidget);
+      expect(find.byTooltip('فروش در سبد غذایی'), findsOneWidget);
 
       await tester.tap(sellButtonFinder);
       await tester.pump();
@@ -95,7 +96,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final button = tester.widget<IconButton>(
-        find.widgetWithIcon(IconButton, Icons.storefront_outlined),
+        find.widgetWithIcon(IconButton, Icons.shopping_basket_outlined),
       );
       expect(button.onPressed, isNull);
     });
@@ -150,6 +151,84 @@ void main() {
 
       expect(find.byTooltip('فروش در سبد غذایی'), findsNothing);
       expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+    });
+
+    testWidgets('renders filled basket button and "در سبد فروش" for listedInBasket row',
+        (tester) async {
+      DateTime? removedDate;
+      MealSlot? removedSlot;
+
+      final rows = [
+        MealRow(
+          date: testDate,
+          slot: MealSlot.lunch,
+          status: MealRowStatus.listedInBasket,
+          dishName: 'چلو قرمه سبزی',
+          hallName: 'مرکزی برادران',
+          priceRial: 400000,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        wrap(
+          ReservationsTable(
+            rows: rows,
+            onBook: (_, _) {},
+            onCancel: (_, _) {},
+            onRemoveFromSell: (date, slot) {
+              removedDate = date;
+              removedSlot = slot;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('در سبد فروش'), findsOneWidget);
+
+      final removeButtonFinder = find.byTooltip('در سبد فروش (حذف از سبد)');
+      expect(removeButtonFinder, findsOneWidget);
+      expect(find.byIcon(Icons.shopping_basket), findsOneWidget);
+      expect(find.byIcon(Icons.cancel), findsOneWidget);
+
+      await tester.tap(removeButtonFinder);
+      await tester.pump();
+
+      expect(removedDate, testDate);
+      expect(removedSlot, MealSlot.lunch);
+    });
+
+    testWidgets('disables remove-from-sale button when row is marked busy', (tester) async {
+      final rows = [
+        MealRow(
+          date: testDate,
+          slot: MealSlot.lunch,
+          status: MealRowStatus.listedInBasket,
+          dishName: 'چلو قرمه سبزی',
+        ),
+      ];
+
+      await tester.pumpWidget(
+        wrap(
+          ReservationsTable(
+            rows: rows,
+            busy: true,
+            busyKey: '2026-10-20|lunch',
+            onBook: (_, _) {},
+            onCancel: (_, _) {},
+            onRemoveFromSell: (_, _) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final button = tester.widget<IconButton>(
+        find.ancestor(
+          of: find.byIcon(Icons.shopping_basket),
+          matching: find.byType(IconButton),
+        ),
+      );
+      expect(button.onPressed, isNull);
     });
   });
 }

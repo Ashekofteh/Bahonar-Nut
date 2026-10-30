@@ -33,6 +33,7 @@ class ReservationsTable extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.onRemoveFromSell,
     this.onForgotReceipt,
     this.selectionMode = false,
     this.selectedKeys = const {},
@@ -55,6 +56,9 @@ class ReservationsTable extends StatelessWidget {
 
   /// Lists a held meal for sale in the secondary Food Basket.
   final void Function(DateTime date, MealSlot slot)? onSell;
+
+  /// Removes a listed meal from the secondary Food Basket sale.
+  final void Function(DateTime date, MealSlot slot)? onRemoveFromSell;
 
   /// Requests a forgot receipt for a held meal.
   final void Function(DateTime date, MealSlot slot, String? dishName)? onForgotReceipt;
@@ -119,6 +123,7 @@ class ReservationsTable extends StatelessWidget {
                       onBook: () => onBook(row.date, row.slot),
                       onCancel: () => onCancel(row.date, row.slot),
                       onSell: onSell != null ? () => onSell!(row.date, row.slot) : null,
+                      onRemoveFromSell: onRemoveFromSell != null ? () => onRemoveFromSell!(row.date, row.slot) : null,
                       onForgotReceipt: onForgotReceipt != null ? () => onForgotReceipt!(row.date, row.slot, row.dishName) : null,
                       selectionMode: selectionMode,
                       isSelected: selectedKeys.contains(_keyOf(row)),
@@ -153,6 +158,7 @@ class _DayHeader extends StatelessWidget {
     final held = meals
         .where((m) => m.status == MealRowStatus.held ||
             m.status == MealRowStatus.heldLocked ||
+            m.status == MealRowStatus.listedInBasket ||
             m.status == MealRowStatus.bought)
         .length;
     final open = meals
@@ -220,6 +226,7 @@ class _MealRowTile extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.onRemoveFromSell,
     this.onForgotReceipt,
     this.selectionMode = false,
     this.isSelected = false,
@@ -231,6 +238,7 @@ class _MealRowTile extends StatelessWidget {
   final VoidCallback onBook;
   final VoidCallback onCancel;
   final VoidCallback? onSell;
+  final VoidCallback? onRemoveFromSell;
   final VoidCallback? onForgotReceipt;
   final bool selectionMode;
   final bool isSelected;
@@ -321,6 +329,7 @@ class _MealRowTile extends StatelessWidget {
               onBook: onBook,
               onCancel: onCancel,
               onSell: onSell,
+              onRemoveFromSell: onRemoveFromSell,
               onForgotReceipt: onForgotReceipt,
               selectionMode: selectionMode,
               isSelected: isSelected,
@@ -356,6 +365,7 @@ class _SlotBadge extends StatelessWidget {
     final colour = switch (status) {
       MealRowStatus.held || MealRowStatus.bought => AppColors.heldOf(context),
       MealRowStatus.bookable => theme.colorScheme.secondary,
+      MealRowStatus.listedInBasket => Colors.orange.shade800,
       MealRowStatus.locked || MealRowStatus.heldLocked =>
         theme.colorScheme.outline,
     };
@@ -390,6 +400,7 @@ class _StatusChip extends StatelessWidget {
   static String _statusLabel(MealRowStatus status) => switch (status) {
         MealRowStatus.held => 'رزرو شده',
         MealRowStatus.heldLocked => 'رزرو شده - مهلت گذشته',
+        MealRowStatus.listedInBasket => 'در سبد فروش',
         MealRowStatus.bought => 'خریداری شده',
         MealRowStatus.bookable => 'قابل رزرو',
         MealRowStatus.locked => 'مهلت گذشته',
@@ -401,6 +412,7 @@ class _StatusChip extends StatelessWidget {
     final colour = switch (status) {
       MealRowStatus.held || MealRowStatus.bought => AppColors.heldOf(context),
       MealRowStatus.bookable => theme.colorScheme.secondary,
+      MealRowStatus.listedInBasket => Colors.orange.shade800,
       MealRowStatus.locked || MealRowStatus.heldLocked =>
         theme.colorScheme.outline,
     };
@@ -430,6 +442,7 @@ class _Action extends StatelessWidget {
     required this.onBook,
     required this.onCancel,
     this.onSell,
+    this.onRemoveFromSell,
     this.onForgotReceipt,
     this.selectionMode = false,
     this.isSelected = false,
@@ -441,6 +454,7 @@ class _Action extends StatelessWidget {
   final VoidCallback onBook;
   final VoidCallback onCancel;
   final VoidCallback? onSell;
+  final VoidCallback? onRemoveFromSell;
   final VoidCallback? onForgotReceipt;
   final bool selectionMode;
   final bool isSelected;
@@ -517,7 +531,7 @@ class _Action extends StatelessWidget {
             if (onSell != null)
               IconButton(
                 onPressed: busy ? null : onSell,
-                icon: const Icon(Icons.storefront_outlined),
+                icon: const Icon(Icons.shopping_basket_outlined),
                 tooltip: 'فروش در سبد غذایی',
                 visualDensity: VisualDensity.compact,
                 style: IconButton.styleFrom(
@@ -530,6 +544,60 @@ class _Action extends StatelessWidget {
                 Icons.lock_clock_outlined,
                 size: 18,
                 color: theme.colorScheme.outline,
+              ),
+          ],
+        );
+
+      case MealRowStatus.listedInBasket:
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (onForgotReceipt != null)
+              IconButton(
+                onPressed: busy ? null : onForgotReceipt,
+                icon: const Icon(Icons.receipt_long, size: 20),
+                tooltip: 'دریافت فیش فراموشی',
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  foregroundColor: theme.colorScheme.secondary,
+                ),
+              ),
+            if (onRemoveFromSell != null)
+              IconButton(
+                onPressed: busy ? null : onRemoveFromSell,
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.shopping_basket, size: 22),
+                    Positioned(
+                      right: -3,
+                      bottom: -2,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surface,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.cancel,
+                          size: 12,
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                tooltip: 'در سبد فروش (حذف از سبد)',
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  foregroundColor: Colors.orange.shade800,
+                  disabledForegroundColor: theme.colorScheme.outline,
+                ),
+              )
+            else
+              Icon(
+                Icons.shopping_basket,
+                size: 20,
+                color: Colors.orange.shade800,
               ),
           ],
         );

@@ -74,6 +74,9 @@ enum MealRowStatus {
   /// cancel post is discarded (F14). Offering a cancel button here would be
   /// offering one that silently does nothing (F63).
   heldLocked,
+
+  /// The student holds this meal, but has listed it for sale in the Food Basket.
+  listedInBasket,
 }
 
 /// One row of the table: a (date, slot) pair and its state.
@@ -124,10 +127,14 @@ class MealRow {
   /// unconsumed meal penalty (Announcement 2090).
   bool get sellable => status == MealRowStatus.heldLocked;
 
+  /// Whether this meal is currently listed for sale in the Food Basket.
+  bool get inBasketSale => status == MealRowStatus.listedInBasket;
+
   /// The status, in words.
   String get statusLabel => switch (status) {
         MealRowStatus.held => 'رزرو شده',
         MealRowStatus.heldLocked => 'رزرو شده - مهلت گذشته',
+        MealRowStatus.listedInBasket => 'در سبد فروش',
         MealRowStatus.bought => 'خریداری شده',
         MealRowStatus.bookable => 'قابل رزرو',
         MealRowStatus.locked => 'مهلت گذشته',
@@ -143,6 +150,7 @@ List<MealRow> buildMealRows({
   required List<MealMenu> menus,
   required List<StoredMeal> held,
   required ServerClock? clock,
+  bool Function(DateTime date, MealSlot slot)? isListedInBasket,
 }) {
   // The mirror's meals, keyed by (date, slot).
   final heldByKey = <String, StoredMeal>{};
@@ -178,13 +186,23 @@ List<MealRow> buildMealRows({
       final locked = clock != null &&
           clock.isSynced &&
           !clock.isReservable(dates[key]!);
+      final inBasket = isListedInBasket?.call(dates[key]!, slots[key]!) ?? false;
+
+      final MealRowStatus status;
+      if (heldMeal.source == MealSource.basketPurchase) {
+        status = MealRowStatus.bought;
+      } else if (inBasket) {
+        status = MealRowStatus.listedInBasket;
+      } else if (locked) {
+        status = MealRowStatus.heldLocked;
+      } else {
+        status = MealRowStatus.held;
+      }
 
       rows.add(MealRow(
         date: dates[key]!,
         slot: slots[key]!,
-        status: heldMeal.source == MealSource.basketPurchase
-            ? MealRowStatus.bought
-            : (locked ? MealRowStatus.heldLocked : MealRowStatus.held),
+        status: status,
         dishName: heldMeal.dishName,
         hallName: heldMeal.hallName,
         priceRial: heldMeal.priceRial,
