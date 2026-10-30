@@ -1645,7 +1645,7 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(
             icon: Icon(Icons.pie_chart_outline),
             selectedIcon: Icon(Icons.pie_chart),
-            label: 'خرج',
+            label: 'مالی',
           ),
           NavigationDestination(
             icon: Icon(Icons.notifications_outlined),

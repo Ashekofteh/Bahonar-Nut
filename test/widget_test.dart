@@ -16,7 +16,7 @@ void main() {
 
     // The four navigation destinations.
     expect(find.text('رزروها'), findsOneWidget);
-    expect(find.text('خرج'), findsOneWidget);
+    expect(find.text('مالی'), findsOneWidget);
     expect(find.text('یادآورها'), findsOneWidget);
   });
 

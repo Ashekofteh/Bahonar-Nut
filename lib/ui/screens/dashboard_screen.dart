@@ -32,7 +32,7 @@ class DashboardScreen extends StatelessWidget {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('خرج غذا'),
+            title: const Text('مالی'),
             actions: [
               if (!state.spendFilter.isUnfiltered)
                 TextButton(
