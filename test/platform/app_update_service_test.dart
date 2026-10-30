@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
-import 'package:bahonar_nut/core/app_version.dart';
 import 'package:bahonar_nut/platform/app_update_service.dart';
 import '../helpers/memory_stores.dart';
 
@@ -146,6 +145,7 @@ void main() {
 
       // Explicit forced check -> bypasses throttle
       final forcedResult = await service.checkForUpdates(force: true);
+      expect(forcedResult.status, AppUpdateStatus.upToDate);
       expect(networkHits, 2);
     });
 
