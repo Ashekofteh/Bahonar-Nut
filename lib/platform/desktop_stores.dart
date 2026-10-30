@@ -33,6 +33,13 @@ Directory defaultDesktopStorageDirectory() {
     if (base != null && base.isNotEmpty) {
       return Directory('$base${Platform.pathSeparator}bahonar_nut');
     }
+  } else if (Platform.isIOS) {
+    final home = Platform.environment['HOME'];
+    if (home != null && home.isNotEmpty) {
+      return Directory(
+        '$home${Platform.pathSeparator}Library${Platform.pathSeparator}Application Support${Platform.pathSeparator}BahonarNut',
+      );
+    }
   }
 
   // Fallback for tests or sandbox environments

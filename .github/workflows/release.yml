@@ -1,4 +1,4 @@
-name: Build and Release Multi-Platform (Android, Windows, macOS, Linux)
+name: Build and Release Multi-Platform (Android, Windows, macOS, Linux, iOS)
 
 on:
   push:
@@ -185,9 +185,44 @@ jobs:
           name: selfiyar-linux-tar
           path: selfiyar-linux-x64.tar.gz
 
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build iOS App Bundle (No Codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package Universal iOS IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r selfiyar-ios.ipa Payload
+          rm -rf Payload
+
+      - name: Upload iOS IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfiyar-ios-ipa
+          path: selfiyar-ios.ipa
+
   publish-release:
     name: Publish Multi-Platform Release
-    needs: [build-android, build-windows, build-macos, build-linux]
+    needs: [build-android, build-windows, build-macos, build-linux, build-ios]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -222,11 +257,17 @@ jobs:
           name: selfiyar-linux-tar
           path: release-assets
 
+      - name: Download iOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: selfiyar-ios-ipa
+          path: release-assets
+
       - name: Publish or Update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RELEASE_TAG="v1.0.0-beta.18"
+          RELEASE_TAG="v1.0.0-beta.19"
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             RELEASE_TAG="${{ github.ref_name }}"
           fi
@@ -240,6 +281,7 @@ jobs:
               "release-assets/selfiyar-windows-x64.zip#selfiyar-windows-x64.zip" \
               "release-assets/selfiyar-macos.zip#selfiyar-macos.zip" \
               "release-assets/selfiyar-linux-x64.tar.gz#selfiyar-linux-x64.tar.gz" \
+              "release-assets/selfiyar-ios.ipa#selfiyar-ios.ipa" \
               --clobber
             gh release edit "$RELEASE_TAG" \
               --title "سِلفیار نسخه آزمایشی بتا ($RELEASE_TAG)" \
@@ -252,6 +294,7 @@ jobs:
               "release-assets/selfiyar-windows-x64.zip#selfiyar-windows-x64.zip" \
               "release-assets/selfiyar-macos.zip#selfiyar-macos.zip" \
               "release-assets/selfiyar-linux-x64.tar.gz#selfiyar-linux-x64.tar.gz" \
+              "release-assets/selfiyar-ios.ipa#selfiyar-ios.ipa" \
               --title "سِلفیار نسخه آزمایشی بتا ($RELEASE_TAG)" \
               -F .github/RELEASE_NOTES_BETA.md \
               --prerelease

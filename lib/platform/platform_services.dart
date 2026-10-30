@@ -147,7 +147,7 @@ class AppServices {
   factory AppServices.forCurrentPlatform({
     DateTime Function()? now,
   }) {
-    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux || Platform.isIOS)) {
       return AppServices.forDesktop(now: now);
     }
     return AppServices.forAndroid(now: now);

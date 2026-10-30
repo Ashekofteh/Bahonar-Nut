@@ -7,7 +7,7 @@
 **Next-Generation Cross-Platform Smart Dining Assistant for Shahid Bahonar University of Kerman (SBUK)**
 
 [![GitHub Release](https://img.shields.io/github/v/release/Ashekofteh/Bahonar-Nut?include_prereleases&style=for-the-badge&color=2563eb&logo=github)](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest)
-[![Platform Support](https://img.shields.io/badge/Platform-Android%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-3b82f6?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/releases)
+[![Platform Support](https://img.shields.io/badge/Platform-Android%20%7C%20iOS%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-3b82f6?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/releases)
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.x-0175C2?style=for-the-badge&logo=dart&logoColor=white)](https://dart.dev)
 [![Tests Passing](https://img.shields.io/badge/Tests-1050%2F1050%20Passed-10b981?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/actions)
@@ -16,6 +16,7 @@
 <br/>
 
 [📱 دانلود اندروید](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-beta.apk) &bull;
+[🍏 دانلود آی‌او‌اس (iOS)](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-ios.ipa) &bull;
 [🪟 دانلود ویندوز](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-windows-x64.zip) &bull;
 [🍎 دانلود مک‌اواس](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-macos.zip) &bull;
 [🐧 دانلود لینوکس](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-linux-x64.tar.gz) &bull;
@@ -41,9 +42,13 @@
 | پلتفرم | فایل دانلودی | توضیحات و پیش‌نیاز | وضعیت |
 | :--- | :--- | :--- | :---: |
 | 📱 **اندروید (Android)** | [**`selfiyar-beta.apk`**](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-beta.apk) | اندروید ۸.۰ به بالا (امضای رسمی با کلید دائمی) | [![Release](https://img.shields.io/badge/APK-Ready-success?style=flat-square)](#) |
+| 🍏 **آی‌او‌اس (iOS IPA)** | [**`selfiyar-ios.ipa`**](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-ios.ipa) | آیفون و آیپد (نصب با Sideloadly / AltStore / استورها) | [![Release](https://img.shields.io/badge/IPA-Ready-silver?style=flat-square)](#) |
 | 🪟 **ویندوز (Windows x64)** | [**`selfiyar-windows-x64.zip`**](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-windows-x64.zip) | ویندوز ۱۰ و ۱۱ نسخه ۶۴ بیتی (Portable) | [![Release](https://img.shields.io/badge/ZIP-Ready-blue?style=flat-square)](#) |
 | 🍎 **مک‌اواس (macOS)** | [**`selfiyar-macos.zip`**](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-macos.zip) | مک‌اواس ۱۲+ (Apple Silicon و Intel) | [![Release](https://img.shields.io/badge/ZIP-Ready-purple?style=flat-square)](#) |
 | 🐧 **لینوکس (Linux x64)** | [**`selfiyar-linux-x64.tar.gz`**](https://github.com/Ashekofteh/Bahonar-Nut/releases/latest/download/selfiyar-linux-x64.tar.gz) | توزیع‌های ۶۴ بیتی لینوکس (Portable Bundle) | [![Release](https://img.shields.io/badge/TAR.GZ-Ready-orange?style=flat-square)](#) |
+
+> [!TIP]
+> **راهنمای نصب نسخه iOS:** فایل `selfiyar-ios.ipa` را دانلود کرده و به آسانی از طریق ابزار رایگان [**Sideloadly**](https://sideloadly.io/) (در ویندوز یا مک) یا [**AltStore**](https://altstore.io/) با وارد کردن اپل‌آیدی شخصی روی آیفون نصب نمایید. همچنین این فایل در استورهای ایرانی iOS (سیبچه، سیب‌اپ، اناردونی) قابل بارگذاری و نصب مستقیم است.
 
 > [!TIP]
 > برای مشاهده تاریخچه نسخه‌ها و تغییرات هر نسخه، به صفحه [**GitHub Releases**](https://github.com/Ashekofteh/Bahonar-Nut/releases) مراجعه کنید.
@@ -94,7 +99,7 @@
 ### 🎨 ۹. طراحی مدرن چندسکویی و تم دوگانه (Cross-Platform & Material 3)
 - طراحی استاندارد مبتنی بر اصول **Material 3** با تایپوگرافی اصیل و خوانای فارسی (فونت وزیرمتن).
 - پشتیبانی کامل و یکپارچه از پوسته تاریک و روشن (Dark / Light Mode) در تمامی بخش‌ها و صفحات.
-- بسته‌های اجرایی سبک، سریع و بومی برای **اندروید (Android)**، **ویندوز (Windows Desktop)**، **مک‌اواس (macOS)** و **لینوکس (Linux Desktop)**.
+- بسته‌های اجرایی سبک، سریع و بومی برای هر ۵ پلتفرم اصلی: **اندروید (Android)**، **آی‌او‌اس (iOS)**، **ویندوز (Windows Desktop)**، **مک‌اواس (macOS)** و **لینوکس (Linux Desktop)**.
 
 ---
 
@@ -206,6 +211,9 @@ flowchart TD
 
    # کامپایل نسخه لینوکس
    flutter build linux --release
+
+   # کامپایل نسخه آی‌او‌اس
+   flutter build ios --release --no-codesign
    ```
 
 ---
