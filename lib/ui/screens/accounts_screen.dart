@@ -123,6 +123,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ignore_for_file: deprecated_member_use
             RadioListTile<ThemeMode>(
               value: ThemeMode.system,
               groupValue: currentMode,

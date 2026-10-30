@@ -26,7 +26,6 @@ class DesktopPlatformBridge extends PlatformBridge {
   final Map<AccountId, Timer> _scheduledHuntAlarms = {};
 
   void Function(String? payload)? _desktopHuntHandler;
-  void Function()? _desktopPermissionHandler;
 
   @override
   SecureCredentialStore get credentialStore => _secureStore;
@@ -132,7 +131,6 @@ class DesktopPlatformBridge extends PlatformBridge {
 
   @override
   void onPermissionChanged(void Function() handler) {
-    _desktopPermissionHandler = handler;
   }
 
   /// Cancels all pending timers when the desktop bridge is disposed.

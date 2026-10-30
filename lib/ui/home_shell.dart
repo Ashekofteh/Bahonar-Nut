@@ -514,13 +514,6 @@ class _HomeShellState extends State<HomeShell> {
     // list on screen is stale.
     _marketFor = _currentHuntConfig;
 
-    if (targetDate == null) {
-      // Without a target date there is no menu to read: the weekly menu is
-      // published per date, and the app must not guess which one the user
-      // means.
-      _reportMarketError('برای خواندن منوی غذا باید تاریخ انتخاب شود.');
-      return;
-    }
 
     try {
       final menus = await widget.services.sessions.withSession(
@@ -1499,7 +1492,6 @@ class _HomeShellState extends State<HomeShell> {
 
         // A hunt with no stored target starts on the portal's today, not the
         // The default date is the first servable date on or after today.
-        final targetDates = _targetDates();
         final defaultDate = _defaultHuntTargetDate();
 
         final activeConfig = state.activeHuntConfig;

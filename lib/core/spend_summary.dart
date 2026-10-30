@@ -123,12 +123,12 @@ class SpendFilter {
       case SpendPeriodType.week:
         final title = formatWeekTitle(weekOffset);
         final range = formatWeekRange(targetSaturday);
-        return ' ()';
+        return '$title ($range)';
       case SpendPeriodType.month:
         final title = formatMonthTitle(monthOffset);
         final target = targetJalaliMonth;
         final name = formatJalaliMonthName(target.year, target.month);
-        return ' ()';
+        return '$title ($name)';
     }
   }
 

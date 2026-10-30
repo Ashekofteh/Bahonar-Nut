@@ -15,7 +15,6 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import 'desktop_bridge.dart';
-import 'desktop_stores.dart';
 import '../adapter/captcha_solver.dart';
 import '../adapter/cullinan_client.dart';
 import '../core/account_store.dart';

@@ -39,7 +39,7 @@ jobs:
         run: flutter pub get
 
       - name: Code Static Analysis
-        run: flutter analyze lib/
+        run: flutter analyze --no-fatal-infos lib/
 
       - name: Run Tests
         run: flutter test

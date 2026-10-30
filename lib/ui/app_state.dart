@@ -35,9 +35,8 @@ class AppState extends ChangeNotifier {
     this.plainStore,
     LocalMealStore? mealStore,
     this._transactions = const [],
-    ThemeMode themeMode = ThemeMode.system,
-  })  : mealStore = mealStore ?? LocalMealStore(),
-        _themeMode = themeMode;
+    this._themeMode = ThemeMode.system,
+  })  : mealStore = mealStore ?? LocalMealStore();
 
   /// Where saved accounts are persisted.
   final AccountStore accountStore;
