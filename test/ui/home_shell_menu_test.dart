@@ -244,6 +244,7 @@ void main() {
 class _FakePortalClient extends FakePortalClient {
   _FakePortalClient({required this.menus, this.failure});
 
+  @override
   final List<MealMenu> menus;
   final Object? failure;
 

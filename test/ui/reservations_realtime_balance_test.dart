@@ -1,6 +1,4 @@
 import 'package:bahonar_nut/core/account_store.dart';
-import 'package:bahonar_nut/core/hunt_config.dart';
-import 'package:bahonar_nut/core/local_meal_store.dart';
 import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/persian.dart';
 import 'package:bahonar_nut/core/portal.dart';
@@ -25,15 +23,9 @@ class _BalanceTrackingPortalClient extends FakePortalClient {
 
   final Map<String, int> balances = {};
   final Map<String, List<Reservation>> heldReservations = {};
+  @override
   final List<MealMenu> menus;
   final List<DateTime> bookableDays;
-
-  @override
-  Future<Session> login(String username, String password) async => Session(
-        account: username,
-        cookies: const {},
-        establishedAt: DateTime.now().toUtc(),
-      );
 
   @override
   Future<Session> refresh(Session session) async => session;

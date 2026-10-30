@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:bahonar_nut/core/models.dart';
 import 'package:bahonar_nut/core/session.dart';
 import 'package:bahonar_nut/platform/desktop_bridge.dart';
 import 'package:bahonar_nut/platform/desktop_stores.dart';

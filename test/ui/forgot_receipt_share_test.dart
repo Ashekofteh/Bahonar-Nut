@@ -1,5 +1,4 @@
 import 'package:bahonar_nut/core/account_store.dart';
-import 'package:bahonar_nut/core/hunt_config.dart';
 import 'package:bahonar_nut/core/local_meal_store.dart';
 import 'package:bahonar_nut/core/meal_invariant.dart';
 import 'package:bahonar_nut/core/models.dart';
@@ -37,6 +36,7 @@ class _ShareRecordingBridge extends PlatformBridge {
 class _ReceiptFakePortal extends FakePortalClient {
   _ReceiptFakePortal({required this.menus});
 
+  @override
   final List<MealMenu> menus;
 
   @override

@@ -192,6 +192,7 @@ class _FakePortalClient extends FakePortalClient {
     this.failure,
   });
 
+  @override
   final List<MealMenu> menus;
 
   /// The days the fake reports as still bookable.

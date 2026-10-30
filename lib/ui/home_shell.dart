@@ -762,7 +762,7 @@ class _HomeShellState extends State<HomeShell> {
         if (syncResult.profileName != null && syncResult.profileName!.trim().isNotEmpty) {
           await widget.state.setProfileName(accountId, syncResult.profileName!.trim());
         }
-        widget.state.setTransactions(syncResult.transactions);
+        widget.state.updateTransactionsForAccount(accountId, syncResult.transactions);
       }
     } catch (_) {}
 

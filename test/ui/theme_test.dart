@@ -7,7 +7,6 @@ import 'package:bahonar_nut/ui/app_state.dart';
 import 'package:bahonar_nut/ui/screens/accounts_screen.dart';
 import 'package:bahonar_nut/ui/theme.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 

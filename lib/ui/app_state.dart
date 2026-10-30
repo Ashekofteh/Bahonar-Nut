@@ -36,7 +36,9 @@ class AppState extends ChangeNotifier {
     LocalMealStore? mealStore,
     this._transactions = const [],
     this._themeMode = ThemeMode.system,
-  })  : mealStore = mealStore ?? LocalMealStore();
+  })  : mealStore = mealStore ?? LocalMealStore() {
+    _normalizeTransactions();
+  }
 
   /// Where saved accounts are persisted.
   final AccountStore accountStore;
@@ -192,8 +194,34 @@ class AppState extends ChangeNotifier {
   SpendSummary? _cachedSpendSummary;
 
   /// The computed spend summary, honouring the current filter.
-  SpendSummary get spendSummary =>
-      _cachedSpendSummary ??= summarise(transactions: _transactions, filter: _spendFilter);
+  SpendSummary get spendSummary {
+    if (_cachedSpendSummary != null) return _cachedSpendSummary!;
+
+    // Resolve filter's accountIds to include both id and studentId for all selected accounts,
+    // ensuring robust matching regardless of transaction ID representation.
+    final effectiveAccountIds = <AccountId>{};
+    for (final id in _spendFilter.accountIds) {
+      effectiveAccountIds.add(id);
+      final acc = accountFor(id);
+      if (acc != null) {
+        effectiveAccountIds.add(acc.studentId);
+      }
+      for (final a in _accounts) {
+        if (a.studentId == id) {
+          effectiveAccountIds.add(a.id);
+        }
+      }
+    }
+
+    final effectiveFilter = effectiveAccountIds.isEmpty
+        ? _spendFilter
+        : _spendFilter.copyWith(accountIds: effectiveAccountIds);
+
+    return _cachedSpendSummary = summarise(
+      transactions: _transactions,
+      filter: effectiveFilter,
+    );
+  }
 
   /// The accounts selected in the dashboard's account filter.
   Set<AccountId> get selectedAccountIds => _spendFilter.accountIds;
@@ -248,6 +276,7 @@ class AppState extends ChangeNotifier {
   /// Loads the persisted state. Safe to call more than once.
   Future<void> load() async {
     _accounts = await accountStore.loadAll();
+    _normalizeTransactions();
     _reminderConfig = await reminderConfigStore.load();
     await _loadHuntConfigs();
     if (bankCardStore != null) {
@@ -299,9 +328,82 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Transaction _normalizeTransaction(Transaction t, {AccountId? fallbackAccountId}) {
+    if (_accounts.any((a) => a.id == t.accountId)) {
+      return t;
+    }
+    for (final a in _accounts) {
+      if (a.studentId == t.accountId) {
+        return Transaction(
+          accountId: a.id,
+          type: t.type,
+          foodName: t.foodName,
+          slot: t.slot,
+          weekday: t.weekday,
+          date: t.date,
+          count: t.count,
+          amountRial: t.amountRial,
+        );
+      }
+    }
+    if (fallbackAccountId != null) {
+      return Transaction(
+        accountId: fallbackAccountId,
+        type: t.type,
+        foodName: t.foodName,
+        slot: t.slot,
+        weekday: t.weekday,
+        date: t.date,
+        count: t.count,
+        amountRial: t.amountRial,
+      );
+    }
+    return t;
+  }
+
+  void _normalizeTransactions() {
+    if (_transactions.isEmpty || _accounts.isEmpty) return;
+    var changed = false;
+    final updated = <Transaction>[];
+    for (final t in _transactions) {
+      final normalized = _normalizeTransaction(t);
+      if (normalized.accountId != t.accountId) {
+        changed = true;
+      }
+      updated.add(normalized);
+    }
+    if (changed) {
+      _transactions = updated;
+      _cachedSpendSummary = null;
+    }
+  }
+
   /// Replaces the transaction history, e.g. after a live read.
   void setTransactions(List<Transaction> transactions) {
-    _transactions = transactions;
+    _transactions = [
+      for (final t in transactions) _normalizeTransaction(t),
+    ];
+    _cachedSpendSummary = null;
+    notifyListeners();
+  }
+
+  /// Updates the transactions for a single account, preserving other accounts' transactions.
+  void updateTransactionsForAccount(AccountId accountId, List<Transaction> accountTransactions) {
+    final acc = accountFor(accountId);
+    final studentId = acc?.studentId;
+
+    final normalized = [
+      for (final t in accountTransactions)
+        _normalizeTransaction(t, fallbackAccountId: accountId),
+    ];
+
+    final remaining = _transactions.where((t) {
+      if (t.accountId == accountId) return false;
+      if (studentId != null && t.accountId == studentId) return false;
+      return true;
+    }).toList();
+
+    _transactions = [...remaining, ...normalized];
     _cachedSpendSummary = null;
     notifyListeners();
   }
@@ -346,6 +448,7 @@ class AppState extends ChangeNotifier {
 
     await accountStore.save(account);
     _accounts = await accountStore.loadAll();
+    _normalizeTransactions();
     _error = null;
     notifyListeners();
   }
@@ -412,7 +515,12 @@ class AppState extends ChangeNotifier {
     if (_selectedReservationsAccountId == accountId) {
       _selectedReservationsAccountId = null;
     }
+    _spendFilter = _spendFilter.copyWith(
+      accountIds: _spendFilter.accountIds.where((id) => id != accountId).toSet(),
+    );
+    _transactions = _transactions.where((t) => t.accountId != accountId).toList();
     _accounts = await accountStore.loadAll();
+    _cachedSpendSummary = null;
     notifyListeners();
   }
 

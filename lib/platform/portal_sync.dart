@@ -106,7 +106,20 @@ class PortalSync {
         // after, and the meal existed only as a ledger row. A mirror built from
         // the grids alone would tell the student they have no lunch on a day
         // they in fact bought one.
-        final transactions = await _readTransactions(session);
+        final rawTransactions = await _readTransactions(session);
+        final transactions = [
+          for (final t in rawTransactions)
+            Transaction(
+              accountId: accountId,
+              type: t.type,
+              foodName: t.foodName,
+              slot: t.slot,
+              weekday: t.weekday,
+              date: t.date,
+              count: t.count,
+              amountRial: t.amountRial,
+            ),
+        ];
 
         // "Today" is the **portal's** day, not the device's.
         //
