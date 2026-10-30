@@ -235,6 +235,31 @@ class _HomeShellState extends State<HomeShell> {
     if (allRead) widget.state.setTransactions(transactions);
   }
 
+  /// Fetches the fresh balance for [accountId] directly from the portal and
+  /// updates [widget.state], keeping the reservations header and accounts
+  /// screen in exact sync.
+  Future<void> _fetchAccountBalance(AccountId accountId) async {
+    try {
+      final balance = await widget.services.sessions.withSession(
+        accountId,
+        (session) => widget.services.client.fetchBalance(session),
+      );
+      if (mounted) {
+        widget.state.setBalance(accountId, balance.amountRial);
+        if (balance.profileName != null && balance.profileName!.trim().isNotEmpty) {
+          await widget.state.setProfileName(accountId, balance.profileName!.trim());
+        }
+      }
+    } catch (_) {
+      try {
+        final syncResult = await _sync.sync(accountId);
+        if (syncResult.ok && mounted && syncResult.balanceRial != null) {
+          widget.state.setBalance(accountId, syncResult.balanceRial!);
+        }
+      } catch (_) {}
+    }
+  }
+
   /// Arms the wake-up for every account that has a hunt.
   ///
   /// The alarm is derived from the configuration, so it is armed on **load**
@@ -853,7 +878,14 @@ class _HomeShellState extends State<HomeShell> {
     await widget.services.mealStore.persist();
     widget.state.mealsChanged();
     if (outcome.succeeded) {
-      _refreshTable(quiet: true);
+      final current = widget.state.balanceFor(accountId);
+      if (current != null) {
+        final price = outcome.reservation?.option.priceRial ?? offering.option.priceRial;
+        final next = current - price;
+        widget.state.setBalance(accountId, next > 0 ? next : 0);
+      }
+      _fetchAccountBalance(accountId);
+      _refreshTable(quiet: true, targetAccount: accountId);
     }
 
     if (!mounted) return outcome.message;
@@ -1084,10 +1116,20 @@ class _HomeShellState extends State<HomeShell> {
           );
           if (outcome.succeeded) {
             bookedCount++;
+            final price = outcome.reservation?.option.priceRial ?? offering.option.priceRial;
+            final current = widget.state.balanceFor(account.id);
+            if (current != null) {
+              final next = current - price;
+              widget.state.setBalance(account.id, next > 0 ? next : 0);
+            }
           }
         }
         await widget.services.mealStore.persist();
         widget.state.mealsChanged();
+        if (bookedCount > 0) {
+          _fetchAccountBalance(account.id);
+          _refreshTable(quiet: true, targetAccount: account.id);
+        }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1157,6 +1199,22 @@ class _HomeShellState extends State<HomeShell> {
     final accountId =
         widget.state.selectedReservationsAccountId ?? accounts.first.id;
 
+    final held = widget.state.mealStore.find(accountId, date, slot);
+    int? refundPrice = held?.priceRial;
+    if (refundPrice == null) {
+      for (final menu in _tableMenus) {
+        if (menu.date.year == date.year &&
+            menu.date.month == date.month &&
+            menu.date.day == date.day &&
+            menu.slot == slot) {
+          if (menu.dishes.isNotEmpty) {
+            refundPrice = menu.dishes.first.priceRial;
+          }
+          break;
+        }
+      }
+    }
+
     setState(() {
       _busyKey = '${date.year}-${date.month}-${date.day}|${slot.name}';
     });
@@ -1184,6 +1242,12 @@ class _HomeShellState extends State<HomeShell> {
     // says so — nothing was lost, and nothing needs doing.
     switch (outcome) {
       case CancelSucceeded():
+        final current = widget.state.balanceFor(accountId);
+        if (current != null && refundPrice != null) {
+          widget.state.setBalance(accountId, current + refundPrice);
+        }
+        _fetchAccountBalance(accountId);
+        _refreshTable(quiet: true, targetAccount: accountId);
         _showBookingProblem('رزرو لغو شد.');
       case CancelRefused(reason: final reason):
         _showBookingProblem(reason);
@@ -1247,7 +1311,7 @@ class _HomeShellState extends State<HomeShell> {
         _showBookingProblem(
           message ?? 'غذا با موفقیت در سبد غذایی برای فروش قرار گرفت.',
         );
-        _refreshTable();
+        _refreshTable(targetAccount: accountId);
       case SaleListingRefused(reason: final reason):
         _showBookingProblem(reason);
       case SaleListingAmbiguous():
@@ -1291,6 +1355,12 @@ class _HomeShellState extends State<HomeShell> {
         );
         if (outcome.succeeded) {
           succeeded++;
+          final price = outcome.reservation?.option.priceRial ?? offering.option.priceRial;
+          final current = widget.state.balanceFor(accountId);
+          if (current != null) {
+            final next = current - price;
+            widget.state.setBalance(accountId, next > 0 ? next : 0);
+          }
         } else {
           failed++;
           lastError = outcome.message;
@@ -1301,7 +1371,10 @@ class _HomeShellState extends State<HomeShell> {
     setState(() => _busyKey = null);
     await widget.services.mealStore.persist();
     widget.state.mealsChanged();
-    _refreshTable(quiet: true);
+    if (succeeded > 0) {
+      _fetchAccountBalance(accountId);
+    }
+    _refreshTable(quiet: true, targetAccount: accountId);
 
     if (mounted) {
       if (failed == 0) {
@@ -1338,6 +1411,12 @@ class _HomeShellState extends State<HomeShell> {
       );
       if (outcome.succeeded) {
         succeeded++;
+        final price = outcome.reservation?.option.priceRial ?? offering.option.priceRial;
+        final current = widget.state.balanceFor(accountId);
+        if (current != null) {
+          final next = current - price;
+          widget.state.setBalance(accountId, next > 0 ? next : 0);
+        }
       } else {
         failed++;
         lastError = outcome.message;
@@ -1347,7 +1426,10 @@ class _HomeShellState extends State<HomeShell> {
     setState(() => _busyKey = null);
     await widget.services.mealStore.persist();
     widget.state.mealsChanged();
-    _refreshTable(quiet: true);
+    if (succeeded > 0) {
+      _fetchAccountBalance(accountId);
+    }
+    _refreshTable(quiet: true, targetAccount: accountId);
 
     if (mounted) {
       if (failed == 0) {
