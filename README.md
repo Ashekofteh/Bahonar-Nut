@@ -10,7 +10,7 @@
 [![Platform Support](https://img.shields.io/badge/Platform-Android%20%7C%20iOS%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-3b82f6?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/releases)
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.x-0175C2?style=for-the-badge&logo=dart&logoColor=white)](https://dart.dev)
-[![Tests Passing](https://img.shields.io/badge/Tests-1050%2F1050%20Passed-10b981?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/actions)
+[![Tests Passing](https://img.shields.io/badge/Tests-1064%2F1064%20Passed-10b981?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 <br/>
@@ -33,7 +33,7 @@
 
 **سِلفیار (Selfiyar)** یک کلاینت مدرن، آفلاین‌محور و چندسکویی (Cross-Platform) با رابط کاربری اختصاصی راست‌به‌چپ (RTL) و طراحی متریال ۳ است که تجربه تعامل دانشجویان دانشگاه شهید باهنر کرمان با سامانه اتوماسیون تغذیه (Cullinan) را متحول می‌سازد. 
 
-این پروژه با عبور از کندی‌ها و محدودیت‌های نسخه وب، امکاناتی فراتر از یک سامانه رزرو معمولی شامل: **شکار خودکار غذاهای پرطرفدار**، **رزرو دسته‌جمعی با تفکیک سلف و غذا**، **حل محلی و بلادرنگ کپچا بدون نیاز به اینترنت**، **مدیریت چند حسابه با شناسایی خودکار هویت**، **به‌روزرسانی بلادرنگ موجودی**، **کیف پول کارت‌های شتاب و شارژ هوشمند کسری اعتبار**، **فیش فراموشی فوری کارت با قابلیت اشتراک‌گذاری پیامکی**، **سبد غذایی ثانویه با قابلیت لغو فروش**، و **پشتیبانی کامل از تم تاریک و روشن** را در قالبی سبک و امن ارائه می‌دهد.
+این پروژه با عبور از کندی‌ها و محدودیت‌های نسخه وب، امکاناتی فراتر از یک سامانه رزرو معمولی شامل: **شکار خودکار غذاهای پرطرفدار**، **رزرو دسته‌جمعی با تفکیک سلف و غذا**، **حل محلی و بلادرنگ کپچا بدون نیاز به اینترنت**، **مدیریت چند حسابه با شناسایی خودکار هویت**، **به‌روزرسانی بلادرنگ موجودی**، **کیف پول کارت‌های شتاب و شارژ هوشمند کسری اعتبار**، **فیش فراموشی فوری کارت با قابلیت اشتراک‌گذاری پیامکی**، **سبد غذایی ثانویه با قابلیت لغو فروش**، **سامانه هوشمند و محترمانه بروزرسانی**، و **پشتیبانی کامل از تم تاریک و روشن** را در قالبی سبک و امن ارائه می‌دهد.
 
 ---
 
@@ -101,6 +101,17 @@
 - پشتیبانی کامل و یکپارچه از پوسته تاریک و روشن (Dark / Light Mode) در تمامی بخش‌ها و صفحات.
 - بسته‌های اجرایی سبک، سریع و بومی برای هر ۵ پلتفرم اصلی: **اندروید (Android)**، **آی‌او‌اس (iOS)**، **ویندوز (Windows Desktop)**، **مک‌اواس (macOS)** و **لینوکس (Linux Desktop)**.
 
+### 🔄 ۱۰. سامانه هوشمند و غیرمزاحم بروزرسانی (In-App Polite Updater)
+- استعلام سبک و مستقیم نسخه جدید از فایل متنی `version.json` روی CDN گیت‌هاب بدون محدودیت سقف درخواست (Zero Rate-Limit) در شبکه مشترک دانشگاه.
+- مجهز به مکانیزم Throttling با استعلام خودکار حداکثر هر ۲۴ ساعت یک‌بار جهت محافظت از ترافیک اینترنت کاربر.
+- **عدم مزاحمت در لحظات حساس:** عدم نمایش هرگونه پنجره پاپ‌آپ مسدودکننده در هنگام باز کردن برنامه و استفاده از نشانگر ملایم روی آیکون اطلاعات.
+- امکان نادیده گرفتن نسخه جاری (**Skip this version**) و دانلود مستقیم پکیج اختصاصی هر سیستم‌عامل از طریق مرورگر بومی.
+
+### ℹ️ ۱۱. بخش «درباره سِلفیار» و جامعه متن‌باز (About & Open Source)
+- دسترسی سریع از نوار بالای صفحه (AppBar) بدون اشغال فضای کاری رزرو غذا.
+- دیالوگ استاندارد متریال ۳ شامل اطلاعات نسخه، دکمه بررسی دستی بروزرسانی، ارجاع مستقیم به صفحه گیت‌هاب توسعه‌دهنده (`Ashekofteh`) و مخزن آزاد پروژه.
+- لینک مستقیم به بخش ثبت باگ و پیشنهادات در GitHub Issues.
+
 ---
 
 <span id="screenshots"></span>
@@ -132,14 +143,14 @@
 ```mermaid
 flowchart TD
     subgraph UI ["لایه ارائه (UI Layer - Material 3 RTL)"]
-        Screens["Screens & Sheets\n(Accounts, Reservations, Hunt, TopUp, Dashboard)"]
+        Screens["Screens & Sheets\n(Accounts, Reservations, Hunt, TopUp, Dashboard, About)"]
         State["AppState (ChangeNotifier)\nShared reactive state management"]
     end
 
     subgraph Core ["لایه دامنه و بیزنس (Core Domain - Pure Dart)"]
         Models["Domain Models & Invariants\n(MealRef, Balance, StoredMeal, BankCard)"]
         Engines["Engines & Schedulers\n(SnipeEngine, SessionManager, ServerClock)"]
-        LocalStores["Local Stores\n(LocalMealStore, RequestLedger)"]
+        LocalStores["Local Stores\n(LocalMealStore, RequestLedger, AppVersion)"]
     end
 
     subgraph Adapter ["لایه انطباق سامانه (Adapter & Parsing)"]
@@ -150,8 +161,8 @@ flowchart TD
 
     subgraph Platform ["لایه پلتفرم و زیرساخت (Platform & Hardware)"]
         Transport["PortalTransport & CookieJarStore\nConnection Pooling & Rate Budget"]
-        Security["SecureStore & AES-256-GCM\nAndroid Keystore / EncryptedPrefs"]
-        NativeService["Native Platform Layer\n(AlarmScheduler, HuntService, Desktop Support)"]
+        Security["SecureStore & AES-256-GCM\nAndroid Keystore / Encrypted Storage"]
+        NativeService["Native Platform Layer\n(AlarmScheduler, HuntService, AppUpdateService, Desktop Support)"]
     end
 
     Screens --> State
@@ -173,7 +184,10 @@ flowchart TD
 ### پیش‌نیازها
 - **Flutter SDK:** نسخه `^3.13.5` یا جدیدترین نسخه Stable
 - **Android SDK:** حداقل API 24 (اندروید ۷+) و Target API 36
-- **ابزارهای دسکتاپ:** Visual Studio C++ (برای بیلد ویندوز) یا Xcode (برای بیلد مک‌اواس)
+- **ابزارهای دسکتاپ و iOS:**
+  - **ویندوز:** Visual Studio با ورک‌لود Desktop development with C++
+  - **مک‌اواس و iOS:** macOS با آخرین نسخه Xcode و ابزار Command Line Tools
+  - **لینوکس:** `clang`, `cmake`, `ninja-build`, `pkg-config`, `libgtk-3-dev`
 
 ### راه‌اندازی و اجرای سورس
 

@@ -16,8 +16,9 @@ Thank you for your interest in contributing to **Selfiyar**! We welcome contribu
 ### Prerequisites
 - [Flutter SDK](https://flutter.dev/docs/get-started/install) (3.13.5+ or latest stable)
 - [Android SDK](https://developer.android.com/studio) (API level 24+)
-- Visual Studio / C++ Desktop Development tools (for Windows target)
-- Xcode (for macOS target)
+- **Windows:** Visual Studio with C++ Desktop Development tools
+- **macOS & iOS:** macOS with Xcode and Command Line Tools
+- **Linux:** `clang`, `cmake`, `ninja-build`, `pkg-config`, `libgtk-3-dev`
 
 ### Getting Started
 
@@ -37,7 +38,7 @@ Thank you for your interest in contributing to **Selfiyar**! We welcome contribu
    dart analyze lib/
    flutter test
    ```
-   > All 1000+ tests must pass with zero analyzer warnings before submitting a pull request.
+   > All 1060+ tests must pass with zero analyzer warnings before submitting a pull request.
 
 ---
 
@@ -53,6 +54,7 @@ Thank you for your interest in contributing to **Selfiyar**! We welcome contribu
 
 3. **Zero Unnecessary Network Requests:**
    - Reuse existing responses and piggyback balance / user name extractions rather than sending duplicate requests.
+   - Use `version.json` via CDN for rate-limit-free version updates.
 
 4. **Right-to-Left (RTL) First:**
    - The UI is designed for Persian speakers; ensure proper layout alignment, Persian digit formatting (`persian.dart`), and localization support.
