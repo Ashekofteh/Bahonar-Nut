@@ -142,6 +142,7 @@ void main() {
           covers: {MealSlot.dinner, MealSlot.breakfast},
         ),
         nextWeekNudgeEnabled: false,
+        liveCheckEnabled: true,
       );
 
       final decoded = decodeReminderConfig(encodeReminderConfig(config))!;
@@ -154,6 +155,7 @@ void main() {
       expect(decoded.evening.time.minute, 45);
       expect(decoded.evening.covers, {MealSlot.dinner, MealSlot.breakfast});
       expect(decoded.nextWeekNudgeEnabled, isFalse);
+      expect(decoded.liveCheckEnabled, isTrue);
     });
 
     test('the default configuration round-trips', () {
@@ -162,6 +164,7 @@ void main() {
       expect(decoded.masterEnabled, config.masterEnabled);
       expect(decoded.lunch.time, config.lunch.time);
       expect(decoded.evening.time, config.evening.time);
+      expect(decoded.liveCheckEnabled, isFalse);
     });
 
     test('the store persists and reloads', () async {

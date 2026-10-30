@@ -210,6 +210,51 @@ void main() {
       expect(scheduled.last.$2, 'lunch');
     });
 
+    test('when liveCheckEnabled is true, handleFire reconciles from portal', () async {
+      final now = DateTime.now();
+      final today = DateTime.utc(now.year, now.month, now.day);
+
+      var liveCheckCalled = false;
+      delivery = ReminderDelivery(
+        service: service,
+        accounts: [
+          SavedAccount(
+            id: 'a1',
+            studentId: '400123456',
+            alias: 'مقسمی',
+            addedAt: DateTime.utc(2026, 10, 20),
+          ),
+        ],
+        config: const ReminderConfig(
+          accountIds: {'a1'},
+          liveCheckEnabled: true,
+        ),
+        readReservations: (accountId) async {
+          liveCheckCalled = true;
+          return [
+            Reservation(
+              id: 'res-live-1',
+              date: today,
+              slot: MealSlot.lunch,
+              hall: const Hall(id: 'h1', name: 'مرکزی'),
+              option: const MenuOption(id: 'o1', name: 'چلو قورمه سبزی', priceRial: 250000),
+              state: ReservationState.active,
+            ),
+          ];
+        },
+      );
+
+      expect(store.forAccount('a1'), isEmpty);
+
+      final result = await delivery.handleFire('lunch');
+
+      expect(result, ReminderSlot.lunch);
+      expect(liveCheckCalled, isTrue);
+      expect(store.forAccount('a1'), isNotEmpty);
+      expect(postedNotifications(), hasLength(1));
+      expect(postedNotifications().first.$2, contains('چلو قورمه سبزی'));
+    });
+
     test('a payload that is not a reminder is ignored', () async {
       final result = await delivery.handleFire('refresh');
 

@@ -77,7 +77,12 @@ class RemindersScreen extends StatelessWidget {
               const SizedBox(height: 12),
               _NudgeCard(state: state, config: config, accounts: accounts),
               const SizedBox(height: 12),
-              const _LiveSyncCard(),
+              _LiveSyncCard(
+                enabled: config.liveCheckEnabled,
+                onChanged: (value) => state.saveReminderConfig(
+                  config.copyWith(liveCheckEnabled: value),
+                ),
+              ),
             ],
           ),
         );
@@ -651,7 +656,13 @@ class _NudgeCard extends StatelessWidget {
 
 /// The opt-in live portal check.
 class _LiveSyncCard extends StatelessWidget {
-  const _LiveSyncCard();
+  const _LiveSyncCard({
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -667,14 +678,26 @@ class _LiveSyncCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.cloud_off_outlined,
-                  size: 20, color: theme.colorScheme.onSurfaceVariant),
+              Icon(
+                enabled ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+                size: 20,
+                color: enabled
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'خاموش (پیش‌فرض)',
-                  style: theme.textTheme.bodyMedium,
+                  enabled ? 'روشن (بررسی قبل از ارسال)' : 'خاموش (پیش‌فرض)',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: enabled ? FontWeight.w600 : FontWeight.normal,
+                    color: enabled ? theme.colorScheme.primary : null,
+                  ),
                 ),
+              ),
+              Switch(
+                value: enabled,
+                onChanged: onChanged,
               ),
             ],
           ),

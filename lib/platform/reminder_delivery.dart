@@ -36,6 +36,8 @@
 library;
 
 import '../core/account.dart';
+import '../core/local_meal_store.dart';
+import '../core/meal_invariant.dart';
 import '../core/models.dart';
 import '../core/next_week.dart';
 import '../core/reminder.dart';
@@ -50,6 +52,7 @@ class ReminderDelivery {
     this.config,
     this.clock,
     this.readReservations,
+    this.persist,
     this.readTimeout = const Duration(seconds: 20),
   });
 
@@ -94,6 +97,9 @@ class ReminderDelivery {
   final Future<List<Reservation>> Function(AccountId accountId)?
       readReservations;
 
+  /// Persists the meal store after an online re-read.
+  final Future<void> Function()? persist;
+
   /// How long the nudge's live read may take.
   ///
   /// The read is bounded because a network read in Doze does not fail — it
@@ -137,6 +143,38 @@ class ReminderDelivery {
     final accountNames = <AccountId, String>{
       for (final account in accounts) account.id: account.resolvedName,
     };
+
+    // When live portal check is enabled, reconcile the mirror against the portal
+    // before delivering the digest.
+    if (config.liveCheckEnabled && readReservations != null) {
+      final now = clock != null && clock!.isSynced
+          ? clock!.portalTodayUtc
+          : DateTime.now().toUtc();
+      for (final accountId in config.accountsFor(slot)) {
+        try {
+          final reservations =
+              await readReservations!(accountId).timeout(readTimeout);
+          final refreshed = <StoredMeal>[
+            for (final r in reservations)
+              StoredMeal(
+                accountId: accountId,
+                date: r.date,
+                slot: r.slot,
+                source: MealSource.weeklyReservation,
+                capturedAt: now,
+                optionId: r.option.id,
+                dishName: r.option.name,
+                hallName: r.hall.name,
+                priceRial: r.option.priceRial,
+              ),
+          ];
+          service.mealStore.replaceForAccount(accountId, refreshed);
+          await persist?.call();
+        } catch (_) {
+          // Bounded timeout or offline: fall back gracefully to the local mirror.
+        }
+      }
+    }
 
     await service.deliver(
       slot,

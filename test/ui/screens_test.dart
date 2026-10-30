@@ -12,6 +12,7 @@ import 'package:bahonar_nut/ui/screens/accounts_screen.dart';
 import 'package:bahonar_nut/ui/screens/dashboard_screen.dart';
 import 'package:bahonar_nut/ui/screens/reminders_screen.dart';
 import 'package:bahonar_nut/ui/screens/reservations_screen.dart';
+import 'package:bahonar_nut/ui/widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -403,6 +404,38 @@ void main() {
       await scrollTo(tester, 'بررسی آنلاین سامانه');
       expect(find.text('بررسی آنلاین سامانه'), findsOneWidget);
       await scrollTo(tester, 'خاموش (پیش‌فرض)');
+      expect(find.text('خاموش (پیش‌فرض)'), findsOneWidget);
+    });
+
+    testWidgets('the live check switch can be toggled on and off',
+        (tester) async {
+      final state = await buildState();
+      await tester.pumpWidget(wrap(state, RemindersScreen(state: state)));
+
+      await scrollTo(tester, 'بررسی آنلاین سامانه');
+      expect(find.text('بررسی آنلاین سامانه'), findsOneWidget);
+      expect(find.text('خاموش (پیش‌فرض)'), findsOneWidget);
+
+      final liveSyncCardFinder = find.ancestor(
+        of: find.text('بررسی آنلاین سامانه'),
+        matching: find.byType(SectionCard),
+      );
+      final liveSwitchFinder = find.descendant(
+        of: liveSyncCardFinder,
+        matching: find.byType(Switch),
+      );
+      expect(liveSwitchFinder, findsOneWidget);
+
+      await tester.tap(liveSwitchFinder);
+      await tester.pumpAndSettle();
+
+      expect(state.reminderConfig.liveCheckEnabled, isTrue);
+      expect(find.text('روشن (بررسی قبل از ارسال)'), findsOneWidget);
+
+      await tester.tap(liveSwitchFinder);
+      await tester.pumpAndSettle();
+
+      expect(state.reminderConfig.liveCheckEnabled, isFalse);
       expect(find.text('خاموش (پیش‌فرض)'), findsOneWidget);
     });
 

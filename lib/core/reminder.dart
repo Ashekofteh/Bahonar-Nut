@@ -64,6 +64,7 @@ class ReminderConfig {
     this.lunch = ReminderSlotConfig.lunchDefault,
     this.evening = ReminderSlotConfig.eveningDefault,
     this.nextWeekNudgeEnabled = true,
+    this.liveCheckEnabled = false,
     this.excludedFromSlot = const {},
     this.nudgeAccountIds,
     this.dismissedNudgeWeekSaturday,
@@ -80,6 +81,9 @@ class ReminderConfig {
 
   /// Independently toggled: a user may want daily reminders but not the nudge.
   final bool nextWeekNudgeEnabled;
+
+  /// Independently toggled: re-check the portal online before delivering a digest.
+  final bool liveCheckEnabled;
 
   /// Accounts excluded from one specific slot, so a user can receive the evening
   /// digest for an account without also receiving the morning one.
@@ -129,6 +133,7 @@ class ReminderConfig {
     ReminderSlotConfig? lunch,
     ReminderSlotConfig? evening,
     bool? nextWeekNudgeEnabled,
+    bool? liveCheckEnabled,
     Map<ReminderSlot, Set<AccountId>>? excludedFromSlot,
     Set<AccountId>? nudgeAccountIds,
     DateTime? dismissedNudgeWeekSaturday,
@@ -141,6 +146,7 @@ class ReminderConfig {
         evening: evening ?? this.evening,
         nextWeekNudgeEnabled:
             nextWeekNudgeEnabled ?? this.nextWeekNudgeEnabled,
+        liveCheckEnabled: liveCheckEnabled ?? this.liveCheckEnabled,
         excludedFromSlot: excludedFromSlot ?? this.excludedFromSlot,
         nudgeAccountIds: nudgeAccountIds ?? this.nudgeAccountIds,
         dismissedNudgeWeekSaturday: clearDismissedNudge

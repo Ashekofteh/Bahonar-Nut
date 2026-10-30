@@ -282,6 +282,7 @@ String encodeReminderConfig(ReminderConfig config) => jsonEncode({
       'lunch': _encodeSlot(config.lunch),
       'evening': _encodeSlot(config.evening),
       'nextWeekNudgeEnabled': config.nextWeekNudgeEnabled,
+      'liveCheckEnabled': config.liveCheckEnabled,
       'excludedFromSlot': config.excludedFromSlot.map(
         (slot, ids) => MapEntry(slot.name, ids.toList()),
       ),
@@ -301,6 +302,7 @@ ReminderConfig? decodeReminderConfig(String raw) {
       lunch: _decodeSlot(decoded['lunch'], ReminderSlotConfig.lunchDefault),
       evening: _decodeSlot(decoded['evening'], ReminderSlotConfig.eveningDefault),
       nextWeekNudgeEnabled: decoded['nextWeekNudgeEnabled'] as bool? ?? true,
+      liveCheckEnabled: decoded['liveCheckEnabled'] as bool? ?? false,
       excludedFromSlot: (decoded['excludedFromSlot'] as Map<String, dynamic>?)
               ?.map(
                 (slot, ids) => MapEntry(

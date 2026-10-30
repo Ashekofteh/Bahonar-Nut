@@ -90,6 +90,7 @@ class _HomeShellState extends State<HomeShell> {
             accountId,
             (session) => widget.services.client.fetchReservations(session),
           ),
+      persist: widget.services.mealStore.persist,
     );
 
     // A configuration change re-arms the alarms, so the alarms always match
