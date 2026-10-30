@@ -163,21 +163,20 @@ jobs:
 
       - name: Package Linux Relocatable Tarball (.tar.gz)
         run: |
-          cd build/linux/x64/release/bundle
-          if [ -f "bahonar_nut" ] && [ ! -f "Selfiyar" ]; then
-            cp bahonar_nut Selfiyar
+          BUNDLE_DIR="build/linux/x64/release/bundle"
+          if [ -f "$BUNDLE_DIR/bahonar_nut" ] && [ ! -f "$BUNDLE_DIR/Selfiyar" ]; then
+            cp "$BUNDLE_DIR/bahonar_nut" "$BUNDLE_DIR/Selfiyar"
           fi
-          echo "[Desktop Entry]" > Selfiyar.desktop
-          echo "Name=سِلفیار" >> Selfiyar.desktop
-          echo "GenericName=Selfiyar" >> Selfiyar.desktop
-          echo "Comment=Smart Dining Assistant for Shahid Bahonar University" >> Selfiyar.desktop
-          echo "Exec=Selfiyar" >> Selfiyar.desktop
-          echo "Icon=data/flutter_assets/assets/images/app_logo.png" >> Selfiyar.desktop
-          echo "Terminal=false" >> Selfiyar.desktop
-          echo "Type=Application" >> Selfiyar.desktop
-          echo "Categories=Utility;" >> Selfiyar.desktop
-          chmod +x Selfiyar bahonar_nut
-          cd ../../../..
+          echo "[Desktop Entry]" > "$BUNDLE_DIR/Selfiyar.desktop"
+          echo "Name=سِلفیار" >> "$BUNDLE_DIR/Selfiyar.desktop"
+          echo "GenericName=Selfiyar" >> "$BUNDLE_DIR/Selfiyar.desktop"
+          echo "Comment=Smart Dining Assistant for Shahid Bahonar University" >> "$BUNDLE_DIR/Selfiyar.desktop"
+          echo "Exec=Selfiyar" >> "$BUNDLE_DIR/Selfiyar.desktop"
+          echo "Icon=data/flutter_assets/assets/images/app_logo.png" >> "$BUNDLE_DIR/Selfiyar.desktop"
+          echo "Terminal=false" >> "$BUNDLE_DIR/Selfiyar.desktop"
+          echo "Type=Application" >> "$BUNDLE_DIR/Selfiyar.desktop"
+          echo "Categories=Utility;" >> "$BUNDLE_DIR/Selfiyar.desktop"
+          chmod +x "$BUNDLE_DIR/Selfiyar" "$BUNDLE_DIR/bahonar_nut"
           tar -czvf selfiyar-linux-x64.tar.gz -C build/linux/x64/release bundle
 
       - name: Upload Linux TAR.GZ Artifact
