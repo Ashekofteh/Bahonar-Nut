@@ -10,7 +10,7 @@
 [![Platform Support](https://img.shields.io/badge/Platform-Android%20%7C%20iOS%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-3b82f6?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/releases)
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.x-0175C2?style=for-the-badge&logo=dart&logoColor=white)](https://dart.dev)
-[![Tests Passing](https://img.shields.io/badge/Tests-1064%2F1064%20Passed-10b981?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/actions)
+[![Tests Passing](https://img.shields.io/badge/Tests-1066%2F1066%20Passed-10b981?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/Ashekofteh/Bahonar-Nut/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 <br/>
@@ -111,6 +111,11 @@
 - دسترسی سریع از نوار بالای صفحه (AppBar) بدون اشغال فضای کاری رزرو غذا.
 - دیالوگ استاندارد متریال ۳ شامل اطلاعات نسخه، دکمه بررسی دستی بروزرسانی، ارجاع مستقیم به صفحه گیت‌هاب توسعه‌دهنده (`Ashekofteh`) و مخزن آزاد پروژه.
 - لینک مستقیم به بخش ثبت باگ و پیشنهادات در GitHub Issues.
+
+### 🧭 ۱۲. راهنمای تعاملی شروع کار (Interactive Onboarding)
+- طراحی کاروسل ۴ اسلایدی در اولین ورود جهت آشنایی سریع با امکانات کلیدی.
+- تاکید صریح بر لزوم فشردن دکمه رفرش (🔄) در اولین ورود به صفحه رزرو برای بارگذاری منوی جدید غذاها و سلف‌ها.
+- امکان رد شدن سریع (Skip) و عدم نمایش مجدد، همراه با دسترسی همیشگی از بخش درباره برنامه.
 
 ---
 

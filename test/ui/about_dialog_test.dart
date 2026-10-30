@@ -87,6 +87,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('سِلفیار'), findsOneWidget);
+      expect(find.text('راهنمای استفاده از برنامه'), findsOneWidget);
       expect(find.text('صفحه گیت‌هاب Ashekofteh'), findsOneWidget);
       expect(find.text('مخزن رسمی سورس‌کد'), findsOneWidget);
       expect(find.text('گزارش مشکل یا پیشنهاد'), findsOneWidget);
@@ -122,6 +123,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('سِلفیار'), findsOneWidget);
+      expect(find.text('راهنمای استفاده از برنامه'), findsOneWidget);
       expect(find.text('صفحه گیت‌هاب Ashekofteh'), findsOneWidget);
     });
   });

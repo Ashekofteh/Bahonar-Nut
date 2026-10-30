@@ -5,6 +5,7 @@ import '../../core/persian.dart';
 import '../../platform/app_update_service.dart';
 import '../../platform/platform_services.dart';
 import '../app_state.dart';
+import 'onboarding_sheet.dart';
 
 /// Opens the official Material 3 "About Selfiyar" dialog.
 Future<void> showAboutSelfiyarDialog(
@@ -157,7 +158,13 @@ class _AboutSelfiyarDialogState extends State<_AboutSelfiyarDialog> {
                 _buildUpdateCard(theme, colorScheme),
                 const SizedBox(height: 16),
 
-                // Developer & Open Source Information Cards
+                // Guide & Developer Cards
+                _buildInfoTile(
+                  icon: Icons.menu_book_rounded,
+                  title: 'راهنمای استفاده از برنامه',
+                  subtitle: 'مرور نکات مهم و امکانات کلیدی سِلفیار',
+                  onTap: () => showOnboardingGuide(context, plainStore: widget.services.plainStore),
+                ),
                 _buildInfoTile(
                   icon: Icons.code_rounded,
                   title: 'توسعه‌دهنده',

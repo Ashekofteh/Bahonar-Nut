@@ -24,6 +24,7 @@ import '../platform/app_update_service.dart';
 import '../platform/reservation_service.dart' show ReservationFailure;
 import 'app_state.dart';
 import 'screens/accounts_screen.dart';
+import 'screens/onboarding_sheet.dart';
 import 'screens/booking_sheet.dart';
 import 'screens/captcha_dialog.dart';
 import 'screens/dashboard_screen.dart';
@@ -163,6 +164,7 @@ class _HomeShellState extends State<HomeShell> {
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _checkFirstRunOnboarding();
       if (widget.state.isLoaded) {
         _armReminders();
         _armHunts();
@@ -206,7 +208,30 @@ class _HomeShellState extends State<HomeShell> {
   /// That flag drives the refresh button's spinner. A quiet read that never
   /// prompted must not make the button look busy — the student would read it
   /// as "a refresh is running" and wait for a result that is not coming.
-  /// Checks for application updates silently in the background.
+  /// Shows onboarding guide on first launch for brand new users.
+  Future<void> _checkFirstRunOnboarding() async {
+    try {
+      final seen = await widget.services.plainStore.readBool('onboarding_completed') ?? false;
+      if (seen) return;
+
+      // If user already has accounts saved, they are an existing user who upgraded.
+      // Silently mark as completed so we do not disrupt their daily food booking.
+      if (widget.state.accounts.isNotEmpty) {
+        await widget.services.plainStore.writeBool('onboarding_completed', true);
+        return;
+      }
+
+      if (mounted) {
+        showOnboardingGuide(
+          context,
+          plainStore: widget.services.plainStore,
+          isFirstLaunch: true,
+        );
+      }
+    } catch (_) {}
+  }
+
+    /// Checks for application updates silently in the background.
   ///
   /// Adheres to standard 24-hour rate limits and never displays disruptive modal popups.
   /// If a new version is available, it illuminates a subtle badge on the About icon.
