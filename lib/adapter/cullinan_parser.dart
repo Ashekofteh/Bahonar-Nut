@@ -755,7 +755,7 @@ abstract final class CullinanParser {
   ///
   /// Two sources carry it on authenticated pages:
   ///   1. `<div id="divUsername" class="profileTitle">رضا شريفي</div>`
-  ///   2. `<label id="cphMain_titleBoxValue">کاربر: ابوالفضل شكفته - 401405035</label>`
+  ///   2. `<label id="cphMain_titleBoxValue">کاربر: علی محمدی - 401000000</label>`
   static String? parseProfileName(String html) {
     final divUser = elementText(html, 'divUsername');
     if (divUser != null && divUser.trim().isNotEmpty) {
@@ -769,7 +769,7 @@ abstract final class CullinanParser {
     return extractStudentName(raw);
   }
 
-  /// Extracts the student's name from a string like "کاربر: ابوالفضل شكفته - 401405035".
+  /// Extracts the student's name from a string like "کاربر: علی محمدی - 401000000".
   static String? extractStudentName(String text) {
     var cleaned = text.trim();
     cleaned = cleaned.replaceFirst(_userPrefixPattern, '').trim();

@@ -288,18 +288,28 @@ void main() {
       expect(parseJalaliDate('یکشنبه 1405/07/26'), DateTime.utc(2026, 10, 18));
     });
 
-    test('parses student profile name from captures', () {
-      final html04 = File('captures/04_after_login.html').readAsStringSync();
-      expect(CullinanParser.parseProfileName(html04), 'رضا شريفي');
+    test('parses student profile name from captures and html structures', () {
+      const htmlDiv = '<div id="divUsername" class="profileTitle">رضا شريفي</div>';
+      expect(CullinanParser.parseProfileName(htmlDiv), 'رضا شريفي');
 
-      final html30 = File('captures/30_reservation_current.html').readAsStringSync();
-      expect(CullinanParser.parseProfileName(html30), 'ابوالفضل شكفته');
+      const htmlLabel = '<label id="cphMain_titleBoxValue">کاربر: علی محمدی - 401000000</label>';
+      expect(CullinanParser.parseProfileName(htmlLabel), 'علی محمدی');
+
+      final f04 = File('captures/04_after_login.html');
+      if (f04.existsSync()) {
+        expect(CullinanParser.parseProfileName(f04.readAsStringSync()), 'رضا شريفي');
+      }
+
+      final f30 = File('captures/30_reservation_current.html');
+      if (f30.existsSync()) {
+        expect(CullinanParser.parseProfileName(f30.readAsStringSync()), isNotNull);
+      }
     });
 
     test('extracts clean student name from raw title strings', () {
       expect(
-        CullinanParser.extractStudentName('کاربر: ابوالفضل شكفته - 401405035'),
-        'ابوالفضل شكفته',
+        CullinanParser.extractStudentName('کاربر: احمد حسینی - 401000000'),
+        'احمد حسینی',
       );
       expect(
         CullinanParser.extractStudentName('کاربر : رضا شريفي - 401157013'),
