@@ -1,7 +1,9 @@
 package ir.ac.uk.bahonar_nut
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
@@ -231,6 +233,34 @@ class PlatformChannel(
                     // service is released the moment there is nothing left to
                     // hunt for, so it never becomes a battery drain.
                     HuntService.stop(context)
+                    result.success(null)
+                }
+
+                // --- sharing & messaging ---
+                "shareText" -> {
+                    val text = call.argument<String>("text") ?: ""
+                    val title = call.argument<String>("title") ?: "ارسال فیش فراموشی"
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, text)
+                        putExtra(Intent.EXTRA_SUBJECT, title)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    val chooser = Intent.createChooser(sendIntent, title).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(chooser)
+                    result.success(null)
+                }
+
+                "sendSms" -> {
+                    val text = call.argument<String>("text") ?: ""
+                    val smsIntent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("smsto:")
+                        putExtra("sms_body", text)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(smsIntent)
                     result.success(null)
                 }
 

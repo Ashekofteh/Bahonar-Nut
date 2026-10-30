@@ -2024,55 +2024,87 @@ class _HomeShellState extends State<HomeShell> {
     });
 
     if (outcome is ForgotReceiptSucceeded) {
+      final slotName = _mealSlotName(slot);
+      final persianDate = formatPersianDate(date);
+      final shareText = 'سلام، کد فیش فراموشی من برای سلف دانشگاه:\n\n'
+          '🔑 کد فیش: ${outcome.code}\n'
+          '🍴 وعده: $slotName ($persianDate)\n'
+          '${dishName != null ? '🍲 غذا: $dishName\n' : ''}'
+          '👤 حساب: ${account.resolvedName}\n\n'
+          'لطفاً این غذا را برای من تحویل بگیر. ممنون!';
+
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('فیش فراموشی صادر شد'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'کد فیش فراموشی:',
-                style: Theme.of(ctx).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Theme.of(ctx).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(12),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'کد فیش فراموشی:',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(ctx).textTheme.titleSmall,
                 ),
-                child: SelectableText(
-                  outcome.code,
-                  style: Theme.of(ctx).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 4,
-                    color: Theme.of(ctx).colorScheme.onPrimaryContainer,
+                const SizedBox(height: 8),
+                Container(
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(ctx).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SelectableText(
+                        outcome.code,
+                        style: Theme.of(ctx).textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 4,
+                          color: Theme.of(ctx).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: outcome.code));
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(content: Text('کد فیش کپی شد')),
+                          );
+                        },
+                        icon: const Icon(Icons.copy, size: 20),
+                        tooltip: 'کپی کد فیش',
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'این کد را در دستگاه سلف وارد کنید یا به متصدی تحویل دهید.',
-                textAlign: TextAlign.center,
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                const SizedBox(height: 12),
+                Text(
+                  'این کد را در دستگاه سلف وارد کنید یا اگر خودتان حضور ندارید، برای دوستتان ارسال کنید تا غذا را برایتان بگیرد.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () => _shareForgotReceipt(shareText, directSms: false),
+                  icon: const Icon(Icons.share, size: 18),
+                  label: const Text('ارسال با پیامک یا پیام‌رسان'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _shareForgotReceipt(shareText, directSms: true),
+                  icon: const Icon(Icons.sms_outlined, size: 18),
+                  label: const Text('ارسال مستقیم با پیامک (SMS)'),
+                ),
+              ],
+            ),
           ),
           actions: [
-            TextButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: outcome.code));
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('کد فیش کپی شد')),
-                );
-              },
-              icon: const Icon(Icons.copy, size: 18),
-              label: const Text('کپی کد'),
-            ),
-            FilledButton(
+            TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
               child: const Text('بستن'),
             ),
@@ -2083,6 +2115,34 @@ class _HomeShellState extends State<HomeShell> {
       _showBookingProblem(outcome.reason);
     } else if (outcome is ForgotReceiptAmbiguous) {
       _showBookingProblem(outcome.diagnostic);
+    }
+  }
+
+  /// Sends or shares the forgot receipt code via SMS or messaging apps.
+  Future<void> _shareForgotReceipt(String text, {bool directSms = false}) async {
+    try {
+      if (directSms) {
+        await widget.services.bridge.sendSms(text: text);
+      } else {
+        await widget.services.bridge.shareText(
+          text: text,
+          title: 'کد فیش فراموشی سلف',
+        );
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('صفحه ارسال باز شد')),
+        );
+      }
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('متن پیام برای ارسال در حافظه موقت (کلیپ‌بورد) کپی شد'),
+          ),
+        );
+      }
     }
   }
 

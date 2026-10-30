@@ -8,6 +8,8 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 import '../core/models.dart';
 import '../core/platform_stores.dart';
 import 'desktop_stores.dart';
@@ -64,6 +66,16 @@ class DesktopPlatformBridge extends PlatformBridge {
 
   @override
   Future<void> cancelNotification(int id) async {}
+
+  @override
+  Future<void> shareText({required String text, String? title}) async {
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  @override
+  Future<void> sendSms({required String text}) async {
+    await Clipboard.setData(ClipboardData(text: text));
+  }
 
   @override
   Future<void> scheduleAlarm({

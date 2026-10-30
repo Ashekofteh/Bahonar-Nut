@@ -192,6 +192,21 @@ class PlatformBridge {
     await _call<void>('stopHuntService');
   }
 
+  /// Shares text through the platform's native share sheet (SMS, messengers, etc.).
+  Future<void> shareText({required String text, String? title}) async {
+    await _call<void>('shareText', {
+      'text': text,
+      'title': title,
+    });
+  }
+
+  /// Opens the default SMS application with [text] ready to send.
+  Future<void> sendSms({required String text}) async {
+    await _call<void>('sendSms', {
+      'text': text,
+    });
+  }
+
   /// Invokes a platform method, surfacing any failure.
   ///
   /// A silent failure here is the worst kind: the app would appear to have
