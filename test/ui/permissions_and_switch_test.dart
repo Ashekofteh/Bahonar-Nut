@@ -117,7 +117,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.textContaining('ارساع اعلان‌ها'),
+        find.textContaining('ارسال اعلان‌ها'),
         findsOneWidget,
         reason: 'a reminder that posts nothing must say the grant is missing',
       );

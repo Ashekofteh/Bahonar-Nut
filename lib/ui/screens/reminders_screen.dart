@@ -214,7 +214,7 @@ class _PermissionCardState extends State<_PermissionCard> with WidgetsBindingObs
           if (notifications == false)
             _PermissionRow(
               icon: Icons.notifications_off_outlined,
-              title: 'ارساع اعلان‌ها',
+              title: 'ارسال اعلان‌ها',
               detail: 'بدون این اجازه، هیچ یادآوری نمایش داده نمی‌شود.',
               actionLabel: 'اجازه می‌دهم',
               onPressed: () => _requestNotifications(),
