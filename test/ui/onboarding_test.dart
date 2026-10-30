@@ -25,7 +25,7 @@ void main() {
       );
     }
 
-    testWidgets('navigates through all 4 slides and records completion', (tester) async {
+    testWidgets('navigates through all 5 slides and records completion', (tester) async {
       bool completed = false;
 
       await tester.pumpWidget(
@@ -46,36 +46,43 @@ void main() {
       await tester.tap(find.text('Launch Onboarding'));
       await tester.pumpAndSettle();
 
-      // Slide 1
+      // Slide 1: Accounts
       expect(find.text('ورود هوشمند و بدون معطلی'), findsOneWidget);
-      expect(find.text('گام ۱ از ۴'), findsOneWidget);
+      expect(find.text('گام ۱ از ۵'), findsOneWidget);
       expect(find.text('رد شدن'), findsOneWidget);
 
-      // Advance to Slide 2
+      // Advance to Slide 2: Reservations
       await tester.tap(find.text('بعدی'));
       await tester.pumpAndSettle();
 
       expect(find.text('دریافت منو و رزرو غذا'), findsOneWidget);
       expect(find.textContaining('دکمه به‌روزرسانی (رفرش 🔄)'), findsOneWidget);
-      expect(find.text('گام ۲ از ۴'), findsOneWidget);
+      expect(find.text('گام ۲ از ۵'), findsOneWidget);
 
-      // Advance to Slide 3
+      // Advance to Slide 3: Financial
+      await tester.tap(find.text('بعدی'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('مدیریت و شفافیت مالی'), findsOneWidget);
+      expect(find.text('گام ۳ از ۵'), findsOneWidget);
+
+      // Advance to Slide 4: Food Basket & Hunt
       await tester.tap(find.text('بعدی'));
       await tester.pumpAndSettle();
 
       expect(find.text('سبد غذایی و شکار خودکار'), findsOneWidget);
-      expect(find.text('گام ۳ از ۴'), findsOneWidget);
+      expect(find.text('گام ۴ از ۵'), findsOneWidget);
 
-      // Advance to Slide 4
+      // Advance to Slide 5: Reminders & Voucher
       await tester.tap(find.text('بعدی'));
       await tester.pumpAndSettle();
 
       expect(find.text('یادآورها و فیش فراموشی کارت'), findsOneWidget);
-      expect(find.text('شروع کار با سِلفیار'), findsOneWidget);
-      expect(find.text('گام ۴ از ۴'), findsOneWidget);
+      expect(find.text('شروع کار'), findsOneWidget);
+      expect(find.text('گام ۵ از ۵'), findsOneWidget);
 
       // Finish Onboarding
-      await tester.tap(find.text('شروع کار با سِلفیار'));
+      await tester.tap(find.text('شروع کار'));
       await tester.pumpAndSettle();
 
       expect(completed, isTrue);

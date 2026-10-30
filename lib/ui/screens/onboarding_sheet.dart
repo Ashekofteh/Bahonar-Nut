@@ -39,7 +39,7 @@ class _OnboardingDialog extends StatefulWidget {
 class _OnboardingDialogState extends State<_OnboardingDialog> {
   final PageController _controller = PageController();
   int _currentPage = 0;
-  static const int _totalPages = 4;
+  static const int _totalPages = 5;
 
   @override
   void dispose() {
@@ -170,6 +170,19 @@ class _OnboardingDialogState extends State<_OnboardingDialog> {
                             'پس از دریافت برنامه غذایی، می‌توانید وعده‌های کل هفته را با یک لمس، با انتخاب سلف دلخواه و به صورت تکی یا دسته‌جمعی رزرو نمایید.',
                       ),
                       _buildSlide(
+                        icon: Icons.pie_chart_rounded,
+                        iconColor: AppColors.secondary,
+                        bgColor: AppColors.secondaryContainer,
+                        title: 'مدیریت و شفافیت مالی',
+                        description:
+                            'در تب «مالی» می‌توانید نمودار هزینه‌کرد و تراکنش‌های خود را به تفکیک وعده‌های صبحانه، ناهار و شام با مبالغ خوانا به تومان مشاهده کنید و با فیلترهای هفتگی و ماهانه، مدیریت دقیقی بر هزینه‌های سلف خود داشته باشید.',
+                        chips: const [
+                          '📊 نمودار تفکیک وعده‌ها',
+                          '💰 مبالغ شفاف به تومان',
+                          '📅 فیلترهای هفتگی و ماهانه',
+                        ],
+                      ),
+                      _buildSlide(
                         icon: Icons.shopping_basket_rounded,
                         iconColor: AppColors.secondary,
                         bgColor: AppColors.secondaryContainer,
@@ -210,42 +223,45 @@ class _OnboardingDialogState extends State<_OnboardingDialog> {
                         _totalPages,
                         (index) => AnimatedContainer(
                           duration: const Duration(milliseconds: 250),
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          width: _currentPage == index ? 22 : 8,
-                          height: 8,
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          width: _currentPage == index ? 16 : 6,
+                          height: 6,
                           decoration: BoxDecoration(
                             color: _currentPage == index
                                 ? colorScheme.primary
                                 : colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(3),
                           ),
                         ),
                       ),
                     ),
 
                     // Actions
-                    Row(
-                      children: [
-                        if (_currentPage > 0)
-                          IconButton.filledTonal(
-                            onPressed: _prevPage,
-                            icon: const Icon(Icons.arrow_forward_rounded, size: 20),
-                            tooltip: 'قبلی',
+                    Flexible(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_currentPage > 0) ...[
+                            IconButton.filledTonal(
+                              visualDensity: VisualDensity.compact,
+                              onPressed: _prevPage,
+                              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                              tooltip: 'قبلی',
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          FilledButton(
+                            onPressed: _nextPage,
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            ),
+                            child: Text(
+                              _currentPage == _totalPages - 1 ? 'شروع کار' : 'بعدی',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
                           ),
-                        const SizedBox(width: 8),
-                        FilledButton(
-                          onPressed: _nextPage,
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                          ),
-                          child: Text(
-                            _currentPage == _totalPages - 1
-                                ? 'شروع کار با سِلفیار'
-                                : 'بعدی',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
