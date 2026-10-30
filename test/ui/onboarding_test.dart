@@ -57,6 +57,8 @@ void main() {
 
       expect(find.text('دریافت منو و رزرو غذا'), findsOneWidget);
       expect(find.textContaining('دکمه به‌روزرسانی (رفرش 🔄)'), findsOneWidget);
+      expect(find.textContaining('حالت رزرو گروهی'), findsOneWidget);
+      expect(find.text('📋 رزرو گروهی کل هفته با ۱ لمس'), findsOneWidget);
       expect(find.text('گام ۲ از ۵'), findsOneWidget);
 
       // Advance to Slide 3: Financial
